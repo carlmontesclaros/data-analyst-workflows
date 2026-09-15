@@ -9,8 +9,25 @@ glob_list = glob.glob(glob_pattern)
 
 for excel_file in glob_list:
 
+    # header detection
+    raw = pd.read_excel(excel_file, header=None, nrows=50)
+    header_row = None
+
+    # loop for raw
+    for i in range(len(raw)):
+        values = [str(x).strip().lower() for x in raw.iloc[i].tolist()]
+
+        if {'property', 'floor', 'space'}.issubset(values):
+            header_row = i
+            break
+
+    if header_row is None:
+        raise ValueError("No header row containing Property/Floor/Space found in the first 50 rows")
+
+    print(excel_file, header_row)
+
     # read excel file
-    df = pd.read_excel(excel_file, header=6)
+    df = pd.read_excel(excel_file, header=header_row)
 
     # selecting columns
     columns_selected = ['Property', 'Floor', 'Space']
