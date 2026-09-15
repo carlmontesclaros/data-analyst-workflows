@@ -2,25 +2,30 @@ import pandas as pd
 import os
 import glob
 
-# read excel file
-df = pd.read_excel('DTB 3rd floor.xlsx', header=6)
+# glob
+glob_pattern = os.path.join("input", "*.xlsx")
+glob_list = glob.glob(glob_pattern)
+print(glob_list)
 
-# selecting columns
-columns_selected = ['Property', 'Floor', 'Space']
-df_clean = df[columns_selected].copy()
+    # read excel file
+    df = pd.read_excel('DTB 3rd floor.xlsx', header=6)
 
-# cleanup
-df_clean = df_clean.dropna(subset=columns_selected)
-df_clean['Floor'] = df_clean['Floor'].astype(int)
+    # selecting columns
+    columns_selected = ['Property', 'Floor', 'Space']
+    df_clean = df[columns_selected].copy()
 
-# loop
-for index, row in df_clean.iterrows():
-    prop = row['Property']
-    floor = row['Floor']
-    space = row['Space']
-    folder_path = os.path.join(prop, f"Floor {floor}", space)
-    # print(folder_path)
-    os.makedirs(folder_path, exist_ok=True)
+    # cleanup
+    df_clean = df_clean.dropna(subset=columns_selected)
+    df_clean['Floor'] = df_clean['Floor'].astype(int)
+
+    # loop
+    for index, row in df_clean.iterrows():
+        prop = row['Property']
+        floor = row['Floor']
+        space = row['Space']
+        folder_path = os.path.join("Buildings", prop, f"Floor {floor}", space)
+        print(folder_path)
+        os.makedirs(folder_path, exist_ok=True)
 
 # print
 # print(df_clean.head())
