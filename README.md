@@ -1,6 +1,6 @@
-# UVic Data Analyst Internship Workflows 📊📋
+# UVic Data Analyst Internship Workflows 
 
-A collection of data analytics and automation workflows developed during my data analyst internship at the **University of Victoria (UVic)**. This repository highlights projects focused on automating operational tasks, managing facilities data, and building cross-platform Python pipelines.
+A collection of data analytics and automation workflows developed during my data analyst internship at the **University of Victoria (UVic)**. This repository highlights self-directed automation tools and pipelines I built on my own initiative to optimize internal data workflows, replacing tedious manual tasks before anyone even asked me to.
 
 ---
 
