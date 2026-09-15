@@ -15,7 +15,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
 * **The Stack:** Python, Pandas, OpenPyXL, built-in `os` and `glob` modules.
 * **Why it matters:** Instead of manually building out hundreds of nested folders for campus inventory, you just drag and drop the raw spreadsheet into the script directory, hit run, and the pipeline dynamically builds the file architecture instantly.
 
-### 🛠️ Tech Stack & Dependencies
+### Tech Stack & Dependencies
 * **Python 3**
 * **Pandas** (Data structures and analysis)
 * **OpenPyXL** (Excel file engine backend)
