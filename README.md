@@ -10,7 +10,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
 
 ### Project Overview
 
-### 📁 `01_facility_folder_automation` (Current project)
+### 📁 `facility_folder_automation` (Current project)
 * **What it does:** Reads any input Excel file dropped into the folder and automatically generates a nested directory tree (`Property Name ➔ Floor Number ➔ Space/Room Number`).
 * **The Stack:** Python, Pandas, OpenPyXL, built-in `os` and `glob` modules.
 * **Why it matters:** Instead of manually building out hundreds of nested folders for campus inventory, you just drag and drop the raw spreadsheet into the script directory, hit run, and the pipeline dynamically builds the file architecture instantly.
