@@ -4,9 +4,9 @@ A collection of data analytics and automation workflows developed during my data
 
 ---
 
-## 🚀 Active Project: Space Allocation & Room Capacity Automation
+## Active Project: Space Allocation & Room Capacity Automation
 
-### 📋 Project Overview
+### Project Overview
 This workflow automates the ingestion and analysis of room capacity metrics for the **2026 Space Allocation Process** at UVic. Instead of manually auditing massive spreadsheets across campus facilities, this Python script reads, validates, and profiles data directly from Excel files.
 
 ### 🛠️ Tech Stack & Dependencies
