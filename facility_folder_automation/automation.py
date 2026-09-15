@@ -5,10 +5,12 @@ import glob
 # glob
 glob_pattern = os.path.join("input", "*.xlsx")
 glob_list = glob.glob(glob_pattern)
-print(glob_list)
+# print(glob_list)
+
+for excel_file in glob_list:
 
     # read excel file
-    df = pd.read_excel('DTB 3rd floor.xlsx', header=6)
+    df = pd.read_excel(excel_file, header=6)
 
     # selecting columns
     columns_selected = ['Property', 'Floor', 'Space']
@@ -23,10 +25,8 @@ print(glob_list)
         prop = row['Property']
         floor = row['Floor']
         space = row['Space']
-        folder_path = os.path.join("Buildings", prop, f"Floor {floor}", space)
-        print(folder_path)
+        folder_path = os.path.join("Campus Space Photos", prop, f"Floor {floor}", space)
+        # print(folder_path)
         os.makedirs(folder_path, exist_ok=True)
 
-# print
-# print(df_clean.head())
-# print(df_clean.shape)
+
