@@ -1,3 +1,18 @@
+# PyCharm
 .idea/
-*.xlsx
+
+# macOS
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Excel lock files (created while a workbook is open)
+~$*.xlsx
+
+# Project data and output
+input/
+Campus Space Photos/
