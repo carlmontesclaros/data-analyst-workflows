@@ -25,6 +25,10 @@ I’m keeping everything modular. Each project or workflow gets its own separate
     2. Excel filters are ignored -> hidden rows will get processed. Copy visible cells to a new sheet before saving!
     3. Currently capitalization matters will be fixed soon -> column headers must be named exactly "Property", "Floor", and "Space".
     4. Characters illegal in paths (/ \ : * ? " < > |) are replaced with - in folder names.
+
+## Future Ideas
+1. Generalize the hierarchy of `facility_folder_automation` let the user choose which columns become folder levels, instead of hardcoding Property/Floor/Space.
+   
 ### Tech Stack & Dependencies
 * **Python 3**
 * **Pandas** (Data structures and analysis)
