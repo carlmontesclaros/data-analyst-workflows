@@ -14,7 +14,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
 * **What it does:** Reads any input Excel file dropped into the folder and automatically generates a nested directory tree (`Property Name ➔ Floor Number ➔ Space/Room Number`).
 * **The Stack:** Python, Pandas, OpenPyXL, built-in `os` and `glob` modules.
 * **Why it matters:** Instead of manually building out hundreds of nested folders for campus inventory, you just drag and drop the raw spreadsheet into the script directory, hit run, and the pipeline dynamically builds the file architecture instantly.
-* **Limitations:** 1. Renaming a space in the source file creates a new folder; the old one is not moved or removed. 2. Excel filters are ignored -> hidden rows will get processed. Copy visible cells to a new sheet before saving! 3. Currently capitalization matters will be fixed soon. Column headers must be named exactly "Property", "Floor", and "Space". 4. Non numeric floors (G, P1, ...) will crash the script.
+* **Limitations:** 1. Renaming a space in the source file creates a new folder; the old one is not moved or removed. 2. Excel filters are ignored -> hidden rows will get processed. Copy visible cells to a new sheet before saving! 3. Currently capitalization matters will be fixed soon. Column headers must be named exactly "Property", "Floor", and "Space". 4. Non numeric floors (G, P1, ...) will crash the script. 5. Characters illegal in paths (/ \ : * ? " < > |) are replaced with - in folder names.
   
 
 ### Tech Stack & Dependencies
