@@ -4,7 +4,6 @@ import glob
 
 # config
 DRY_RUN = True
-ONLY_PROPERTIES = ['David Turpin Building']
 bad_chars = '/\\:*?"<>|'
 OUTPUT_DIR = "buildings"
 
@@ -73,11 +72,14 @@ print(f"\n{len(available)} properties found.")
 
 # take input, find matches
 choice = input("Type building name (blank = all): ").strip()
-matches = [p for p in available if choice.lower() in p.lower()]
-print(matches)
 
-if ONLY_PROPERTIES:
-    combined = combined[combined['Property'].isin(ONLY_PROPERTIES)]
+#multi select function
+terms = [t.strip().lower() for t in choice.split(',') if t.strip()]
+if terms:
+    matches = [p for p in available if any(t in p.lower() for t in terms)]
+else:
+    matches = available
+combined = combined[combined['Property'].isin(matches)]
 
 # bad chars check
 for col in columns_selected:
