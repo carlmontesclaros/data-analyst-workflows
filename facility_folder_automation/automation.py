@@ -6,6 +6,7 @@ import glob
 DRY_RUN = True
 ONLY_PROPERTIES = ['David Turpin Building']
 bad_chars = '/\\:*?"<>|'
+OUTPUT_DIR = "."
 
 # with DRY_RUN
 files_processed = 0
@@ -73,7 +74,7 @@ for excel_file in glob_list:
         prop = row['Property']
         floor = row['Floor']
         space = row['Space']
-        folder_path = os.path.join("Campus Space Photos", prop, f"Floor {floor}", space)
+        folder_path = os.path.join(OUTPUT_DIR, prop, f"Floor {floor}", space)
         if folder_path in planned_paths:
             continue
         planned_paths.add(folder_path)
@@ -88,8 +89,12 @@ for excel_file in glob_list:
 print(f"Files processed: {files_processed}")
 print(f"Folders created: {folders_created}")
 print(f"Already existed: {folders_existing}")
+print(max(len(os.path.abspath(p)) for p in planned_paths))
 
 if DRY_RUN:
     print("DRY RUN — nothing was actually created")
+
+input("\nDone. Press Enter to close...")
+
 
 
