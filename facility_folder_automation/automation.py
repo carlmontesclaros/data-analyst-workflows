@@ -71,14 +71,31 @@ available = sorted(combined['Property'].unique())
 print(f"\n{len(available)} properties found.")
 
 # take input, find matches
-choice = input("Type building name (blank = all): ").strip()
+while True:
+    choice = input("Type building name(s), comma-separated (blank = all, q = quit): ").strip()
+    if choice.lower() == 'q':
+        raise SystemExit("Canceled.")
 
-#multi select function
-terms = [t.strip().lower() for t in choice.split(',') if t.strip()]
-if terms:
-    matches = [p for p in available if any(t in p.lower() for t in terms)]
-else:
-    matches = available
+    #multi select function
+    terms = [t.strip().lower() for t in choice.split(',') if t.strip()]
+    if terms:
+        matches = [p for p in available if any(t in p.lower() for t in terms)]
+    else:
+        matches = available
+    if not matches:
+        print("No properties matched. Try again.")
+        continue
+
+    print(f"\n{len(matches)} properties matched:")
+    if len(matches) <= 20:
+        for m in matches:
+            print(" -", m)
+
+    confirm = input("\n Process these? (y/n): ").strip().lower()
+    if confirm == 'y':
+        break
+
+# filtered outside of loop
 combined = combined[combined['Property'].isin(matches)]
 
 # bad chars check
