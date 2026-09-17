@@ -71,6 +71,11 @@ combined = combined.drop_duplicates()
 available = sorted(combined['Property'].unique())
 print(f"\n{len(available)} properties found.")
 
+# take input, find matches
+choice = input("Type building name (blank = all): ").strip()
+matches = [p for p in available if choice.lower() in p.lower()]
+print(matches)
+
 if ONLY_PROPERTIES:
     combined = combined[combined['Property'].isin(ONLY_PROPERTIES)]
 
