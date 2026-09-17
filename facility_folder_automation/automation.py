@@ -6,7 +6,7 @@ import glob
 DRY_RUN = True
 ONLY_PROPERTIES = ['David Turpin Building']
 bad_chars = '/\\:*?"<>|'
-OUTPUT_DIR = "."
+OUTPUT_DIR = "buildings"
 
 # with DRY_RUN
 files_processed = 0
