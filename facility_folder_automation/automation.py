@@ -13,11 +13,12 @@ files_processed = 0
 folders_created = 0
 folders_existing = 0
 planned_paths = set()
+all_frames = []
 
 # sanitize name function
 def sanitize(name):
     for c in bad_chars:
-        name = name.replace(c, '_')
+        name = name.replace(c, '-')
     return name.strip()
 
 # glob
@@ -31,7 +32,7 @@ for excel_file in glob_list:
     raw = pd.read_excel(excel_file, header=None, nrows=50)
     header_row = None
 
-    # loop for raw
+    # loop for raw; header detection
     for i in range(len(raw)):
         values = [str(x).strip().lower() for x in raw.iloc[i].tolist()]
         if {'property', 'floor', 'space'}.issubset(values):
@@ -57,39 +58,51 @@ for excel_file in glob_list:
     for col in columns_selected:
         df_clean[col] = df_clean[col].astype(str).str.strip().str.removesuffix('.0').apply(sanitize)
 
-    before = len(df_clean)
-    df_clean = df_clean.drop_duplicates()
-    # print(f"{before} rows -> {len(df_clean)} unique spaces")
+    all_frames.append(df_clean)
 
-    if ONLY_PROPERTIES:
-        df_clean = df_clean[df_clean['Property'].isin(ONLY_PROPERTIES)]
-    # bad chars check
-    for col in columns_selected:
-        for value in df_clean[col].unique():
-            if any(c in value for c in bad_chars):
-                print("suspect:", col, repr(value))
 
-    # row loop
-    for index, row in df_clean.iterrows():
-        prop = row['Property']
-        floor = row['Floor']
-        space = row['Space']
-        folder_path = os.path.join(OUTPUT_DIR, prop, f"Floor {floor}", space)
-        if folder_path in planned_paths:
-            continue
-        planned_paths.add(folder_path)
-        # print(folder_path)
-        if os.path.exists(folder_path):
-            folders_existing += 1
-        else:
-            folders_created += 1
-        if not DRY_RUN:
-            os.makedirs(folder_path, exist_ok=True)
+if not all_frames:
+    raise ValueError("No excel files found in input")
+
+combined = pd.concat(all_frames, ignore_index=True)
+combined = combined.drop_duplicates()
+
+# the list of choices
+available = sorted(combined['Property'].unique())
+print(f"\n{len(available)} properties found.")
+
+if ONLY_PROPERTIES:
+    combined = combined[combined['Property'].isin(ONLY_PROPERTIES)]
+
+# bad chars check
+for col in columns_selected:
+    for value in combined[col].unique():
+        if any(c in value for c in bad_chars):
+            print("suspect:", col, repr(value))
+
+# row loop
+for index, row in combined.iterrows():
+    prop = row['Property']
+    floor = row['Floor']
+    space = row['Space']
+    folder_path = os.path.join(OUTPUT_DIR, prop, f"Floor {floor}", space)
+    if folder_path in planned_paths:
+        continue
+    planned_paths.add(folder_path)
+    # print(folder_path)
+    if os.path.exists(folder_path):
+        folders_existing += 1
+    else:
+        folders_created += 1
+    if not DRY_RUN:
+        os.makedirs(folder_path, exist_ok=True)
+
 
 print(f"Files processed: {files_processed}")
 print(f"Folders created: {folders_created}")
 print(f"Already existed: {folders_existing}")
-print(max(len(os.path.abspath(p)) for p in planned_paths))
+if planned_paths:
+    print(max(len(os.path.abspath(p)) for p in planned_paths))
 
 if DRY_RUN:
     print("DRY RUN — nothing was actually created")
