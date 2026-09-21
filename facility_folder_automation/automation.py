@@ -7,7 +7,7 @@ DRY_RUN = True
 bad_chars = '/\\:*?"<>|'
 OUTPUT_DIR = "buildings"
 
-# with DRY_RUN
+# counters
 files_processed = 0
 folders_created = 0
 folders_existing = 0
@@ -114,6 +114,7 @@ for index, row in combined.iterrows():
         continue
     planned_paths.add(folder_path)
     # print(folder_path)
+
     if os.path.exists(folder_path):
         folders_existing += 1
     else:
@@ -121,10 +122,10 @@ for index, row in combined.iterrows():
     if not DRY_RUN:
         os.makedirs(folder_path, exist_ok=True)
 
-
 print(f"Files processed: {files_processed}")
 print(f"Folders created: {folders_created}")
 print(f"Already existed: {folders_existing}")
+
 if planned_paths:
     print(max(len(os.path.abspath(p)) for p in planned_paths))
 
