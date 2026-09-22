@@ -10,7 +10,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
 
 ### Project Overview
 
-### 📁 `facility_folder_automation` (Current project)
+### 📁 `facility_folder_automation` 
 * **What it does: Reads facility spreadsheets and builds a nested folder tree**
   1. Reads any input Excel file dropped into the "input/" folder and automatically generates a nested directory tree (`Property Name ➔ Floor Number ➔ Space/Room Number`).
   2. Automatic header detection -> finds the header row wherever it sits, files with slicers, subtotals or look up tables above the data all work.
