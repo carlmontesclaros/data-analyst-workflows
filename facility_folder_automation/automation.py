@@ -6,6 +6,8 @@ import glob
 DRY_RUN = True
 bad_chars = '/\\:*?"<>|'
 OUTPUT_DIR = "buildings"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(SCRIPT_DIR, "buildings")
 
 # counters
 files_processed = 0
@@ -21,7 +23,7 @@ def sanitize(name):
     return name.strip()
 
 # glob
-glob_pattern = os.path.join("input", "*.xlsx")
+glob_pattern = os.path.join(SCRIPT_DIR, "input", "*.xlsx")
 glob_list = glob.glob(glob_pattern)
 
 #file loop
