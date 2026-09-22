@@ -132,8 +132,8 @@ print(f"Files processed: {files_processed}")
 print(f"Folders created: {folders_created}")
 print(f"Already existed: {folders_existing}")
 
-if planned_paths:
-    print(max(len(os.path.abspath(p)) for p in planned_paths))
+#if planned_paths:
+    #print(max(len(os.path.abspath(p)) for p in planned_paths))
 
 if DRY_RUN:
     print("DRY RUN — nothing was actually created")
