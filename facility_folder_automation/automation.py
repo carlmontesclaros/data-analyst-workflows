@@ -27,6 +27,10 @@ glob_list = glob.glob(glob_pattern)
 #file loop
 for excel_file in glob_list:
 
+    if os.path.basename(excel_file).startswith('~$'):
+        print("Skipping lock file:", excel_file)
+        continue
+
     # header detection
     raw = pd.read_excel(excel_file, header=None, nrows=50)
     header_row = None
