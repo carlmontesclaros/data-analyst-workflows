@@ -2,8 +2,6 @@ import pandas as pd
 import os
 import glob
 
-from exiting_capacity_calculation.exiting_capacity_claude import COUNT_COL, optional_exit_columns
-
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_DIR = os.path.join(BASE_DIR, "input")
@@ -95,7 +93,6 @@ if not room_frames:
     raise ValueError("No space reports found input")
 
 # load config
-
 
 
 
