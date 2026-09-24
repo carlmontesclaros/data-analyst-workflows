@@ -29,4 +29,29 @@ exit_frames = []
 glob_pattern = os.path.join(INPUT_DIR, "*.xlsx")
 glob_list = sorted(glob.glob(glob_pattern))
 
+# file loop
+for excel_file in glob_list:
+    name = os.path.basename(excel_file)
+    if name.startswith("~$"):
+        continue
+
+    # header detection
+    raw = pd.read_excel(excel_file, header=None, nrows=50)
+    header_row = None
+    kind = None
+
+    for i in range(len(raw)):
+        values = {str(x).strip().lower() for x in raw.iloc[i].tolist()}
+        if SPACE_REPORT_HEADERS.issubset(values):
+            header_row, kind = i, "space report"
+            break
+        if EXITS_HEADERS.issubset(values):
+            header_row, kind = i, "exit report"
+            break
+
+    if header_row is None:
+        raise ValueError(f"{name}: not a space report (Property/Floor/Space)" 
+                         f"or an exit report (Property/Floor/exit_id)")
+
+
 
