@@ -2,22 +2,27 @@ import pandas as pd
 import os
 import glob
 
+from exiting_capacity_calculation.exiting_capacity_claude import COUNT_COL, optional_exit_columns
+
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_DIR = os.path.join(BASE_DIR, "input")
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 OUTPUT_DIR = BASE_DIR
 ROOM_TYPE_COL = "Room type (per code m^2 used in capacity)"
+COUNT_COL = "Capacity (Occupants)"
 
 # file recognition
 SPACE_REPORT_HEADERS =  {'property', 'floor', 'space'}
 EXITS_HEADERS =  {'property', 'floor', 'exit_type'}
 
 room_keys = ['Property', 'Floor', 'Space']
-room_cols = room_columns = ['Property', 'Floor', 'Space', 'Net Space (sq m)',
-                'Space Sub-Category', 'Capacity (Occupants)', ROOM_TYPE_COL]
+room_cols = ['Property', 'Floor', 'Space', 'Net Space (sq m)',
+                'Space Sub-Category', COUNT_COL, ROOM_TYPE_COL]
 exit_keys = ['Property', 'Floor', 'exit_id']
-exit_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm']
+exit_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'into_wing', 'measured_date']
+optional_exit_cols = ['wing', 'into_wing', 'measured_date']
+zone_keys = ['Property', 'Floor', 'wing']
 
 # counters
 reports_processed = 0
@@ -67,6 +72,31 @@ for excel_file in glob_list:
         room_frames.append(df_clean)
 
     else:
-        #wing col opitonal and blank
+        # optional cols
+        for col in optional_exit_cols:
+            if col not in df.columns:
+                df[col] = None
+        missing = [c for c in exit_cols if c not in df.columns]
+        if missing:
+            raise ValueError(f"{name}: is missing columns: {missing}")
+
+        df_clean = df[exit_cols].copy()
+        df_clean = df_clean.dropna(subset=['Property', 'Floor'])
+        exit_files_processed += 1
+        exit_frames.append(df_clean)
+
+    # clean up
+    for col in ['Property', 'Floor']:
+        df_clean[col] = df_clean[col].astype(str).str.strip().str.removesuffix(".0")
+        df_clean['source_file'] = name
+        print(f"{name}: {kind}, {len(df_clean)} rows")
+
+if not room_frames:
+    raise ValueError("No space reports found input")
+
+# load config
+
+
+
 
 
