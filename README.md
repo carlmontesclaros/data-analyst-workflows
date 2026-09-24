@@ -25,6 +25,18 @@ I’m keeping everything modular. Each project or workflow gets its own separate
     2. Excel filters are ignored -> hidden rows will get processed. Copy visible cells to a new sheet before saving!
     3. Column headers must be named exactly "Property", "Floor", and "Space".
     4. Characters illegal in paths (/ \ : * ? " < > |) are replaced with - in folder names.
+ 
+### 📁 `exiting_capacity_calculation` (Current project)
+* **What it does: Screens every floor on campus for exiting capacity under the BC Building Code 2024**
+  1. Reads FMIS space reports and floor exit measurements dropped into `input/`. Files are recognised by their headers, so names don't matter.
+  2. Works out each room's occupant load from its area and room type (BCBC Table 3.1.17.1), using site-surveyed room types where they exist.
+  3. Converts measured exit widths into persons (BCBC 3.4.3.2) and applies the 50% rule to get each floor's exiting capacity.
+  4. Handles buildings with wings, including doors that send one wing's occupants into another.
+  5. All code factors and rulings live in `config/` CSV files, so they can be updated without touching the code.
+  6. Screening only: results say "review", never "approved".
+* **The Stack:** Python, Pandas, OpenPyXL
+* **Why it matters:** Answering "can this room go from 32 to 36?" used to mean a hand calculation per floor. Now every surveyed floor has its exiting capacity on hand, and every site visit's measurements are reusable.
+* **Details:** method, decisions and open questions are in `exiting_capacity_calculation/README.md`.
 
 ## Future Ideas
 1. Generalize the hierarchy of `facility_folder_automation` let the user choose which columns become folder levels, instead of hardcoding Property/Floor/Space.
