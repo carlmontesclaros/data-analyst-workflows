@@ -1,4 +1,5 @@
-setting,value
-code_edition,BCBC 2024
-occupant_load_rounding,up
-minimum_exits,2
+setting,value,note
+code_edition,BCBC 2024,Governing edition
+occupant_load_rounding,up,up = conservative (more people means more exit width). Change only with sign-off
+minimum_exits,2,Floors or wings with fewer exits are flagged for review
+link_share_method,even_split,even_split = sending wing load / its number of exits (supervisor decision). half_load = sending wing load / 2

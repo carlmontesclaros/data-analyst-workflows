@@ -46,12 +46,27 @@ for excel_file in glob_list:
             header_row, kind = i, "space report"
             break
         if EXITS_HEADERS.issubset(values):
-            header_row, kind = i, "exit report"
+            header_row, kind = i, "exits"
             break
 
     if header_row is None:
         raise ValueError(f"{name}: not a space report (Property/Floor/Space)" 
                          f"or an exit report (Property/Floor/exit_id)")
 
+    # read excel file -> first sheet
+    df = pd.read_excel(excel_file, header=header_row)
+
+    if kind == "space report":
+        missing = [c for c in room_cols if c not in df.columns]
+        if missing:
+            raise ValueError(f"{name}: missing columns: {missing}")
+
+        df_clean = df[room_cols].copy()
+        df_clean = df_clean.dropna(subset=room_keys)
+        reports_processed += 1
+        room_frames.append(df_clean)
+
+    else:
+        #wing col opitonal and blank
 
 
