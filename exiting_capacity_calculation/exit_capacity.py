@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import glob
+import numpy as np
 
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9,6 +10,7 @@ CONFIG_DIR = os.path.join(BASE_DIR, "config")
 OUTPUT_DIR = BASE_DIR
 ROOM_TYPE_COL = "Room type (per code m^2 used in capacity)"
 COUNT_COL = "Capacity (Occupants)"
+AREA_COL = "Net Space (sq m)"
 
 # file recognition
 SPACE_REPORT_HEADERS =  {'property', 'floor', 'space'}
@@ -153,4 +155,17 @@ for _, row in no_type.iterrows():
 
 print(f"warnings - no room type: {len(no_type)}")
 print(warning_rows[0])
+
+# room occupant load = area / m^2 per person, rounded up
+if ROUNDING != 'up':
+    raise ValueError(f"settings.csv: occupant_load_rounding is '{ROUNDING}', only 'up' is supported")
+
+rooms['area_per_person_m2'] = rooms['room_type'].map(area_factor)
+raw_load = rooms[AREA_COL] / rooms['area_per_person_m2']
+rooms['occupant_load'] = np.ceil(raw_load.round(6)).fillna(0).astype(int)
+
+print(f"rooms with people: {(rooms['occupant_load'] > 0).sum()}")
+print(f"total occupant load: {rooms['occupant_load'].sum()}")
+print(rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Space'] == 'B303')]
+[['Space', AREA_COL, 'room_type', 'area_per_person_m2', 'occupant_load']])
 
