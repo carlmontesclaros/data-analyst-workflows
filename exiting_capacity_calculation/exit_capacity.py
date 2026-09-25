@@ -93,7 +93,26 @@ if not room_frames:
     raise ValueError("No space reports found input")
 
 # load config
+area_df = pd.read_csv(os.path.join(CONFIG_DIR, "area_factors.csv"))
+category_df = pd.read_csv(os.path.join(CONFIG_DIR, "category_map.csv"))
+width_df = pd.read_csv(os.path.join(CONFIG_DIR, "width_factors.csv"))
+setting_df = pd.read_csv(os.path.join(CONFIG_DIR, "settings.csv"))
 
+# lookups
+area_factor = dict(zip(area_df['room_type'], area_df['area_per_person_m2']))
+category_map = dict(zip(category_df['space_sub_category'], category_df['room_type']))
+settings = dict(zip(setting_df['setting'], setting_df['value']))
+width_df = width_df.set_index('exit_type')
 
+# settings
+ROUNDING = settings['occupant_load_rounding']
+MIN_EXITS = int(settings['minimum_exits'])
+LINK_METHOD = settings['link_share_method']
+
+print(f"area factors: {len(area_factor)}")
+print(f"category mappings: {len(category_map)}")
+print(f"width factors: {width_df.shape}")
+print(f"settings: {ROUNDING}, {MIN_EXITS}, {LINK_METHOD}")
+print(f"min exits + 1: {MIN_EXITS + 1}")
 
 
