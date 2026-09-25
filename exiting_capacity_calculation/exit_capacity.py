@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import glob
 
+from pandas.core.common import not_none
+
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_DIR = os.path.join(BASE_DIR, "input")
@@ -109,10 +111,39 @@ ROUNDING = settings['occupant_load_rounding']
 MIN_EXITS = int(settings['minimum_exits'])
 LINK_METHOD = settings['link_share_method']
 
+# config prints
 print(f"area factors: {len(area_factor)}")
 print(f"category mappings: {len(category_map)}")
 print(f"width factors: {width_df.shape}")
 print(f"settings: {ROUNDING}, {MIN_EXITS}, {LINK_METHOD}")
 print(f"min exits + 1: {MIN_EXITS + 1}")
+
+# combine rooms
+rooms = pd.concat(room_frames, ignore_index=True) # stacks space report frames into one table
+rooms = rooms.drop_duplicates(subset=room_cols) # drops rows that are identical in every col selected
+print(f"rooms: {rooms.shape}")
+
+# room type override
+override = rooms[ROOM_TYPE_COL].astype(str).str.strip().str.lower() # lower cases everything, makes everything text
+override = override.where(rooms[ROOM_TYPE_COL].notna() & (override != '')) # keeps a value where condition is true puts NaN whens its false
+
+print(f"overrides: {override.notna().sum()}")
+print(override.value_counts())
+
+# default room type from category map
+default = rooms['Space Sub-Category'].map(category_map) # takes each room's sub-category,from category_map.csv. Rooms with no sub-category get NaN
+
+print(f"rooms with a category default: {default.notna().sum()}")
+
+# final room type -> override wins, else category default
+rooms['room_type'] = override.fillna(default) # keeps override if it exists, else default
+
+# where the rooms came from (goes in room detail)
+rooms['room_type_source'] = 'none'
+rooms. loc[default.notna(), 'room_type_source'] = 'category'
+rooms.loc[override.notna(), 'room_type_source'] = 'override'
+
+print(rooms['room_type_source'].value_counts())
+print(rooms['room_type'].value_counts(dropna=False))
 
 
