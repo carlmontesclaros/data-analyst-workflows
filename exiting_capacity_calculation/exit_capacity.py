@@ -2,8 +2,6 @@ import pandas as pd
 import os
 import glob
 
-from pandas.core.common import not_none
-
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_DIR = os.path.join(BASE_DIR, "input")
@@ -28,6 +26,7 @@ zone_keys = ['Property', 'Floor', 'wing']
 reports_processed = 0
 exit_files_processed = 0
 room_frames = []
+warning_rows = []
 exit_frames = []
 
 # glob
@@ -146,4 +145,12 @@ rooms.loc[override.notna(), 'room_type_source'] = 'override'
 print(rooms['room_type_source'].value_counts())
 print(rooms['room_type'].value_counts(dropna=False))
 
+# warn -> rooms with area but no  room type (counting as 0 occupancy)
+no_type = rooms[rooms['room_type'].isna() & (rooms['Net space (sq m)'] > 0)]
+for _, row in no_type.iterrows():
+    warning_rows.append({'type': 'no_room_type', 'Property': row['Property'], 'Floor': row['Floor'],
+                         'detail': f"{row['Space']}: {row['Net space (sq m)']} m2, no sub-category or override - counted as 0 people"})
+
+print(f"warnings - no room type: {len(no_type)}")
+print(warning_rows[0])
 
