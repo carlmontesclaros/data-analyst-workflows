@@ -54,7 +54,7 @@ for excel_file in glob_list:
 
     if header_row is None:
         raise ValueError(f"{name}: not a space report (Property/Floor/Space)" 
-                         f"or an exit report (Property/Floor/exit_id)")
+                         f" or an exit report (Property/Floor/exit_type)")
 
     # read excel file -> first sheet
     df = pd.read_excel(excel_file, header=header_row)
@@ -86,8 +86,8 @@ for excel_file in glob_list:
     # clean up
     for col in ['Property', 'Floor']:
         df_clean[col] = df_clean[col].astype(str).str.strip().str.removesuffix(".0")
-        df_clean['source_file'] = name
-        print(f"{name}: {kind}, {len(df_clean)} rows")
+    df_clean['source_file'] = name
+    print(f"{name}: {kind}, {len(df_clean)} rows")
 
 if not room_frames:
     raise ValueError("No space reports found input")
