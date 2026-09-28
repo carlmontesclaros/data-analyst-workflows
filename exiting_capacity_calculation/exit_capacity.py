@@ -169,3 +169,15 @@ print(f"total occupant load: {rooms['occupant_load'].sum()}")
 print(rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Space'] == 'B303')]
 [['Space', AREA_COL, 'room_type', 'area_per_person_m2', 'occupant_load']])
 
+# combine exits
+if exit_frames:
+    all_exits = pd.concat(exit_frames, ignore_index=True)
+else: # still get an empty row with the correct columns
+    all_exits = pd.DataFrame(columns=exit_cols + ['source_file'])
+print(f"exit rows read: {len(all_exits)}")
+
+# keep rows with something recorded
+has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().all(axis=1)
+exits = all_exits[has_data].copy()
+print(f"exits recorded: {len(exits)}")
+print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm']])
