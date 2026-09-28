@@ -112,13 +112,6 @@ ROUNDING = settings['occupant_load_rounding']
 MIN_EXITS = int(settings['minimum_exits'])
 LINK_METHOD = settings['link_share_method']
 
-# config prints
-print(f"area factors: {len(area_factor)}")
-print(f"category mappings: {len(category_map)}")
-print(f"width factors: {width_df.shape}")
-print(f"settings: {ROUNDING}, {MIN_EXITS}, {LINK_METHOD}")
-print(f"min exits + 1: {MIN_EXITS + 1}")
-
 # combine rooms
 rooms = pd.concat(room_frames, ignore_index=True) # stacks space report frames into one table
 rooms = rooms.drop_duplicates(subset=room_cols) # drops rows that are identical in every col selected
@@ -129,7 +122,6 @@ override = rooms[ROOM_TYPE_COL].astype(str).str.strip().str.lower() # lower case
 override = override.where(rooms[ROOM_TYPE_COL].notna() & (override != '')) # keeps a value where condition is true puts NaN whens its false
 
 print(f"overrides: {override.notna().sum()}")
-print(override.value_counts())
 
 # default room type from category map
 default = rooms['Space Sub-Category'].map(category_map) # takes each room's sub-category,from category_map.csv. Rooms with no sub-category get NaN
@@ -144,9 +136,6 @@ rooms['room_type_source'] = 'none'
 rooms. loc[default.notna(), 'room_type_source'] = 'category'
 rooms.loc[override.notna(), 'room_type_source'] = 'override'
 
-print(rooms['room_type_source'].value_counts())
-print(rooms['room_type'].value_counts(dropna=False))
-
 # warn -> rooms with area but no room type (counting as 0 occupancy)
 no_type = rooms[rooms['room_type'].isna() & (rooms['Net Space (sq m)'] > 0)]
 for _, row in no_type.iterrows():
@@ -154,7 +143,6 @@ for _, row in no_type.iterrows():
                          'detail': f"{row['Space']}: {row['Net Space (sq m)']} m2, no sub-category or override - counted as 0 people"})
 
 print(f"warnings - no room type: {len(no_type)}")
-print(warning_rows[0])
 
 # room occupant load = area / m^2 per person, rounded up
 if ROUNDING != 'up':
@@ -188,7 +176,9 @@ for col in ['wing', 'into_wing']:
     exits[col] = exits[col].fillna('').astype(str).str.strip().str.upper()
 exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce')
 
-print(exits['exit_type'].value_counts())
-print(exits['wing'].value_counts())
-print(f"into_wing set: {(exits['into_wing'] != '').sum()}")
-print(f"width type: {exits['clear_width_cm'].dtype}, missing: {exits['clear_width_cm'].isna().sum()}")
+# person per exit = width in mm / mm per person, rounded down
+exits['mm_per_person'] = exits['exit_type'].map(width_df['mm_per_person'])
+raw_persons = exits['clear_width_cm'] * 10 / exits['mm_per_person']
+exits['persons'] = np.floor(raw_persons.round(6)).fillna(0).astype(int)
+
+print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'mm_per_person', 'persons']])
