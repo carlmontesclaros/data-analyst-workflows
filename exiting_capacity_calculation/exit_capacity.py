@@ -22,7 +22,6 @@ room_cols = ['Property', 'Floor', 'Space', 'Net Space (sq m)',
 exit_keys = ['Property', 'Floor', 'exit_id']
 exit_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'into_wing', 'measured_date']
 optional_exit_cols = ['wing', 'into_wing', 'measured_date']
-zone_keys = ['Property', 'Floor', 'wing']
 
 # counters
 reports_processed = 0
@@ -154,8 +153,6 @@ rooms['occupant_load'] = np.ceil(raw_load.round(6)).fillna(0).astype(int)
 
 print(f"rooms with people: {(rooms['occupant_load'] > 0).sum()}")
 print(f"total occupant load: {rooms['occupant_load'].sum()}")
-print(rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Space'] == 'B303')]
-[['Space', AREA_COL, 'room_type', 'area_per_person_m2', 'occupant_load']])
 
 # combine exits
 if exit_frames:
@@ -180,8 +177,6 @@ exits['mm_per_person'] = exits['exit_type'].map(width_df['mm_per_person'])
 raw_persons = exits['clear_width_cm'] * 10 / exits['mm_per_person']
 exits['persons'] = np.floor(raw_persons.round(6)).fillna(0).astype(int)
 
-print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'mm_per_person', 'persons']])
-
 # min width check (table 3.4.3.2 via BCBC 2024)
 exits['width_mm'] = exits['clear_width_cm'] * 10
 exits['minimum_mm'] = exits['exit_type'].map(width_df['minimum_mm'])
@@ -191,8 +186,6 @@ exits['width_check'] = 'ok'
 exits.loc[exits['width_mm'] < exits['minimum_mm'], 'width_check'] = 'review - depends on storeys served'
 exits.loc[exits['width_mm'] < exits['minimum_mm_low_rise'], 'width_check'] = 'fail - below minimum'
 exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] = 'unknown'
-
-print(exits['width_check'].value_counts())
 
 # exit warnings -> exits with unknown type of missing width (counting it as 0 people)
 bad_type = exits[exits['mm_per_person'].isna()]
@@ -212,9 +205,7 @@ print(f"warnings total: {len(warning_rows)}")
 # room wing -> leading letter of Space column
 rooms['room_wing'] = rooms['Space'].astype(str).str.strip().str.extract(r'^([A-Za-z]+)')[0].fillna('').str.upper()
 
-print(f"rooms with a wing letter: {(rooms['room_wing'] != '').sum().sum()}")
-turpin3 = rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Floor'] == '3')]
-print(turpin3.groupby('room_wing')['occupant_load'].agg(['count', 'sum']))
+print(f"rooms with a wing letter: {(rooms['room_wing'] != '').sum()}")
 
 # floor key -> one text id per floor, same in rooms and exits
 rooms['floor_key'] = rooms['Property'] + ' | ' + rooms['Floor']
@@ -222,11 +213,29 @@ exits['floor_key'] = exits['Property'] + ' | ' + exits['Floor']
 
 # split floors -> any exit on the floor has a wing
 split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
-print(f"split floors {len(split_floors)} {sorted(split_floors)}")
+print(f"split floors: {len(split_floors)} {sorted(split_floors)}")
 
 # zone wing - > room's wing letter on split floors
-rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors))
+rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors), '')
 
-zones = rooms[['floor_key', 'zone_wing']].drop_duplicates()
-print(f"zones before cleanup: {len(zones)}")
-print(zones[zones['floor_key'] == 'David Turpin Building | 3'])
+# occupant load per zone
+zone_keys = ['Property', 'Floor', 'floor_key', 'zone_wing']
+zones = rooms.groupby(zone_keys, as_index=False)['occupant_load'].sum()
+
+# exits per zone
+exits['zone_wing'] = exits['wing']
+exit_count = exits.groupby(zone_keys, as_index=False).size()
+exit_count = exit_count.rename(columns={'size': 'exit_count'})
+
+#join -> outer keeps zones that only have exits
+zones = zones.merge(exit_count, on=zone_keys, how='outer')
+zones['occupant_load'] = zones['occupant_load'].fillna(0).astype(int)
+zones['exit_count'] = zones['exit_count'].fillna(0).astype(int)
+
+# dropping pseudo zones -> split floor, 0 load, no exits
+pseudo = zones['floor_key'].isin(split_floors) & (zones['occupant_load'] == 0) & (zones['exit_count'] == 0)
+zones = zones[~pseudo].copy()
+
+print(f"pseudo-zones dropped: {pseudo.sum()}")
+print(f"zones: {len(zones)}")
+print(f"zone load total: {zones['occupant_load'].sum()}")
