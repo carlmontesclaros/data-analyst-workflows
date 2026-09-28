@@ -249,3 +249,34 @@ zones = zones.merge(cap[zone_keys + ['exit_capacity']], on=zone_keys, how='left'
 zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
 print(zones[zones['exit_count'] > 0])
+
+# link flow -> a door into another wing sends people to that wing BCBC 3.4.3.1(2)
+links = exits.loc[exits['into_wing'] != '', zone_keys + ['exit_id', 'into_wing', 'persons']]
+links = links.merge(zones[zone_keys + ['occupant_load', 'exit_count']], on=zone_keys, how='left')
+
+if LINK_METHOD == 'even_split':
+    share = np.ceil((links['occupant_load'] / links['exit_count']).round(6))
+elif LINK_METHOD == 'half_load':
+    share = np.ceil((links['occupant_load'] / 2).round(6))
+else:
+    raise ValueError(f"settings.csv: link_share_method '{LINK_METHOD}' must be even_split or half_load")
+
+links['people_sent'] = np.minimum(share, links['persons']).astype(int)
+
+# add people sent to the receiving wing
+inflow = links.groupby(['floor_key', 'into_wing'], as_index=False)['people_sent'].sum()
+inflow = inflow.rename(columns={'into_wing': 'zone_wing', 'people_sent': 'link_inflow'})
+
+zones = zones.merge(inflow, on=['floor_key', 'zone_wing'], how='left')
+zones['link_inflow'] = zones['link_inflow'].fillna(0).astype(int)
+zones['total_load'] = zones['occupant_load'] + zones['link_inflow']
+
+# warning -> link into a wing that isnt a zone
+zone_ids = set(zones['floor_key'] + ' | ' + zones['zone_wing'])
+for _, row in links.iterrows():
+    if f"{row['floor_key']} | {row['into_wing']}" not in zone_ids:
+        warning_rows.append({'type': 'link_to_missing_wing', 'Property': row['Property'], 'Floor': row['Floor'],
+                             'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' has no zone - {row['people_sent']} people not added"})
+
+print(f"link doors: {len(links)}, people sent: {links['people_sent'].sum()}")
+print(f"warnings total: {len(warning_rows)}")
