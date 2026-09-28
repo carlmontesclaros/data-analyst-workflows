@@ -193,3 +193,18 @@ exits.loc[exits['width_mm'] < exits['minimum_mm_low_rise'], 'width_check'] = 'fa
 exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] = 'unknown'
 
 print(exits['width_check'].value_counts())
+
+# exit warnings -> exits wit unknown type of missing width (counting it as 0 people)
+bad_type = exits[exits['mm_per_person'].isna()]
+for _, row in bad_type.iterrows():
+    warning_rows.append({'type': 'unknown_exit_type', 'Property': row['Property'], 'Floor': row['Floor'],
+                         'detail': f"{row['exit_id']}: exit_type '{row['exit_type']}' not in width_factors.csv - counted as 0 people"})
+
+no_width = exits[exits['clear_width_cm'].isna()]
+for _, row in no_width.iterrows():
+    warning_rows.append({'type': 'missing_width', 'Property': row['Property'], 'Floor': row['Floor'],
+                         'detail': f"{row['exit_id']}: no clear_width_cm - counted as 0 people"})
+
+print(f"warnings - unknown exit type: {len(bad_type)}")
+print(f"warnings - missing width: {len(no_width)}")
+print(f"warnings total: {len(warning_rows)}")
