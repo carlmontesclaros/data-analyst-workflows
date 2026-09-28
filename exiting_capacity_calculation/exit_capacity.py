@@ -239,3 +239,13 @@ zones = zones[~pseudo].copy()
 print(f"pseudo-zones dropped: {pseudo.sum()}")
 print(f"zones: {len(zones)}")
 print(f"zone load total: {zones['occupant_load'].sum()}")
+
+# exit capacity per zone -> applying the 50% rule on BCBC 3.4.3.2 (7)
+cap = exits.groupby(zone_keys, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')
+cap['others'] = cap['total_persons'] - cap['largest_exit']
+cap['exit_capacity'] = np.minimum(cap['total_persons'], 2 * cap['others'])
+
+zones = zones.merge(cap[zone_keys + ['exit_capacity']], on=zone_keys, how='left')
+zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
+
+print(zones[zones['exit_count'] > 0])
