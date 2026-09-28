@@ -208,3 +208,10 @@ for _, row in no_width.iterrows():
 print(f"warnings - unknown exit type: {len(bad_type)}")
 print(f"warnings - missing width: {len(no_width)}")
 print(f"warnings total: {len(warning_rows)}")
+
+# room wing -> leading letter of Space column
+rooms['room_wing'] = rooms['Space'].astype(str).str.strip().str.extract(r'^([A-Za-z]+)')[0].fillna('').str.upper()
+
+print(f"rooms with a wing letter: {(rooms['room_wing'] != '').sum().sum()}")
+turpin3 = rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Floor'] == '3')]
+print(turpin3.groupby('room_wing')['occupant_load'].agg(['count', 'sum']))
