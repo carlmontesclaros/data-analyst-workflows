@@ -181,3 +181,14 @@ has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().all(axi
 exits = all_exits[has_data].copy()
 print(f"exits recorded: {len(exits)}")
 print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm']])
+
+# clean exit columns
+exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
+for col in ['wing', 'into_wing']:
+    exits[col] = exits[col].fillna('').astype(str).str.strip().str.upper()
+exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce')
+
+print(exits['exit_type'].value_counts())
+print(exits['wing'].value_counts())
+print(f"into_wing set: {(exits['into_wing'] != '').sum()}")
+print(f"width type: {exits['clear_width_cm'].dtype}, missing: {exits['clear_width_cm'].isna().sum()}")
