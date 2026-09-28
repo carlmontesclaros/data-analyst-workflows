@@ -194,7 +194,7 @@ exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] 
 
 print(exits['width_check'].value_counts())
 
-# exit warnings -> exits wit unknown type of missing width (counting it as 0 people)
+# exit warnings -> exits with unknown type of missing width (counting it as 0 people)
 bad_type = exits[exits['mm_per_person'].isna()]
 for _, row in bad_type.iterrows():
     warning_rows.append({'type': 'unknown_exit_type', 'Property': row['Property'], 'Floor': row['Floor'],
@@ -215,3 +215,18 @@ rooms['room_wing'] = rooms['Space'].astype(str).str.strip().str.extract(r'^([A-Z
 print(f"rooms with a wing letter: {(rooms['room_wing'] != '').sum().sum()}")
 turpin3 = rooms[(rooms['Property'] == 'David Turpin Building') & (rooms['Floor'] == '3')]
 print(turpin3.groupby('room_wing')['occupant_load'].agg(['count', 'sum']))
+
+# floor key -> one text id per floor, same in rooms and exits
+rooms['floor_key'] = rooms['Property'] + ' | ' + rooms['Floor']
+exits['floor_key'] = exits['Property'] + ' | ' + exits['Floor']
+
+# split floors -> any exit on the floor has a wing
+split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
+print(f"split floors {len(split_floors)} {sorted(split_floors)}")
+
+# zone wing - > room's wing letter on split floors
+rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors))
+
+zones = rooms[['floor_key', 'zone_wing']].drop_duplicates()
+print(f"zones before cleanup: {len(zones)}")
+print(zones[zones['floor_key'] == 'David Turpin Building | 3'])
