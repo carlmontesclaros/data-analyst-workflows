@@ -165,10 +165,9 @@ else: # still get an empty row with the correct columns
 print(f"exit rows read: {len(all_exits)}")
 
 # keep rows with something recorded
-has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().all(axis=1)
+has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().any(axis=1)
 exits = all_exits[has_data].copy()
 print(f"exits recorded: {len(exits)}")
-print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm']])
 
 # clean exit columns
 exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
@@ -182,3 +181,15 @@ raw_persons = exits['clear_width_cm'] * 10 / exits['mm_per_person']
 exits['persons'] = np.floor(raw_persons.round(6)).fillna(0).astype(int)
 
 print(exits[['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'mm_per_person', 'persons']])
+
+# min width check (table 3.4.3.2 via BCBC 2024)
+exits['width_mm'] = exits['clear_width_cm'] * 10
+exits['minimum_mm'] = exits['exit_type'].map(width_df['minimum_mm'])
+exits['minimum_mm_low_rise'] = exits['exit_type'].map(width_df['minimum_mm_low_rise'])
+
+exits['width_check'] = 'ok'
+exits.loc[exits['width_mm'] < exits['minimum_mm'], 'width_check'] = 'review - depends on storeys served'
+exits.loc[exits['width_mm'] < exits['minimum_mm_low_rise'], 'width_check'] = 'fail - below minimum'
+exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] = 'unknown'
+
+print(exits['width_check'].value_counts())
