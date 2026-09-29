@@ -328,3 +328,15 @@ zones['status'] = statuses
 zones['flags'] = flag_texts
 
 print(zones['status'].value_counts())
+
+# counted capacity per zone -> site counts carried next t the area based load
+rooms[COUNT_COL] = pd.to_numeric(rooms[COUNT_COL], errors='coerce').fillna(0).astype(int)
+rooms['counted'] = rooms[COUNT_COL] > 0
+counted = rooms.groupby(zone_keys, as_index=False).agg(counted_capacity=(COUNT_COL, 'sum'), rooms_counted=('counted', 'sum'))
+
+zones = zones.merge(counted, on=zone_keys, how='left')
+for col in ['counted_capacity', 'rooms_counted']:
+    zones[col] = zones[col].fillna(0).astype(int)
+
+print(f"rooms counted: {rooms['counted'].sum()}, counted capacity total: {rooms[COUNT_COL].sum()}")
+print(f"zone counted total: {zones['counted_capacity'].sum()}, zones with counts: {(zones['rooms_counted'] > 0).sum()}")
