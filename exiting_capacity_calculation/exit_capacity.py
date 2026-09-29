@@ -13,6 +13,7 @@ OUTPUT_DIR = BASE_DIR
 ROOM_TYPE_COL = "Room type (per code m^2 used in capacity)"
 COUNT_COL = "Capacity (Occupants)"
 AREA_COL = "Net Space (sq m)"
+LOAD_BASIS = 'counted'  # 'counted' = site counts (Capacity (Occupants)), 'area' = BCBC area-based load
 
 # file recognition
 SPACE_REPORT_HEADERS =  {'property', 'floor', 'space'}
@@ -242,6 +243,27 @@ print(f"pseudo-zones dropped: {pseudo.sum()}")
 print(f"zones: {len(zones)}")
 print(f"zone load total: {zones['occupant_load'].sum()}")
 
+# counted capacity per zone -> site counts carried next t the area based load
+rooms[COUNT_COL] = pd.to_numeric(rooms[COUNT_COL], errors='coerce').fillna(0).astype(int)
+rooms['counted'] = rooms[COUNT_COL] > 0
+counted = rooms.groupby(zone_keys, as_index=False).agg(counted_capacity=(COUNT_COL, 'sum'), rooms_counted=('counted', 'sum'))
+
+zones = zones.merge(counted, on=zone_keys, how='left')
+for col in ['counted_capacity', 'rooms_counted']:
+    zones[col] = zones[col].fillna(0).astype(int)
+
+print(f"rooms counted: {rooms['counted'].sum()}, counted capacity total: {rooms[COUNT_COL].sum()}")
+print(f"zone counted total: {zones['counted_capacity'].sum()}, zones with counts: {(zones['rooms_counted'] > 0).sum()}")
+
+# load used for the check -> counted or area based, set in the config block
+if LOAD_BASIS == 'counted':
+    zones['load_used'] = zones['counted_capacity']
+elif LOAD_BASIS == 'area':
+    zones['load_used'] = zones['occupant_load']
+else:
+    raise ValueError(f"LOAD_BASIS is '{LOAD_BASIS}', must be 'counted' or 'area'")
+print(f"load basis: {LOAD_BASIS}")
+
 # exit capacity per zone -> applying the 50% rule on BCBC 3.4.3.2 (7)
 cap = exits.groupby(zone_keys, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')
 cap['others'] = cap['total_persons'] - cap['largest_exit']
@@ -254,12 +276,12 @@ print(zones[zones['exit_count'] > 0])
 
 # link flow -> a door into another wing sends people to that wing BCBC 3.4.3.1(2)
 links = exits.loc[exits['into_wing'] != '', zone_keys + ['exit_id', 'into_wing', 'persons']]
-links = links.merge(zones[zone_keys + ['occupant_load', 'exit_count']], on=zone_keys, how='left')
+links = links.merge(zones[zone_keys + ['load_used', 'exit_count']], on=zone_keys, how='left')
 
 if LINK_METHOD == 'even_split':
-    share = np.ceil((links['occupant_load'] / links['exit_count']).round(6))
+    share = np.ceil((links['load_used'] / links['exit_count']).round(6))
 elif LINK_METHOD == 'half_load':
-    share = np.ceil((links['occupant_load'] / 2).round(6))
+    share = np.ceil((links['load_used'] / 2).round(6))
 else:
     raise ValueError(f"settings.csv: link_share_method '{LINK_METHOD}' must be even_split or half_load")
 
@@ -271,7 +293,7 @@ inflow = inflow.rename(columns={'into_wing': 'zone_wing', 'people_sent': 'link_i
 
 zones = zones.merge(inflow, on=['floor_key', 'zone_wing'], how='left')
 zones['link_inflow'] = zones['link_inflow'].fillna(0).astype(int)
-zones['total_load'] = zones['occupant_load'] + zones['link_inflow']
+zones['total_load'] = zones['load_used'] + zones['link_inflow']
 
 # warning -> link into a wing that isnt a zone
 zone_ids = set(zones['floor_key'] + ' | ' + zones['zone_wing'])
@@ -314,6 +336,8 @@ for _, z in zones.iterrows():
         flags.append("exit type or width unknown")
     if z['link_sends'] and z['link_inflow'] > 0:
         flags.append("wing sends and receives link traffic")
+    if LOAD_BASIS == 'counted' and z['rooms_counted'] == 0:
+        flags.append("no rooms counted yet - load is 0")
 
     if z['exit_count'] == 0:
         status = 'NOT SURVEYED - no exit data'
@@ -331,27 +355,18 @@ zones['flags'] = flag_texts
 
 print(zones['status'].value_counts())
 
-# counted capacity per zone -> site counts carried next t the area based load
-rooms[COUNT_COL] = pd.to_numeric(rooms[COUNT_COL], errors='coerce').fillna(0).astype(int)
-rooms['counted'] = rooms[COUNT_COL] > 0
-counted = rooms.groupby(zone_keys, as_index=False).agg(counted_capacity=(COUNT_COL, 'sum'), rooms_counted=('counted', 'sum'))
-
-zones = zones.merge(counted, on=zone_keys, how='left')
-for col in ['counted_capacity', 'rooms_counted']:
-    zones[col] = zones[col].fillna(0).astype(int)
-
-print(f"rooms counted: {rooms['counted'].sum()}, counted capacity total: {rooms[COUNT_COL].sum()}")
-print(f"zone counted total: {zones['counted_capacity'].sum()}, zones with counts: {(zones['rooms_counted'] > 0).sum()}")
-
 # output tables -> pick and order the columns for each sheet
 status_order = {'REVIEW': 0, 'WITHIN CAPACITY - review before acting': 1, 'NOT SURVEYED - no exit data': 2}
 floor_summary = zones.copy()
 floor_summary['status_order'] = floor_summary['status'].map(status_order)
 floor_summary = floor_summary.sort_values(['status_order', 'Property', 'Floor', 'zone_wing'])
+floor_summary['load_basis'] = LOAD_BASIS
+floor_summary = floor_summary.rename(columns={'occupant_load': 'area_based_load'})
 
+# total_load (load_used + link inflow) is the number checked against exit_capacity
 summary_cols = ['Property', 'Floor', 'zone_wing', 'status', 'flags',
-                'occupant_load', 'link_inflow', 'total_load', 'exit_capacity', 'exit_count',
-                'counted_capacity', 'rooms_counted', 'floor_key']
+                'total_load', 'exit_capacity', 'load_basis', 'counted_capacity', 'rooms_counted',
+                'area_based_load', 'link_inflow', 'exit_count', 'floor_key']
 exit_detail_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'persons',
                     'width_check', 'mm_per_person', 'minimum_mm', 'minimum_mm_low_rise',
                     'into_wing', 'measured_date', 'source_file', 'floor_key']
