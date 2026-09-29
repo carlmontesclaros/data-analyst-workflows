@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import glob
 import numpy as np
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -366,8 +368,75 @@ print(f"floor_summary: {floor_summary.shape}, exit_detail: {exit_detail.shape}, 
       f"room_detail: {room_detail.shape}, warnings: {warnings_df.shape}")
 print(floor_summary[['floor_key', 'zone_wing', 'status']].head(4))
 
+# pick buildings for the output -> calculation already ran on the whole campus
+available = sorted(floor_summary['Property'].unique())
+print(f"\n{len(available)} properties found.")
+
+while True:
+    choice = input("Type building name(s), comma-separated (blank = all, q = quit): ").strip()
+    if choice.lower() == 'q':
+        raise SystemExit("Canceled.")
+
+    terms = [t.strip().lower() for t in choice.split(',') if t.strip()]
+    if terms:
+        matches = [p for p in available if any(t in p.lower() for t in terms)]
+        no_match = [t for t in terms if not any(t in p.lower() for p in available)]
+        if no_match:
+            print(f"no match for: {no_match}")
+    else:
+        matches = available
+    if not matches:
+        print("No properties matched. Try again.")
+        continue
+
+    print(f"\n{len(matches)} properties matched:")
+    if len(matches) <= 20:
+        for m in matches:
+            print(" -", m)
+
+    confirm = input("\nWrite these? (y/n): ").strip().lower()
+    if confirm == 'y':
+        break
+
+# pick floors -> only asked when one building matched
+selected_floors = []
+if terms and len(matches) == 1:
+    building_floors = sorted(floor_summary.loc[floor_summary['Property'] == matches[0], 'Floor'].unique())
+    print(f"floors: {', '.join(building_floors)}")
+    while True:
+        floor_choice = input("Floor(s), comma-separated (blank = all): ").strip()
+        selected_floors = [f.strip() for f in floor_choice.split(',') if f.strip()]
+        unknown = [f for f in selected_floors if f not in building_floors]
+        if not unknown:
+            break
+        print(f"not a floor in {matches[0]}: {unknown}. Try again.")
+
+# filter -> same selection on all 4 tables
+def pick(df):
+    df = df[df['Property'].isin(matches)]
+    if selected_floors:
+        df = df[df['Floor'].isin(selected_floors)]
+    return df
+
+floor_summary = pick(floor_summary)
+exit_detail = pick(exit_detail)
+room_detail = pick(room_detail)
+warnings_df = pick(warnings_df)
+
+# file name -> blank = campus file, a selection gets its own file
+output_name = "exiting_capacity_results.xlsx"
+if terms:
+    tag = '_'.join(terms)
+    if selected_floors:
+        tag += '_floor_' + '-'.join(selected_floors)
+    tag = ''.join(c if c.isalnum() or c in '_-' else '-' for c in tag)
+    output_name = f"exiting_capacity_results_{tag}.xlsx"
+
 # writing the result workbook -> one sheet per table
-output_path = os.path.join(OUTPUT_DIR, "exiting_capacity_results.xlsx")
+output_path = os.path.join(OUTPUT_DIR, output_name)
+status_fills = {'REVIEW': PatternFill('solid', fgColor='F8CBAD'),
+                'WITHIN CAPACITY - review before acting': PatternFill('solid', fgColor='C6EFCE'),
+                'NOT SURVEYED - no exit data': PatternFill('solid', fgColor='E7E6E6')}
 
 try:
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -375,7 +444,36 @@ try:
         exit_detail.to_excel(writer, sheet_name='exit_detail', index=False)
         room_detail.to_excel(writer, sheet_name='room_detail', index=False)
         warnings_df.to_excel(writer, sheet_name='warnings', index=False)
+
+        # formatting -> bold frozen header, filters, column widths
+        for ws in writer.sheets.values():
+            ws.freeze_panes = 'A2'
+            ws.auto_filter.ref = ws.dimensions
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+            for col_cells in ws.columns:
+                width = max(len(str(c.value)) for c in col_cells if c.value is not None)
+                ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(width + 2, 50)
+
+        # status colours -> whole row on floor_summary
+        ws = writer.sheets['floor_summary']
+        status_idx = summary_cols.index('status')
+        for row in ws.iter_rows(min_row=2):
+            fill = status_fills.get(row[status_idx].value)
+            if fill:
+                for cell in row:
+                    cell.fill = fill
 except PermissionError:
     raise SystemExit(f"can't write {output_path} - it's probably open in Excel. close it and run again")
 
+# terminal summary
+print(f"\n--- summary ---")
+print(f"zones: {len(floor_summary)}")
+for status, n in floor_summary['status'].value_counts().items():
+    print(f"  {status}: {n}")
+for _, z in floor_summary[floor_summary['status'] == 'REVIEW'].iterrows():
+    print(f"  REVIEW {z['floor_key']} {z['zone_wing']}: {z['flags']}")
+print(f"warnings: {len(warnings_df)}")
 print(f"written: {output_path}")
+
+input("\nDone. Press Enter to close...")
