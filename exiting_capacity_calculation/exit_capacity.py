@@ -13,7 +13,8 @@ OUTPUT_DIR = BASE_DIR
 ROOM_TYPE_COL = "Room type (per code m^2 used in capacity)"
 COUNT_COL = "Capacity (Occupants)"
 AREA_COL = "Net Space (sq m)"
-LOAD_BASIS = 'counted'  # 'counted' = site counts (Capacity (Occupants)), 'area' = BCBC area-based load
+LOAD_BASIS = 'counted'  # 'counted' = site count, blank count falls back to per code; 'area' = per code for every room
+ROOM_SCOPE = ['1.1', '1.2', '2.1', '2.2', '3.1']  # sub-category codes in the check, [] = all rooms
 
 # file recognition
 SPACE_REPORT_HEADERS =  {'property', 'floor', 'space'}
@@ -243,26 +244,45 @@ print(f"pseudo-zones dropped: {pseudo.sum()}")
 print(f"zones: {len(zones)}")
 print(f"zone load total: {zones['occupant_load'].sum()}")
 
-# counted capacity per zone -> site counts carried next t the area based load
-rooms[COUNT_COL] = pd.to_numeric(rooms[COUNT_COL], errors='coerce').fillna(0).astype(int)
-rooms['counted'] = rooms[COUNT_COL] > 0
-counted = rooms.groupby(zone_keys, as_index=False).agg(counted_capacity=(COUNT_COL, 'sum'), rooms_counted=('counted', 'sum'))
+# room scope -> only the sub-categories in ROOM_SCOPE count toward the load
+rooms['sub_code'] = rooms['Space Sub-Category'].astype(str).str.split(' - ').str[0].str.strip()
+if ROOM_SCOPE:
+    rooms['in_scope'] = rooms['sub_code'].isin(ROOM_SCOPE)
+else:
+    rooms['in_scope'] = True
 
-zones = zones.merge(counted, on=zone_keys, how='left')
-for col in ['counted_capacity', 'rooms_counted']:
-    zones[col] = zones[col].fillna(0).astype(int)
-
-print(f"rooms counted: {rooms['counted'].sum()}, counted capacity total: {rooms[COUNT_COL].sum()}")
-print(f"zone counted total: {zones['counted_capacity'].sum()}, zones with counts: {(zones['rooms_counted'] > 0).sum()}")
-
-# load used for the check -> counted or area based, set in the config block
+# load used per room -> count if filled in (0 stays 0), blank = not seen yet so use per code
+rooms[COUNT_COL] = pd.to_numeric(rooms[COUNT_COL], errors='coerce')
 if LOAD_BASIS == 'counted':
-    zones['load_used'] = zones['counted_capacity']
+    rooms['load_used'] = rooms[COUNT_COL].fillna(rooms['occupant_load'])
+    rooms['load_source'] = np.where(rooms[COUNT_COL].notna(), 'counted', 'per code')
 elif LOAD_BASIS == 'area':
-    zones['load_used'] = zones['occupant_load']
+    rooms['load_used'] = rooms['occupant_load']
+    rooms['load_source'] = 'per code'
 else:
     raise ValueError(f"LOAD_BASIS is '{LOAD_BASIS}', must be 'counted' or 'area'")
-print(f"load basis: {LOAD_BASIS}")
+
+rooms.loc[~rooms['in_scope'], 'load_used'] = 0
+rooms.loc[~rooms['in_scope'], 'load_source'] = 'out of scope'
+rooms['load_used'] = rooms['load_used'].astype(int)
+rooms['counted'] = rooms['in_scope'] & rooms[COUNT_COL].notna()
+rooms['count_in_scope'] = rooms[COUNT_COL].where(rooms['in_scope'])
+
+print(f"load basis: {LOAD_BASIS}, scope: {ROOM_SCOPE if ROOM_SCOPE else 'all rooms'}")
+print(f"rooms in scope: {rooms['in_scope'].sum()}, counted: {rooms['counted'].sum()}, "
+      f"per code: {(rooms['load_source'] == 'per code').sum()}")
+
+# per zone -> load used, counted capacity, rooms counted
+per_zone = rooms.groupby(zone_keys, as_index=False).agg(load_used=('load_used', 'sum'),
+                                                        counted_capacity=('count_in_scope', 'sum'),
+                                                        rooms_in_scope=('in_scope', 'sum'),
+                                                        rooms_counted=('counted', 'sum'))
+
+zones = zones.merge(per_zone, on=zone_keys, how='left')
+for col in ['load_used', 'counted_capacity', 'rooms_in_scope', 'rooms_counted']:
+    zones[col] = zones[col].fillna(0).astype(int)
+
+print(f"zone load used total: {zones['load_used'].sum()}")
 
 # exit capacity per zone -> applying the 50% rule on BCBC 3.4.3.2 (7)
 cap = exits.groupby(zone_keys, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')
@@ -333,8 +353,8 @@ for _, z in zones.iterrows():
         flags.append("exit type or width unknown")
     if z['link_sends'] and z['link_inflow'] > 0:
         flags.append("wing sends and receives link traffic")
-    if LOAD_BASIS == 'counted' and z['rooms_counted'] == 0:
-        flags.append("no rooms counted yet - load is 0")
+    if z['total_load'] == 0:
+        flags.append("load is 0 - no rooms in scope, or all counted as 0")
 
     if z['exit_count'] == 0:
         status = 'NOT SURVEYED - no exit data'
@@ -360,14 +380,14 @@ floor_summary = floor_summary.rename(columns={'occupant_load': 'area_based_load'
 
 # total_load (load_used + link inflow) is the number checked against exit_capacity
 summary_cols = ['Property', 'Floor', 'zone_wing', 'status', 'flags',
-                'total_load', 'exit_capacity', 'load_basis', 'counted_capacity', 'rooms_counted',
-                'area_based_load', 'link_inflow', 'exit_count', 'floor_key']
+                'total_load', 'exit_capacity', 'load_basis', 'rooms_in_scope', 'rooms_counted',
+                'counted_capacity', 'area_based_load', 'link_inflow', 'exit_count', 'floor_key']
 exit_detail_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'persons',
                     'width_check', 'mm_per_person', 'minimum_mm', 'minimum_mm_low_rise',
                     'into_wing', 'measured_date', 'source_file', 'floor_key']
 room_detail_cols = ['Property', 'Floor', 'Space', 'room_wing', 'zone_wing', 'Space Sub-Category',
                     'room_type', 'room_type_source', AREA_COL, 'area_per_person_m2', 'occupant_load',
-                    COUNT_COL, 'source_file', 'floor_key']
+                    COUNT_COL, 'in_scope', 'load_used', 'load_source', 'source_file', 'floor_key']
 
 floor_summary = floor_summary[summary_cols]
 exit_detail = exits[exit_detail_cols]
