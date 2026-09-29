@@ -272,8 +272,6 @@ cap['exit_capacity'] = np.minimum(cap['total_persons'], 2 * cap['others'])
 zones = zones.merge(cap[zone_keys + ['exit_capacity']], on=zone_keys, how='left')
 zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
-print(zones[zones['exit_count'] > 0])
-
 # link flow -> a door into another wing sends people to that wing BCBC 3.4.3.1(2)
 links = exits.loc[exits['into_wing'] != '', zone_keys + ['exit_id', 'into_wing', 'persons']]
 links = links.merge(zones[zone_keys + ['load_used', 'exit_count']], on=zone_keys, how='left')
@@ -303,7 +301,6 @@ for _, row in links.iterrows():
                              'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' has no zone - {row['people_sent']} people not added"})
 
 print(f"link doors: {len(links)}, people sent: {links['people_sent'].sum()}")
-print(f"warnings total: {len(warning_rows)}")
 
 # width problems per  zone -> true if any exit in the zone has one
 exits['width_fail'] = exits['width_check'].str.startswith('fail')
@@ -353,8 +350,6 @@ for _, z in zones.iterrows():
 zones['status'] = statuses
 zones['flags'] = flag_texts
 
-print(zones['status'].value_counts())
-
 # output tables -> pick and order the columns for each sheet
 status_order = {'REVIEW': 0, 'WITHIN CAPACITY - review before acting': 1, 'NOT SURVEYED - no exit data': 2}
 floor_summary = zones.copy()
@@ -378,10 +373,6 @@ floor_summary = floor_summary[summary_cols]
 exit_detail = exits[exit_detail_cols]
 room_detail = rooms[room_detail_cols]
 warnings_df = pd.DataFrame(warning_rows, columns=['type', 'Property', 'Floor', 'detail'])
-
-print(f"floor_summary: {floor_summary.shape}, exit_detail: {exit_detail.shape}, "
-      f"room_detail: {room_detail.shape}, warnings: {warnings_df.shape}")
-print(floor_summary[['floor_key', 'zone_wing', 'status']].head(4))
 
 # pick buildings for the output -> calculation already ran on the whole campus
 available = sorted(floor_summary['Property'].unique())
