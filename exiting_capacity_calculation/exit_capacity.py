@@ -280,3 +280,51 @@ for _, row in links.iterrows():
 
 print(f"link doors: {len(links)}, people sent: {links['people_sent'].sum()}")
 print(f"warnings total: {len(warning_rows)}")
+
+# width problems per  zone -> true if any exit in the zone has one
+exits['width_fail'] = exits['width_check'].str.startswith('fail')
+exits['width_review'] = exits['width_check'].str.startswith('review')
+exits['width_unknown'] = exits['width_check'] == 'unknown'
+width_flags = exits.groupby(zone_keys, as_index=False)[['width_fail', 'width_review', 'width_unknown']].any()
+
+zones = zones.merge(width_flags, on=zone_keys, how='left')
+for col in ['width_fail', 'width_review', 'width_unknown']:
+    zones[col] = zones[col].eq(True)
+
+# wings that send people through link door
+sending = set(links['floor_key'] + ' | ' + links['zone_wing'])
+zones['link_sends'] = (zones['floor_key'] + ' | ' + zones['zone_wing']).isin(sending)
+
+# status + flags per zone
+statuses = []
+flag_texts = []
+for _, z in zones.iterrows():
+    flags = []
+    if z['exit_count'] < MIN_EXITS:
+        flags.append(f"fewer than {MIN_EXITS} exits")
+    if z['total_load'] > z['exit_capacity']:
+        flags.append("occupant load over exiting capacity")
+    if z['width_fail']:
+        flags.append("exit below minimum width")
+    if z['width_review']:
+        flags.append("stair width depends on storeys served")
+    if z['width_unknown']:
+        flags.append("exit type or width unknown")
+    if z['link_sends'] and z['link_inflow'] > 0:
+        flags.append("wing sends and receives link traffic")
+
+    if z['exit_count'] == 0:
+        status = 'NOT SURVEYED - no exit data'
+        flags = []
+    elif flags:
+        status = 'REVIEW'
+    else:
+        status = 'WITHIN CAPACITY - review before acting'
+
+    statuses.append(status)
+    flag_texts.append('; '.join(flags))
+
+zones['status'] = statuses
+zones['flags'] = flag_texts
+
+print(zones['status'].value_counts())
