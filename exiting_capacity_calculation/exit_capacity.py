@@ -365,3 +365,17 @@ warnings_df = pd.DataFrame(warning_rows, columns=['type', 'Property', 'Floor', '
 print(f"floor_summary: {floor_summary.shape}, exit_detail: {exit_detail.shape}, "
       f"room_detail: {room_detail.shape}, warnings: {warnings_df.shape}")
 print(floor_summary[['floor_key', 'zone_wing', 'status']].head(4))
+
+# writing the result workbook -> one sheet per table
+output_path = os.path.join(OUTPUT_DIR, "exiting_capacity_results.xlsx")
+
+try:
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        floor_summary.to_excel(writer, sheet_name='floor_summary', index=False)
+        exit_detail.to_excel(writer, sheet_name='exit_detail', index=False)
+        room_detail.to_excel(writer, sheet_name='room_detail', index=False)
+        warnings_df.to_excel(writer, sheet_name='warnings', index=False)
+except PermissionError:
+    raise SystemExit(f"can't write {output_path} - it's probably open in Excel. close it and run again")
+
+print(f"written: {output_path}")
