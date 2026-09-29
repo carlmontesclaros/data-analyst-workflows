@@ -340,3 +340,28 @@ for col in ['counted_capacity', 'rooms_counted']:
 
 print(f"rooms counted: {rooms['counted'].sum()}, counted capacity total: {rooms[COUNT_COL].sum()}")
 print(f"zone counted total: {zones['counted_capacity'].sum()}, zones with counts: {(zones['rooms_counted'] > 0).sum()}")
+
+# output tables -> pick and order the columns for each sheet
+status_order = {'REVIEW': 0, 'WITHIN CAPACITY - review before acting': 1, 'NOT SURVEYED - no exit data': 2}
+floor_summary = zones.copy()
+floor_summary['status_order'] = floor_summary['status'].map(status_order)
+floor_summary = floor_summary.sort_values(['status_order', 'Property', 'Floor', 'zone_wing'])
+
+summary_cols = ['Property', 'Floor', 'zone_wing', 'status', 'flags',
+                'occupant_load', 'link_inflow', 'total_load', 'exit_capacity', 'exit_count',
+                'counted_capacity', 'rooms_counted', 'floor_key']
+exit_detail_cols = ['Property', 'Floor', 'wing', 'exit_id', 'exit_type', 'clear_width_cm', 'persons',
+                    'width_check', 'mm_per_person', 'minimum_mm', 'minimum_mm_low_rise',
+                    'into_wing', 'measured_date', 'source_file', 'floor_key']
+room_detail_cols = ['Property', 'Floor', 'Space', 'room_wing', 'zone_wing', 'Space Sub-Category',
+                    'room_type', 'room_type_source', AREA_COL, 'area_per_person_m2', 'occupant_load',
+                    COUNT_COL, 'source_file', 'floor_key']
+
+floor_summary = floor_summary[summary_cols]
+exit_detail = exits[exit_detail_cols]
+room_detail = rooms[room_detail_cols]
+warnings_df = pd.DataFrame(warning_rows, columns=['type', 'Property', 'Floor', 'detail'])
+
+print(f"floor_summary: {floor_summary.shape}, exit_detail: {exit_detail.shape}, "
+      f"room_detail: {room_detail.shape}, warnings: {warnings_df.shape}")
+print(floor_summary[['floor_key', 'zone_wing', 'status']].head(4))
