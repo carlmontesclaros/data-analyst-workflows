@@ -4,7 +4,7 @@ import glob
 import numpy as np
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
-from exit_calc import occupant_load
+from exit_calc import occupant_load, exit_persons, capacity_50_rule, people_sent
 
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -175,8 +175,7 @@ exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce'
 
 # person per exit = width in mm / mm per person, rounded down
 exits['mm_per_person'] = exits['exit_type'].map(width_df['mm_per_person'])
-raw_persons = exits['clear_width_cm'] * 10 / exits['mm_per_person']
-exits['persons'] = np.floor(raw_persons.round(6)).fillna(0).astype(int)
+exits['persons'] = exit_persons(exits['clear_width_cm'], exits['mm_per_person']).fillna(0).astype(int)
 
 # min width check (table 3.4.3.2 via BCBC 2024)
 exits['width_mm'] = exits['clear_width_cm'] * 10
@@ -284,8 +283,7 @@ print(f"zone load used total: {zones['load_used'].sum()}")
 
 # exit capacity per zone -> applying the 50% rule on BCBC 3.4.3.2 (7)
 cap = exits.groupby(zone_keys, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')
-cap['others'] = cap['total_persons'] - cap['largest_exit']
-cap['exit_capacity'] = np.minimum(cap['total_persons'], 2 * cap['others'])
+cap['exit_capacity'] = capacity_50_rule(cap['total_persons'], cap['largest_exit'])
 
 zones = zones.merge(cap[zone_keys + ['exit_capacity']], on=zone_keys, how='left')
 zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
@@ -294,14 +292,7 @@ zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 links = exits.loc[exits['into_wing'] != '', zone_keys + ['exit_id', 'into_wing', 'persons']]
 links = links.merge(zones[zone_keys + ['load_used', 'exit_count']], on=zone_keys, how='left')
 
-if LINK_METHOD == 'even_split':
-    share = np.ceil((links['load_used'] / links['exit_count']).round(6))
-elif LINK_METHOD == 'half_load':
-    share = np.ceil((links['load_used'] / 2).round(6))
-else:
-    raise ValueError(f"settings.csv: link_share_method '{LINK_METHOD}' must be even_split or half_load")
-
-links['people_sent'] = np.minimum(share, links['persons']).astype(int)
+links['people_sent'] = people_sent(links['load_used'], links['exit_count'], links['persons'], LINK_METHOD).astype(int)
 
 # add people sent to the receiving wing
 inflow = links.groupby(['floor_key', 'into_wing'], as_index=False)['people_sent'].sum()
