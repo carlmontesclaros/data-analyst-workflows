@@ -17,6 +17,12 @@ AREA_COL = "Net Space (sq m)"
 LOAD_BASIS = 'counted'  # 'counted' = site count, blank count falls back to per code; 'area' = per code for every room
 ROOM_EXCLUDE = ['14.3', '16']  # sub-category codes left out of the load (16 = all 16.x non-assignable), [] = all rooms
 OPEN_STAIRS_COUNT = False  # BCBC 3.4.4.1.(1) exits must be fire separated -> open stairs don't count until confirmed
+VERBOSE = True  # True = print the step checkpoints, False = only files read + summary
+
+# checkpoint prints -> only shown when VERBOSE is on
+def checkpoint(msg):
+    if VERBOSE:
+        print(msg)
 
 # file recognition
 SPACE_REPORT_HEADERS =  {'property', 'floor', 'space'}
@@ -126,7 +132,7 @@ files_per_room = rooms.groupby(room_keys)['source_file'].nunique()
 if (files_per_room > 1).any():
     raise SystemExit(f"the same rooms are in more than one space report: {sorted(rooms['source_file'].unique())}\n"
                      f"keep only one space report in input/ and run again")
-print(f"rooms: {rooms.shape}")
+checkpoint(f"rooms: {rooms.shape}")
 
 # room type override
 override = rooms[ROOM_TYPE_COL].astype(str).str.strip().str.lower() # lower cases everything, makes everything text
@@ -165,7 +171,7 @@ else: # still get an empty row with the correct columns
 # keep rows with something recorded
 has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().any(axis=1)
 exits = all_exits[has_data].copy()
-print(f"exits recorded: {len(exits)}")
+checkpoint(f"exits recorded: {len(exits)}")
 
 # clean exit columns
 exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
@@ -194,7 +200,7 @@ if not OPEN_STAIRS_COUNT:
     exits.loc[open_stair, 'counts_as_exit'] = False
     exits.loc[open_stair, 'persons'] = 0
     exits.loc[open_stair, 'width_check'] = 'not an exit - open stair'
-    print(f"open stairs not counted: {open_stair.sum()}")
+    checkpoint(f"open stairs not counted: {open_stair.sum()}")
 
 # exit warnings -> exits with unknown type of missing width (counting it as 0 people)
 bad_type = exits[exits['mm_per_person'].isna()]
@@ -207,7 +213,7 @@ for _, row in no_width.iterrows():
     warning_rows.append({'type': 'missing_width', 'Property': row['Property'], 'Floor': row['Floor'],
                          'detail': f"{row['exit_id']}: no clear_width_cm - counted as 0 people"})
 
-print(f"warnings total: {len(warning_rows)}")
+checkpoint(f"warnings total: {len(warning_rows)}")
 
 # room wing -> leading letter of Space column
 rooms['room_wing'] = rooms['Space'].astype(str).str.strip().str.extract(r'^([A-Za-z]+)')[0].fillna('').str.upper()
@@ -240,7 +246,7 @@ zones['exit_count'] = zones['exit_count'].fillna(0).astype(int)
 pseudo = zones['floor_key'].isin(split_floors) & (zones['occupant_load'] == 0) & (zones['exit_count'] == 0)
 zones = zones[~pseudo].copy()
 
-print(f"zones: {len(zones)}")
+checkpoint(f"zones: {len(zones)}")
 
 # room scope -> every room counts except the sub-categories in ROOM_EXCLUDE (a code also covers its children, 16 -> 16.2.1)
 rooms['sub_code'] = rooms['Space Sub-Category'].astype(str).str.split(' - ').str[0].str.strip()
@@ -265,8 +271,8 @@ rooms['load_used'] = rooms['load_used'].astype(int)
 rooms['counted'] = rooms['in_scope'] & rooms[COUNT_COL].notna()
 rooms['count_in_scope'] = rooms[COUNT_COL].where(rooms['in_scope'])
 
-print(f"load basis: {LOAD_BASIS}, excluded sub-categories: {ROOM_EXCLUDE}")
-print(f"rooms in scope: {rooms['in_scope'].sum()}, counted: {rooms['counted'].sum()}, "
+checkpoint(f"load basis: {LOAD_BASIS}, excluded sub-categories: {ROOM_EXCLUDE}")
+checkpoint(f"rooms in scope: {rooms['in_scope'].sum()}, counted: {rooms['counted'].sum()}, "
       f"per code: {(rooms['load_source'] == 'per code').sum()}")
 
 # per zone -> load used, counted capacity, rooms counted
@@ -279,7 +285,7 @@ zones = zones.merge(per_zone, on=zone_keys, how='left')
 for col in ['load_used', 'counted_capacity', 'rooms_in_scope', 'rooms_counted']:
     zones[col] = zones[col].fillna(0).astype(int)
 
-print(f"zone load used total: {zones['load_used'].sum()}")
+checkpoint(f"zone load used total: {zones['load_used'].sum()}")
 
 # exit capacity per zone -> applying the 50% rule on BCBC 3.4.3.2 (7)
 cap = exits.groupby(zone_keys, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')

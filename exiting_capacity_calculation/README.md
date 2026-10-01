@@ -45,6 +45,7 @@ The script finds its own `input/` and `config/` folders wherever it is run from,
 | `LOAD_BASIS` | `'counted'` | `'counted'` = use the site count; a blank count falls back to per code. `'area'` = per code for every room |
 | `ROOM_EXCLUDE` | `['14.3', '16']` | Sub-category codes left out of the load. A code covers its children (`16` → `16.2.1`). `[]` = all rooms |
 | `OPEN_STAIRS_COUNT` | `False` | `False` = open stairs are not exits (see method step 6). `True` = they count |
+| `VERBOSE` | `True` | `True` = print a checkpoint line after each step (row counts, zones, load). `False` = only the files read and the final summary |
 
 ---
 
