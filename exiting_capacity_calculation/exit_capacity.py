@@ -4,6 +4,7 @@ import glob
 import numpy as np
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
+from exit_calc import occupant_load
 
 #configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -131,12 +132,8 @@ print(f"rooms: {rooms.shape}")
 override = rooms[ROOM_TYPE_COL].astype(str).str.strip().str.lower() # lower cases everything, makes everything text
 override = override.where(rooms[ROOM_TYPE_COL].notna() & (override != '')) # keeps a value where condition is true puts NaN whens its false
 
-print(f"overrides: {override.notna().sum()}")
-
 # default room type from category map
 default = rooms['Space Sub-Category'].map(category_map) # takes each room's sub-category,from category_map.csv. Rooms with no sub-category get NaN
-
-print(f"rooms with a category default: {default.notna().sum()}")
 
 # final room type -> override wins, else category default
 rooms['room_type'] = override.fillna(default) # keeps override if it exists, else default
@@ -152,25 +149,18 @@ for _, row in no_type.iterrows():
     warning_rows.append({'type': 'no_room_type', 'Property': row['Property'], 'Floor': row['Floor'],
                          'detail': f"{row['Space']}: {row['Net Space (sq m)']} m2, no sub-category or override - counted as 0 people"})
 
-print(f"warnings - no room type: {len(no_type)}")
-
 # room occupant load = area / m^2 per person, rounded up
 if ROUNDING != 'up':
     raise ValueError(f"settings.csv: occupant_load_rounding is '{ROUNDING}', only 'up' is supported")
 
 rooms['area_per_person_m2'] = rooms['room_type'].map(area_factor)
-raw_load = rooms[AREA_COL] / rooms['area_per_person_m2']
-rooms['occupant_load'] = np.ceil(raw_load.round(6)).fillna(0).astype(int)
-
-print(f"rooms with people: {(rooms['occupant_load'] > 0).sum()}")
-print(f"total occupant load: {rooms['occupant_load'].sum()}")
+rooms['occupant_load'] = occupant_load(rooms[AREA_COL], rooms['area_per_person_m2']).fillna(0).astype(int)
 
 # combine exits
 if exit_frames:
     all_exits = pd.concat(exit_frames, ignore_index=True)
 else: # still get an empty row with the correct columns
     all_exits = pd.DataFrame(columns=exit_cols + ['source_file'])
-print(f"exit rows read: {len(all_exits)}")
 
 # keep rows with something recorded
 has_data = all_exits[['exit_id', 'exit_type', 'clear_width_cm']].notna().any(axis=1)
@@ -218,14 +208,10 @@ for _, row in no_width.iterrows():
     warning_rows.append({'type': 'missing_width', 'Property': row['Property'], 'Floor': row['Floor'],
                          'detail': f"{row['exit_id']}: no clear_width_cm - counted as 0 people"})
 
-print(f"warnings - unknown exit type: {len(bad_type)}")
-print(f"warnings - missing width: {len(no_width)}")
 print(f"warnings total: {len(warning_rows)}")
 
 # room wing -> leading letter of Space column
 rooms['room_wing'] = rooms['Space'].astype(str).str.strip().str.extract(r'^([A-Za-z]+)')[0].fillna('').str.upper()
-
-print(f"rooms with a wing letter: {(rooms['room_wing'] != '').sum()}")
 
 # floor key -> one text id per floor, same in rooms and exits
 rooms['floor_key'] = rooms['Property'] + ' | ' + rooms['Floor']
@@ -233,7 +219,6 @@ exits['floor_key'] = exits['Property'] + ' | ' + exits['Floor']
 
 # split floors -> any exit on the floor has a wing
 split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
-print(f"split floors: {len(split_floors)} {sorted(split_floors)}")
 
 # zone wing - > room's wing letter on split floors
 rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors), '')
@@ -256,9 +241,7 @@ zones['exit_count'] = zones['exit_count'].fillna(0).astype(int)
 pseudo = zones['floor_key'].isin(split_floors) & (zones['occupant_load'] == 0) & (zones['exit_count'] == 0)
 zones = zones[~pseudo].copy()
 
-print(f"pseudo-zones dropped: {pseudo.sum()}")
 print(f"zones: {len(zones)}")
-print(f"zone load total: {zones['occupant_load'].sum()}")
 
 # room scope -> every room counts except the sub-categories in ROOM_EXCLUDE (a code also covers its children, 16 -> 16.2.1)
 rooms['sub_code'] = rooms['Space Sub-Category'].astype(str).str.split(' - ').str[0].str.strip()
@@ -334,8 +317,6 @@ for _, row in links.iterrows():
     if f"{row['floor_key']} | {row['into_wing']}" not in zone_ids:
         warning_rows.append({'type': 'link_to_missing_wing', 'Property': row['Property'], 'Floor': row['Floor'],
                              'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' has no zone - {row['people_sent']} people not added"})
-
-print(f"link doors: {len(links)}, people sent: {links['people_sent'].sum()}")
 
 # width problems per  zone -> true if any exit in the zone has one
 exits['width_fail'] = exits['width_check'].str.startswith('fail')

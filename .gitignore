@@ -23,6 +23,7 @@ floor_exits.xlsx
 ARCHITECTURE_PLAN.md
 exiting_capacity_results*.xlsx
 bcbc_2018dbp3s34.pdf
+.pytest_cache/
 
 # Co-op coursework (personal info)
 coop/

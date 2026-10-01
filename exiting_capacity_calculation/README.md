@@ -172,7 +172,7 @@ Change numbers and rulings here, not in the code. Room type names must be spelle
 | Wings are calculated separately even when connected; connections are recorded with `into_wing` | Supervisor | 2026-09-24 |
 | People sent through a link door = even split across the sending wing's exits (`link_share_method = even_split`) | Supervisor | 2026-09-24 |
 | A floor splits into wings only if one of its exits has a wing | Carl | 2026-09-28 |
-| Occupant load = site count; blank count = per code; 0 stays 0 (`LOAD_BASIS`) | Carl, supervisor ruling pending | 2026-09-29 |
+| Occupant load = site count; blank count = per code; 0 stays 0 (`LOAD_BASIS`) | Carl | 2026-10-01 |
 | All rooms count except lounges (14.3) and non-assignable (16.x) (`ROOM_EXCLUDE`) | Carl | 2026-09-29 |
 | Open stairs are not exits until confirmed (`OPEN_STAIRS_COUNT`) | BCBC 3.4.4.1.(1), ruling pending | 2026-09-29 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |
@@ -182,12 +182,11 @@ Change numbers and rulings here, not in the code. Room type names must be spelle
 ## Open questions
 
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Decides `OPEN_STAIRS_COUNT`.
-- **Occupant load basis:** site count or area based? The script uses the count, with per code for rooms not counted.
 - **27 sub-category mappings** are marked `needs_review` in `category_map.csv`.
 - **Horizontal exits:** if a link door is in a fire-rated wall, the code's horizontal exit rules may apply. Not yet checked.
 - **Ramps:** mm per person for ramps (3.4.3.2.(1)) not confirmed yet, so ramps count as 0.
 - **Code text:** the clauses were checked against BCBC 2018 Section 3.4. Confirm them in the 2024 text before quoting.
-- **Turpin floors 2 and 3:** A-wing exits are not measured yet, so A shows as not surveyed.
+- **Turpin floors 2 and 3:** A and B are not connected on these floors (only on floor 1, through B101A → A101A). A-wing exits are not measured yet, so A shows as not surveyed.
 - **Turpin floor 3 B:** hand count about 149 vs the script's 161. The difference is probably the 16 offices not counted yet (per code).
 
 ## Out of scope
