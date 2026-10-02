@@ -154,3 +154,45 @@ def classify_rooms(df):
     df['visited'] = site.astype(int)
     df['fmis_capacity'] = count.where(~visited_area & (count > 0)).astype('Int64')
     return df
+
+# space report col -> rooms table col
+ROOM_COLUMN_NAMES = {
+'Property': 'property',
+    'Floor': 'floor',
+    'Space': 'space',
+    'Building Number': 'building_number',
+    'Net Space (sq m)': 'area_m2',
+    'Space Category': 'space_category',
+    'Space Sub-Category': 'sub_category',
+    'Room type (per code m^2 used in capacity)': 'room_type_override',
+    'Note': 'note',
+}
+
+def insert_rooms(conn, df, report_name):
+    rooms = df.rename(columns=ROOM_COLUMN_NAMES)
+    rooms = rooms.drop(columns=['Capacity (Occupants)'])
+
+    # building number 237.0 -> 237 and blank stays blank
+    has_number = rooms['building_number'].notna()
+    rooms.loc[has_number, 'building_number'] = (rooms.loc[has_number, 'building_number']
+                                                .astype(str).str.removesuffix('.0'))
+
+    # Office and office are the same room type
+    rooms['room_type_override'] = rooms['room_type_override'].str.strip().str.lower()
+
+    rooms['in_latest_report'] = 1
+    rooms['last_report'] = report_name
+    rooms.to_sql('rooms', conn, if_exists='append', index=False)
+    return len(rooms)
+
+# code factors: csv file -> table of the same name
+CODE_FACTOR_TABLES = ['area_factors', 'width_factors', 'category_map', 'settings']
+
+def import_code_factors(conn, config_dir):
+    counts = {}
+    for table in CODE_FACTOR_TABLES:
+        csv_path = os.path.join(config_dir, f'{table}.csv')
+        df = pd.read_csv(csv_path)
+        df.to_sql(table, conn, if_exists='append', index=False)
+        counts[table] = len(df)
+    return counts
