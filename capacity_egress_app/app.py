@@ -1,6 +1,7 @@
 import os
 import sys
 import getpass
+import sqlite3
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
@@ -18,6 +19,7 @@ PHOTOS_DIR_WINDOWS = (r"S:\_Buildings and Properties\BP065 - Capital Projects\Pr
 PHOTOS_DIR_DEV = os.path.join(BASE_DIR, "..", "facility_folder_automation", "buildings")
 PHOTOS_DIR = PHOTOS_DIR_WINDOWS if sys.platform == 'win32' else PHOTOS_DIR_DEV
 BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py sanitize()
+POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
 
 STATUS_TAGS = {egress.STATUS_REVIEW: 'review', egress.STATUS_WITHIN: 'within', egress.STATUS_NOT_SURVEYED: 'not_surveyed'}
@@ -26,6 +28,9 @@ def sanitize(name):
     for c in BAD_CHARS:
         name = name.replace(c, '-')
     return name.strip()
+
+def text_or_blank(v):
+    return '' if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
 
 def open_path(path):
     if sys.platform == 'win32':
@@ -46,16 +51,54 @@ class App:
         root.geometry("1400x820")
         self.build_widgets()
         self.reload()
+        self.root.after(POLL_MS, self.poll)
 
     # data -> whole campus once, then only the floor that changed
     def reload(self):
-        self.rooms = db.load_rooms(self.conn)
-        self.exits = db.load_exits(self.conn)
-        self.factors = db.load_code_factors(self.conn)
-        self.result = egress.calculate(self.rooms, self.exits, self.factors)
-        self.properties = sorted(self.rooms['property'].unique())
-        self.building_box['values'] = self.properties
-        self.show()
+        self.root.config(cursor='watch')
+        self.root.update_idletasks()
+        try:
+            self.rooms = db.load_rooms(self.conn)
+            self.exits = db.load_exits(self.conn)
+            self.factors = db.load_code_factors(self.conn)
+            self.result = egress.calculate(self.rooms, self.exits, self.factors)
+            self.seen_version = db.data_version(self.conn)
+            self.properties = sorted(self.rooms['property'].unique())
+            self.building_box['values'] = self.properties
+            self.show()
+        finally:
+            self.root.config(cursor='')
+
+    # other people's saves -> reload when the database changed since this app last looked
+    def refresh_if_changed(self):
+        if db.data_version(self.conn) != self.seen_version:
+            self.reload()
+            self.status_var.set("Updated with changes someone else saved")
+            return True
+        return False
+
+    def poll(self):
+        try:
+            if self.root.grab_current() is None:      # not while a dialog is open
+                self.refresh_if_changed()
+        except sqlite3.Error:
+            pass                                      # drive busy or offline -> try again next time
+        self.root.after(POLL_MS, self.poll)
+
+    def manual_refresh(self):
+        self.reload()
+        self.status_var.set(f"Refreshed at {pd.Timestamp.now():%H:%M:%S}")
+
+    # one place for every failed save
+    def save_failed(self, err, parent=None):
+        if isinstance(err, db.StaleDataError):
+            messagebox.showwarning("Changed by someone else", str(err), parent=parent)
+            self.reload()
+        elif isinstance(err, sqlite3.Error):
+            messagebox.showerror("Not saved", "The database is busy or the S: drive can't be reached. "
+                                 f"Nothing was saved; try again in a moment.\n\n({err})", parent=parent)
+        else:
+            messagebox.showerror("Not saved", str(err), parent=parent)
 
     def floor_result(self, prop, floor, rooms=None):
         return egress.calculate_floor(self.rooms if rooms is None else rooms, self.exits, self.factors, prop, floor)
@@ -83,7 +126,8 @@ class App:
 
         menu = ttk.Frame(self.root, padding=(6, 0))
         menu.pack(fill='x')
-        for text, cmd in [("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
+        for text, cmd in [("Refresh", self.manual_refresh),
+                          ("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
                           ("Export results workbook", self.export_results), ("Export capacity file", self.export_capacity),
                           ("Change my name", self.change_name)]:
             ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=2)
@@ -189,6 +233,16 @@ class App:
         return rooms
 
     def show(self):
+        keep = {tree: tree.selection() for tree in (self.room_tree, self.exit_tree)}
+        self.fill_lists()
+        # same room / exit still selected after a refresh
+        for tree, sel in keep.items():
+            still = [i for i in sel if tree.exists(i)]
+            if still:
+                tree.selection_set(still)
+                tree.see(still[0])
+
+    def fill_lists(self):
         rooms = self.selected_rooms()
         keys = set(zip(rooms['property'], rooms['floor']))
         zones = self.result['zones']
@@ -211,9 +265,9 @@ class App:
             if pd.notna(r['fmis_capacity']) and pd.notna(r['capacity']) and int(r['fmis_capacity']) != int(r['capacity']):
                 flag.append(f"FMIS says {int(r['fmis_capacity'])}")
             cap = '' if pd.isna(r['capacity']) else int(r['capacity'])
-            values = [r['property'], r['floor'], r['space'], r['sub_category'] or '', r['area_m2'], r['room_type'] or '',
+            values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
-                      '; '.join(flag), r['note'] or '']
+                      '; '.join(flag), text_or_blank(r['note'])]
             self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
                                   tags=('missing',) if r['in_latest_report'] == 0 else ())
 
@@ -222,7 +276,7 @@ class App:
             width = '' if pd.isna(e['clear_width_cm']) else int(e['clear_width_cm'])
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, e['persons'],
                       'yes' if e['counts_as_exit'] else 'no', e['width_check'], e['into_wing'],
-                      e['measured_date'] or '', e['measured_by'] or '', e['notes'] or '']
+                      text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values)
 
         shown = f"{len(rooms)} rooms" + (" (first 3000 shown)" if len(rooms) > 3000 else '')
@@ -243,14 +297,24 @@ class App:
             messagebox.showinfo("Pick a room", "Select a room in the Rooms list first.")
             return None
         rid = int(sel[0][1:])
-        return self.result['rooms'].set_index('room_id').loc[rid].to_dict() | {'room_id': rid}
+        self.refresh_if_changed()                     # start from the latest values
+        rooms = self.result['rooms'].set_index('room_id')
+        if rid not in rooms.index:
+            messagebox.showinfo("Room not found", "That room is no longer in the database.")
+            return None
+        return rooms.loc[rid].to_dict() | {'room_id': rid}
 
     def current_exit_pk(self):
         sel = self.exit_tree.selection()
         if not sel:
             messagebox.showinfo("Pick an exit", "Select an exit in the Exits list first.")
             return None
-        return int(sel[0][1:])
+        pk = int(sel[0][1:])
+        self.refresh_if_changed()
+        if pk not in set(self.exits['exit_pk']):
+            messagebox.showinfo("Exit not found", "Someone else deleted that exit. The list has been refreshed.")
+            return None
+        return pk
 
     def after_change(self, message):
         self.reload()
@@ -336,9 +400,14 @@ class App:
                 return
             try:
                 db.change_capacity(self.conn, room['room_id'], new, source_var.get(),
-                                   self.user_login, self.user_name, why_var.get())
-            except ValueError as err:
-                messagebox.showerror("Not saved", str(err), parent=win)
+                                   self.user_login, self.user_name, why_var.get(),
+                                   expected=(room['capacity'], room['capacity_source']))
+            except (ValueError, sqlite3.Error) as err:
+                if isinstance(err, db.StaleDataError):
+                    win.destroy()
+                    self.save_failed(err)
+                else:
+                    self.save_failed(err, parent=win)
                 return
             win.destroy()
             self.after_change(f"saved: {room['property']} {room['space']} capacity {current or '-'} -> {new}")
@@ -374,18 +443,29 @@ class App:
         room = self.current_room()
         if room is None:
             return
-        note = self.ask_text(f"Note - {room['property']} {room['space']}", room['note'] or '')
-        if note is not None and db.set_note(self.conn, 'rooms', room['room_id'], note, self.user_login, self.user_name):
-            self.after_change(f"note saved: {room['space']}")
+        note = self.ask_text(f"Note - {room['property']} {room['space']}", text_or_blank(room['note']))
+        if note is None:
+            return
+        try:
+            if db.set_note(self.conn, 'rooms', room['room_id'], note, self.user_login, self.user_name,
+                           expected=room['note']):
+                self.after_change(f"note saved: {room['space']}")
+        except (ValueError, sqlite3.Error) as err:
+            self.save_failed(err)
 
     def exit_note(self):
         pk = self.current_exit_pk()
         if pk is None:
             return
         e = self.exits.set_index('exit_pk').loc[pk]
-        note = self.ask_text(f"Note - {e['exit_id']}", e['notes'] or '')
-        if note is not None and db.set_note(self.conn, 'exits', pk, note, self.user_login, self.user_name):
-            self.after_change(f"note saved: {e['exit_id']}")
+        note = self.ask_text(f"Note - {e['exit_id']}", text_or_blank(e['notes']))
+        if note is None:
+            return
+        try:
+            if db.set_note(self.conn, 'exits', pk, note, self.user_login, self.user_name, expected=e['notes']):
+                self.after_change(f"note saved: {e['exit_id']}")
+        except (ValueError, sqlite3.Error) as err:
+            self.save_failed(err)
 
     def show_history(self, title, df):
         win = tk.Toplevel(self.root)
@@ -457,14 +537,18 @@ class App:
         return result['values']
 
     def save_exit_loop(self, title, values, exit_pk=None):
+        expected = dict(values) if exit_pk is not None else db.NO_CHECK    # the exit as it was when the form opened
         while True:
             entered = self.exit_form(title, values)
             if entered is None:
                 return
             try:
-                db.save_exit(self.conn, entered, self.user_login, self.user_name, exit_pk=exit_pk)
-            except ValueError as err:
-                messagebox.showerror("Exit not saved", str(err))
+                db.save_exit(self.conn, entered, self.user_login, self.user_name, exit_pk=exit_pk, expected=expected)
+            except db.StaleDataError as err:
+                self.save_failed(err)
+                return
+            except (ValueError, sqlite3.Error) as err:
+                self.save_failed(err)
                 values = entered
                 continue
             self.after_change(f"exit saved: {entered['property']} floor {entered['floor']} {entered['exit_id']}")
@@ -496,9 +580,9 @@ class App:
         if why is None:
             return
         try:
-            db.delete_exit(self.conn, pk, self.user_login, self.user_name, why)
-        except ValueError as err:
-            messagebox.showerror("Not deleted", str(err))
+            db.delete_exit(self.conn, pk, self.user_login, self.user_name, why, expected=e.to_dict())
+        except (ValueError, sqlite3.Error) as err:
+            self.save_failed(err)
             return
         self.after_change(f"exit deleted: {e['exit_id']}")
 
@@ -599,10 +683,15 @@ class App:
         def save():
             try:
                 table, key, value, _ = changed_factors()
+                seen = self.factors[table].set_index(db.CODE_FACTOR_KEYS[table]).loc[key, field_var.get()]
                 db.change_code_factor(self.conn, table, key, field_var.get(), value, clause_var.get(),
-                                      self.user_login, self.user_name, why_var.get() or None)
-            except ValueError as err:
-                messagebox.showerror("Not saved", str(err), parent=win)
+                                      self.user_login, self.user_name, why_var.get() or None, expected=seen)
+            except (ValueError, sqlite3.Error) as err:
+                if isinstance(err, db.StaleDataError):
+                    win.destroy()
+                    self.save_failed(err)
+                else:
+                    self.save_failed(err, parent=win)
                 return
             win.destroy()
             self.after_change(f"code factor saved: {table} {key} {field_var.get()} = {value}")
@@ -626,11 +715,16 @@ class App:
         if not messagebox.askyesno("Refresh rooms", f"{len(df)} rows in {os.path.basename(path)}.\n"
                                    "Room capacities, sources, notes and room types are not changed.\nContinue?"):
             return
-        with self.conn:
-            result = db.refresh_space_report(self.conn, df, os.path.basename(path))
-            db.log_change(self.conn, self.user_login, self.user_name, 'rooms', 'all', 'space report', None,
-                          os.path.basename(path), f"refresh: {result['matched']} matched, {result['new']} new, "
-                          f"{result['missing']} missing")
+        try:
+            # one transaction -> nobody sees a half-refreshed room list
+            with db.write_transaction(self.conn):
+                result = db.refresh_space_report(self.conn, df, os.path.basename(path))
+                db.log_change(self.conn, self.user_login, self.user_name, 'rooms', 'all', 'space report', None,
+                              os.path.basename(path), f"refresh: {result['matched']} matched, {result['new']} new, "
+                              f"{result['missing']} missing")
+        except sqlite3.Error as err:
+            self.save_failed(err)
+            return
         self.after_change("space report refreshed")
         messagebox.showinfo("Refreshed", f"matched: {result['matched']} (changed {result['changed']})\n"
                                          f"new rooms (per code): {result['new']}\nmissing rooms (kept, flagged): "

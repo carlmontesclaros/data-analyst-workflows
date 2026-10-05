@@ -71,7 +71,7 @@ capacity_egress_app/
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
   exports.py               results workbook + capacity export
   build_database.py        one-time first import
-  test_*.py                pytest (48 tests)
+  test_*.py                pytest (55 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
@@ -91,6 +91,17 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 3. Tests: `python3 -m pytest`
 
 Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities.
+
+## Several people at once
+
+The database is one file on the S: drive that several people use. Built for a handful of people (Carl, Mark, 1–2 PMs), tested with two apps saving at the same moment:
+
+- **A busy database waits instead of failing.** If someone else is saving, the app waits up to 15 seconds for them to finish.
+- **Nobody overwrites someone else's change without seeing it.** Every save checks that the room, exit, note or code factor still has the value the person saw when they opened it. If someone else changed it in between, the save is refused ("This room was changed to 45 by Mark at 2:14 pm..."), the screen refreshes, and they try again from the new value.
+- **Screens stay current.** The app checks for other people's saves every 20 seconds and refreshes; opening a room always starts from the latest value. There's also a **Refresh** button.
+- The database uses SQLite's standard journal mode, not WAL, because WAL doesn't work on network drives.
+
+If many more people ever need to edit at once, the next step is UVic's SQL Server (ADR 0001).
 
 ## Settings that used to be constants
 
@@ -163,7 +174,6 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 - **Ramps:** mm per person not confirmed, so there's no `ramp` exit type yet.
 - **Code text:** clauses were checked against BCBC 2018 Section 3.4. Confirm them in the 2024 text before quoting.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).
-- **December handover:** after Carl leaves, is FMIS or the app the source of truth for room capacity, and who runs the exports?
 
 ## Out of scope
 
