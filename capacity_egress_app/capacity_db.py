@@ -196,3 +196,57 @@ def import_code_factors(conn, config_dir):
         df.to_sql(table, conn, if_exists='append', index=False)
         counts[table] = len(df)
     return counts
+
+# exits
+EXIT_COLS = ['Property', 'Floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
+             'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes']
+OPTIONAL_EXIT_COLS = ['wing', 'into_wing', 'measured_date']
+MEASURED_COLS = ['exit_id', 'exit_type', 'clear_width_cm']
+
+def read_exits(excel_file):
+    name = os.path.basename(excel_file)
+    header_row = find_header(excel_file, EXITS_HEADERS)
+    if header_row is None:
+        raise ValueError(f"{name}: not an exits file (no Property/Floor/exit_type header in the first 50 rows)")
+
+    df = pd.read_excel(excel_file, header=header_row)
+    for col in OPTIONAL_EXIT_COLS:
+        if col not in df.columns:
+            df[col] = None
+    missing = [c for c in EXIT_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"{name}: missing columns: {missing}")
+
+    df = df[EXIT_COLS].copy()
+    df = df.dropna(subset=['Property', 'Floor'])
+    df = df[df[MEASURED_COLS].notna().any(axis=1)].copy()
+    for col in ['Property', 'Floor']:
+        df[col] = df[col].astype(str).str.strip().str.removesuffix(".0")
+    df['clear_width_cm'] = pd.to_numeric(df['clear_width_cm'], errors='coerce').astype('Int64')
+    df['measured_date'] = pd.to_datetime(df['measured_date'], errors='coerce').dt.strftime('%Y-%m-%d')
+    return df
+
+def insert_exits(conn, df):
+    exits = df.rename(columns={'Property': 'property', 'Floor': 'floor'})
+    warnings = []
+
+    # exit_id and exit_type cant be empty in the table -> skip and say so
+    no_id = exits['exit_id'].isna() | exits['exit_type'].isna()
+    for _, row in exits[no_id].iterrows():
+        warnings.append(f"{row['property']} floor {row['floor']}: exit skipped, missing exit_id or exit_type")
+    exits = exits[~no_id].copy()
+
+    # floors and exit types the database doesn't know
+    known_floors = set(conn.execute("SELECT DISTINCT property, floor FROM rooms").fetchall())
+    known_types = {r[0] for r in conn.execute("SELECT exit_type FROM width_factors").fetchall()}
+    for _, row in exits.iterrows():
+        label = f"{row['property']} floor {row['floor']} {row['exit_id']}"
+        if (row['property'], row['floor']) not in known_floors:
+            warnings.append(f"{label}: floor not in the rooms table")
+        if row['exit_type'] not in known_types:
+            warnings.append(f"{label}: exit type '{row['exit_type']}' has no width factor")
+        if pd.isna(row['clear_width_cm']):
+            warnings.append(f"{label}: no width")
+
+    exits.to_sql('exits', conn, if_exists='append', index=False)
+    return len(exits), warnings
