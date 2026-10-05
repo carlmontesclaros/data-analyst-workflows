@@ -26,17 +26,26 @@ I’m keeping everything modular. Each project or workflow gets its own separate
     3. Column headers must be named exactly "Property", "Floor", and "Space".
     4. Characters illegal in paths (/ \ : * ? " < > |) are replaced with - in folder names.
  
-### 📁 `exiting_capacity_calculation` (Current project)
-* **What it does: Screens every floor on campus for exiting capacity under the BC Building Code 2024**
-  1. Reads FMIS space reports and floor exit measurements dropped into `input/`. Files are recognised by their headers, so names don't matter.
-  2. Works out each room's occupant load from its area and room type (BCBC Table 3.1.17.1), using site-surveyed room types where they exist.
-  3. Converts measured exit widths into persons (BCBC 3.4.3.2) and applies the 50% rule to get each floor's exiting capacity.
-  4. Handles buildings with wings, including doors that send one wing's occupants into another.
-  5. All code factors and rulings live in `config/` CSV files, so they can be updated without touching the code.
-  6. Screening only: results say "review", never "approved".
-* **The Stack:** Python, Pandas, OpenPyXL
-* **Why it matters:** Answering "can this room go from 32 to 36?" used to mean a hand calculation per floor. Now every surveyed floor has its exiting capacity on hand, and every site visit's measurements are reusable.
-* **Details:** method, decisions and open questions are in `exiting_capacity_calculation/README.md`.
+### 📁 `capacity_egress_app` (Current project)
+* **What it does: Desktop app that keeps the record of room capacities and checks every floor's exiting capacity under the BC Building Code 2024**
+  1. One SQLite database holds the room capacities, measured exits and building code factors. The FMIS space report only supplies the list of rooms and is never written to.
+  2. Search a room (`B303`) or pick building -> floor, and see each zone's occupant load vs exit capacity, coloured red (review) / green (within) / grey (not surveyed).
+  3. Change capacity -> type the new number, preview the floor result, then save or cancel. Every change is logged: who, when, old value, new value and why.
+  4. Add or edit exits with the same checks the Excel exits sheet had (exit type dropdown, width 50-500 cm).
+  5. Code factors (m² per person, mm per person, settings) can be edited in the app, but only with a building code clause reference, and it previews how many floors change status first.
+  6. Exports -> results workbook (4 sheets, same as the old script) and a capacity file in the space report layout for the FMIS capacity import.
+  7. Backs up the database every day it's opened (last 30 kept).
+  8. Screening only: results say "review", never "approved".
+* **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest (48 tests).
+* **Why it matters:** Answering "can this room go from 32 to 36?" used to mean opening the Excel files and a hand calculation per floor. Now you just find the room, type 36 and see if the floor's exits still cover it, with a record of who changed it and why.
+* **How to run:** from `capacity_egress_app/`, run `build_database.py` once (reads the space report and `floor_exits.xlsx` in `data/input/`), then `app.py` every time after. On Windows use `py` instead of `python3`.
+* **Limitations:**
+    1. Built for a few people editing now and then (Carl, Mark, 1-2 PMs). SQLite on a shared drive isn't meant for many people saving at once.
+    2. Open stairs don't count as exits until there's a ruling (BCBC 3.4.4.1.(1) says exits must be fire separated).
+    3. Ramps have no exit factor yet, so they can't be entered as exits.
+    4. Doesn't check travel distance, dead ends, sprinklers, door hardware or fire separations. That's why results say "review", not "approved".
+    5. A newer space report is loaded with Refresh in the app, not by rebuilding. Rooms that disappear are kept and flagged, never deleted.
+* **Details:** method, decisions and open questions are in `capacity_egress_app/README.md`. It replaced the earlier `exiting_capacity_calculation` terminal script (retired 2026-10-05).
 
 ## Future Ideas
 1. Generalize the hierarchy of `facility_folder_automation` let the user choose which columns become folder levels, instead of hardcoding Property/Floor/Space.
@@ -45,3 +54,6 @@ I’m keeping everything modular. Each project or workflow gets its own separate
 * **Python 3**
 * **Pandas** (Data structures and analysis)
 * **OpenPyXL** (Excel file engine backend)
+* **Tkinter** (Desktop app window, comes with Python)
+* **SQLite** (Database, comes with Python)
+* **pytest** (Tests)

@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
     why TEXT,
     clause_ref TEXT
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    user_login TEXT PRIMARY KEY,
+    user_name TEXT NOT NULL
+);
 """
 
 def create_schema(conn):
@@ -237,7 +242,7 @@ def insert_exits(conn, df):
     exits = exits[~no_id].copy()
 
     # floors and exit types the database doesn't know
-    known_floors = set(conn.execute("SELECT DISTINCT property, floor FROM rooms").fetchall())
+    known_floors = {tuple(r) for r in conn.execute("SELECT DISTINCT property, floor FROM rooms").fetchall()}
     known_types = {r[0] for r in conn.execute("SELECT exit_type FROM width_factors").fetchall()}
     for _, row in exits.iterrows():
         label = f"{row['property']} floor {row['floor']} {row['exit_id']}"
@@ -250,3 +255,314 @@ def insert_exits(conn, df):
 
     exits.to_sql('exits', conn, if_exists='append', index=False)
     return len(exits), warnings
+# connection -> rows come back like dicts (row['space'])
+def connect(db_path=DB_PATH):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def now():
+    return pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+
+# audit log -> one row per changed field
+def log_change(conn, user_login, user_name, table_name, record_key, field, old_value, new_value,
+               why=None, clause_ref=None, changed_at=None):
+    conn.execute("""INSERT INTO audit_log (changed_at, user_login, user_name, table_name, record_key,
+                    field, old_value, new_value, why, clause_ref) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                 (changed_at or now(), user_login, user_name, table_name, str(record_key), field,
+                  None if old_value is None else str(old_value),
+                  None if new_value is None else str(new_value), why, clause_ref))
+
+# first import -> every site count room gets its starting capacity in the log
+def insert_first_import_audit(conn, user_login, user_name=None):
+    changed_at = now()
+    rows = conn.execute("SELECT room_id, capacity FROM rooms WHERE capacity_source = 'site count'").fetchall()
+    for room_id, capacity in rows:
+        log_change(conn, user_login, user_name, 'rooms', room_id, 'capacity', None, capacity,
+                   why='first import', changed_at=changed_at)
+    return len(rows)
+
+# extra settings the terminal script kept as constants -> now code factors in the database
+EXTRA_SETTINGS = [
+    ('room_exclude', '14.3,16', 'Sub-category codes left out of the load (16 = all 16.x non-assignable). Carl 2026-09-29'),
+    ('open_stairs_count', 'no', 'BCBC 3.4.4.1.(1) exits must be fire separated -> open stairs not counted until Mark rules'),
+]
+
+def insert_extra_settings(conn):
+    conn.executemany("INSERT INTO settings (setting, value, note) VALUES (?,?,?)", EXTRA_SETTINGS)
+    return len(EXTRA_SETTINGS)
+
+# space report refresh -> match rooms on Property + Floor + Space (+ area when a key repeats)
+# only FMIS columns change, capacity / source / visited / note / override are never touched
+FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
+
+def refresh_space_report(conn, df, report_name):
+    report = df.rename(columns=ROOM_COLUMN_NAMES).copy()
+    report['fmis_count'] = pd.to_numeric(report['Capacity (Occupants)'], errors='coerce')
+    # same room twice, one copy blank -> keep one (ECS 242A)
+    report = report.sort_values('fmis_count').drop_duplicates(['property', 'floor', 'space', 'area_m2'])
+    has_number = report['building_number'].notna()
+    report.loc[has_number, 'building_number'] = (report.loc[has_number, 'building_number']
+                                                 .astype(str).str.removesuffix('.0'))
+
+    db = pd.read_sql("SELECT room_id, property, floor, space, area_m2, capacity, in_latest_report FROM rooms", conn)
+    keys = ['property', 'floor', 'space']
+
+    # keys found once on both sides -> match on the key alone (area can change)
+    report_n = report.groupby(keys)['space'].transform('size')
+    db_n = db.groupby(keys)['space'].transform('size')
+    single = report[report_n == 1].merge(db[db_n == 1][keys + ['room_id']], on=keys, how='inner')
+
+    # repeated keys -> match on key + area
+    matched_report_idx = set(report[report_n == 1].reset_index().merge(
+        db[db_n == 1][keys], on=keys)['index'])
+    rest_report = report[~report.index.isin(matched_report_idx)].copy()
+    rest_db = db[~db['room_id'].isin(single['room_id'])].copy()
+    rest_report['area_key'] = rest_report['area_m2'].round(2)
+    rest_db['area_key'] = rest_db['area_m2'].round(2)
+    by_area = rest_report.reset_index().merge(rest_db[keys + ['area_key', 'room_id']],
+                                              on=keys + ['area_key'], how='inner')
+    by_area = by_area.drop_duplicates('index').drop_duplicates('room_id')
+
+    matched = pd.concat([single, by_area.set_index('index')], ignore_index=False)
+    new_rooms = report[~report.index.isin(set(matched_report_idx) | set(by_area['index']))]
+    missing_ids = set(db['room_id']) - set(matched['room_id'])
+
+    # matched rooms -> update FMIS columns, remember FMIS capacity when it's a real number
+    changed = 0
+    for _, row in matched.iterrows():
+        values = [None if pd.isna(row[c]) else row[c] for c in FMIS_COLS]
+        fmis = int(row['fmis_count']) if pd.notna(row['fmis_count']) and row['fmis_count'] > 0 else None
+        cur = conn.execute(f"""UPDATE rooms SET {', '.join(c + ' = ?' for c in FMIS_COLS)},
+                               fmis_capacity = ?, in_latest_report = 1, last_report = ?
+                               WHERE room_id = ? AND NOT ({' AND '.join(f'{c} IS ?' for c in FMIS_COLS)}
+                               AND fmis_capacity IS ? AND in_latest_report = 1)""",
+                           values + [fmis, report_name, int(row['room_id'])] + values + [fmis])
+        changed += cur.rowcount
+    conn.execute("UPDATE rooms SET last_report = ? WHERE in_latest_report = 1", (report_name,))
+
+    # new rooms -> per code until someone counts them
+    if len(new_rooms):
+        insert = new_rooms[keys + FMIS_COLS + ['room_type_override', 'note']].copy()
+        insert['room_type_override'] = insert['room_type_override'].str.strip().str.lower()
+        insert['fmis_capacity'] = new_rooms['fmis_count'].where(new_rooms['fmis_count'] > 0).astype('Int64')
+        insert['in_latest_report'] = 1
+        insert['last_report'] = report_name
+        insert.to_sql('rooms', conn, if_exists='append', index=False)
+
+    # missing rooms -> kept and flagged, never deleted
+    if missing_ids:
+        conn.executemany("UPDATE rooms SET in_latest_report = 0 WHERE room_id = ?",
+                         [(int(i),) for i in missing_ids])
+
+    # disagreements -> app capacity vs FMIS capacity (app value wins, only flagged)
+    disagree = conn.execute("""SELECT room_id, property, floor, space, capacity, fmis_capacity FROM rooms
+                               WHERE capacity IS NOT NULL AND fmis_capacity IS NOT NULL
+                               AND capacity != fmis_capacity""").fetchall()
+    return {'matched': len(matched), 'changed': changed, 'new': len(new_rooms),
+            'missing': len(missing_ids), 'disagree': [dict(r) for r in disagree]}
+
+# reading tables back for the calculation and the app
+def load_rooms(conn):
+    return pd.read_sql("SELECT * FROM rooms", conn)
+
+def load_exits(conn):
+    return pd.read_sql("SELECT * FROM exits", conn)
+
+def load_code_factors(conn):
+    return {
+        'area_factors': pd.read_sql("SELECT * FROM area_factors", conn),
+        'width_factors': pd.read_sql("SELECT * FROM width_factors", conn),
+        'category_map': pd.read_sql("SELECT * FROM category_map", conn),
+        'settings': pd.read_sql("SELECT * FROM settings", conn),
+    }
+
+# users -> windows login + the nickname people know them by
+def get_user_name(conn, user_login):
+    row = conn.execute("SELECT user_name FROM users WHERE user_login = ?", (user_login,)).fetchone()
+    return row[0] if row else None
+
+def set_user_name(conn, user_login, user_name):
+    conn.execute("INSERT INTO users (user_login, user_name) VALUES (?, ?) "
+                 "ON CONFLICT(user_login) DO UPDATE SET user_name = excluded.user_name", (user_login, user_name))
+    conn.commit()
+
+# change capacity -> site count (counted on a visit) or PM change, always with a reason
+CAPACITY_SOURCES = ['site count', 'PM change']
+
+def change_capacity(conn, room_id, new_capacity, source, user_login, user_name, why):
+    if source not in CAPACITY_SOURCES:
+        raise ValueError(f"capacity source must be one of {CAPACITY_SOURCES}")
+    if not str(why or '').strip():
+        raise ValueError("say why the capacity changed")
+    new_capacity = int(new_capacity)
+    if new_capacity < 0:
+        raise ValueError("capacity can't be negative")
+
+    old = conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
+    if old is None:
+        raise ValueError(f"no room with room_id {room_id}")
+    visited = 1 if source == 'site count' else old[2]
+    changed_at = now()
+    with conn:
+        conn.execute("UPDATE rooms SET capacity = ?, capacity_source = ?, visited = ? WHERE room_id = ?",
+                     (new_capacity, source, visited, room_id))
+        if old[0] != new_capacity:
+            log_change(conn, user_login, user_name, 'rooms', room_id, 'capacity', old[0], new_capacity, why, changed_at=changed_at)
+        if old[1] != source:
+            log_change(conn, user_login, user_name, 'rooms', room_id, 'capacity_source', old[1], source, why, changed_at=changed_at)
+        if old[2] != visited:
+            log_change(conn, user_login, user_name, 'rooms', room_id, 'visited', old[2], visited, why, changed_at=changed_at)
+
+# notes -> one per room, one per exit
+def set_note(conn, table_name, record_id, note, user_login, user_name):
+    column, key = {'rooms': ('note', 'room_id'), 'exits': ('notes', 'exit_pk')}[table_name]
+    note = str(note or '').strip() or None
+    old = conn.execute(f"SELECT {column} FROM {table_name} WHERE {key} = ?", (record_id,)).fetchone()
+    if old is None or old[0] == note:
+        return False
+    with conn:
+        conn.execute(f"UPDATE {table_name} SET {column} = ? WHERE {key} = ?", (note, record_id))
+        log_change(conn, user_login, user_name, table_name, record_id, column, old[0], note, 'note edited')
+    return True
+
+# exits -> same checks as the excel exits sheet
+EXIT_EDIT_COLS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
+                  'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes']
+
+def check_exit(conn, values):
+    problems = []
+    if not values.get('exit_id'):
+        problems.append("exit_id is required (e.g. 'S4 - doorway', 'E3 - outside exit')")
+    known_types = {r[0] for r in conn.execute("SELECT exit_type FROM width_factors")}
+    if values.get('exit_type') not in known_types:
+        problems.append(f"exit type must be one of {sorted(known_types)}")
+    width = values.get('clear_width_cm')
+    if width is None or str(width).strip() == '':
+        problems.append("clear width is required")
+    else:
+        try:
+            w = int(str(width).strip())
+            if not 50 <= w <= 500:
+                problems.append("clear width must be a whole number of cm between 50 and 500")
+        except ValueError:
+            problems.append("clear width must be a whole number of cm between 50 and 500")
+    floor_known = conn.execute("SELECT 1 FROM rooms WHERE property = ? AND floor = ? LIMIT 1",
+                               (values.get('property'), values.get('floor'))).fetchone()
+    if not floor_known:
+        problems.append(f"{values.get('property')} floor {values.get('floor')} is not in the rooms table")
+    for col in ['wing', 'into_wing']:
+        v = values.get(col) or ''
+        if v and not v.isalpha():
+            problems.append(f"{col} must be letters only (A, B, ...)")
+    if values.get('into_wing') and not values.get('wing'):
+        problems.append("a link door (into_wing) needs the wing it leaves from")
+    date = values.get('measured_date')
+    if date:
+        try:
+            pd.to_datetime(date, format='%Y-%m-%d')
+        except ValueError:
+            problems.append("measured date must be YYYY-MM-DD")
+    return problems
+
+def clean_exit(values):
+    out = {}
+    for col in EXIT_EDIT_COLS:
+        v = values.get(col)
+        v = None if v is None or str(v).strip() == '' else str(v).strip()
+        out[col] = v
+    for col in ['wing', 'into_wing']:
+        if out[col]:
+            out[col] = out[col].upper()
+    if out['exit_type']:
+        out['exit_type'] = out['exit_type'].lower()
+    if out['clear_width_cm'] is not None:
+        try:
+            out['clear_width_cm'] = int(out['clear_width_cm'])
+        except ValueError:
+            pass
+    return out
+
+def save_exit(conn, values, user_login, user_name, exit_pk=None):
+    values = clean_exit(values)
+    problems = check_exit(conn, values)
+    if problems:
+        raise ValueError('\n'.join(problems))
+    same = conn.execute("SELECT exit_pk FROM exits WHERE property = ? AND floor = ? AND exit_id = ?",
+                        (values['property'], values['floor'], values['exit_id'])).fetchone()
+    if same and same[0] != exit_pk:
+        raise ValueError(f"{values['exit_id']} already exists on {values['property']} floor {values['floor']}")
+    changed_at = now()
+    with conn:
+        if exit_pk is None:
+            cur = conn.execute(f"INSERT INTO exits ({', '.join(EXIT_EDIT_COLS)}) VALUES ({', '.join('?' * len(EXIT_EDIT_COLS))})",
+                               [values[c] for c in EXIT_EDIT_COLS])
+            exit_pk = cur.lastrowid
+            log_change(conn, user_login, user_name, 'exits', exit_pk, 'exit', None,
+                       f"{values['exit_id']} {values['exit_type']} {values['clear_width_cm']} cm", 'exit added', changed_at=changed_at)
+        else:
+            old = conn.execute("SELECT * FROM exits WHERE exit_pk = ?", (exit_pk,)).fetchone()
+            if old is None:
+                raise ValueError(f"no exit with exit_pk {exit_pk}")
+            conn.execute(f"UPDATE exits SET {', '.join(c + ' = ?' for c in EXIT_EDIT_COLS)} WHERE exit_pk = ?",
+                         [values[c] for c in EXIT_EDIT_COLS] + [exit_pk])
+            for c in EXIT_EDIT_COLS:
+                if old[c] != values[c]:
+                    log_change(conn, user_login, user_name, 'exits', exit_pk, c, old[c], values[c], 'exit edited', changed_at=changed_at)
+    return exit_pk
+
+def delete_exit(conn, exit_pk, user_login, user_name, why):
+    if not str(why or '').strip():
+        raise ValueError("say why the exit is deleted")
+    old = conn.execute("SELECT * FROM exits WHERE exit_pk = ?", (exit_pk,)).fetchone()
+    if old is None:
+        raise ValueError(f"no exit with exit_pk {exit_pk}")
+    with conn:
+        conn.execute("DELETE FROM exits WHERE exit_pk = ?", (exit_pk,))
+        log_change(conn, user_login, user_name, 'exits', exit_pk, 'exit',
+                   f"{old['property']} floor {old['floor']} {old['exit_id']} {old['exit_type']} {old['clear_width_cm']} cm",
+                   None, why)
+
+# code factors -> every change needs a building code clause
+CODE_FACTOR_KEYS = {'area_factors': 'room_type', 'width_factors': 'exit_type',
+                    'category_map': 'space_sub_category', 'settings': 'setting'}
+
+def change_code_factor(conn, table_name, key_value, field, new_value, clause_ref, user_login, user_name, why=None):
+    if table_name not in CODE_FACTOR_KEYS:
+        raise ValueError(f"{table_name} is not a code factor table")
+    if not str(clause_ref or '').strip():
+        raise ValueError("a building code clause reference is required (e.g. BCBC 2024 3.4.3.2.(1))")
+    key = CODE_FACTOR_KEYS[table_name]
+    columns = [r[1] for r in conn.execute(f"PRAGMA table_info({table_name})")]
+    if field not in columns or field == key:
+        raise ValueError(f"{field} is not an editable column of {table_name}")
+    old = conn.execute(f"SELECT {field} FROM {table_name} WHERE {key} = ?", (key_value,)).fetchone()
+    if old is None:
+        raise ValueError(f"no row '{key_value}' in {table_name}")
+    with conn:
+        conn.execute(f"UPDATE {table_name} SET {field} = ? WHERE {key} = ?", (new_value, key_value))
+        log_change(conn, user_login, user_name, table_name, key_value, field, old[0], new_value, why, clause_ref)
+
+# history for one record, newest first
+def history(conn, table_name, record_key):
+    return pd.read_sql("SELECT changed_at, user_name, user_login, field, old_value, new_value, why, clause_ref "
+                       "FROM audit_log WHERE table_name = ? AND record_key = ? ORDER BY log_id DESC",
+                       conn, params=(table_name, str(record_key)))
+
+# backup -> one copy per day the app opens, last 30 kept
+BACKUP_KEEP = 30
+
+def backup_database(conn, backup_dir, keep=BACKUP_KEEP):
+    os.makedirs(backup_dir, exist_ok=True)
+    path = os.path.join(backup_dir, f"capacity_{pd.Timestamp.now().strftime('%Y-%m-%d')}.db")
+    made = False
+    if not os.path.exists(path):
+        dest = sqlite3.connect(path)
+        with dest:
+            conn.backup(dest)
+        dest.close()
+        made = True
+    backups = sorted(f for f in os.listdir(backup_dir) if f.startswith('capacity_') and f.endswith('.db'))
+    for old in backups[:-keep]:
+        os.remove(os.path.join(backup_dir, old))
+    return path if made else None
