@@ -17,7 +17,8 @@ def read_settings(settings_df):
     if link_method not in ('even_split', 'half_load'):
         raise ValueError(f"link_share_method '{link_method}' must be even_split or half_load")
     exclude = [c.strip() for c in str(s.get('room_exclude', '') or '').split(',') if c.strip()]
-    return {'min_exits': int(s.get('minimum_exits', 2)),
+    return {'code_edition': str(s.get('code_edition', '') or '').strip(),
+            'min_exits': int(s.get('minimum_exits', 2)),
             'link_method': link_method,
             'room_exclude': exclude,
             'open_stairs_count': str(s.get('open_stairs_count', 'no')).strip().lower() in ('yes', 'true', '1')}
@@ -164,7 +165,8 @@ def build_zones(rooms, exits, settings, warning_rows):
     sending = set(links['floor_key'] + ' | ' + links['zone_wing'])
     zones['link_sends'] = (zones['floor_key'] + ' | ' + zones['zone_wing']).isin(sending)
 
-    # status + flags
+    # stairs are not cumulative across floors (3.4.3.2.(4)) -> each floor only counts its own rooms, nothing to add
+    # status + flags, minimum exits per zone from the minimum_exits setting
     min_exits = settings['min_exits']
     statuses, flag_texts = [], []
     for _, z in zones.iterrows():
@@ -205,6 +207,8 @@ def calculate(rooms, exits, factors):
     rooms = prepare_rooms(rooms, factors, settings, warning_rows)
     exits = prepare_exits(exits, factors, settings, warning_rows)
     zones = build_zones(rooms, exits, settings, warning_rows)
+    # which edition these results were screened under -> old results stay comparable after a code change
+    zones['code_edition'] = settings['code_edition']
     warnings_df = pd.DataFrame(warning_rows, columns=['type', 'property', 'floor', 'detail'])
     return {'zones': zones, 'rooms': rooms, 'exits': exits, 'warnings': warnings_df, 'settings': settings}
 

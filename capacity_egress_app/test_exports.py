@@ -20,6 +20,8 @@ def test_results_workbook_has_4_formatted_sheets(tmp_path):
     ws = wb['floor_summary']
     assert ws.freeze_panes == 'A2' and ws['A1'].font.bold
     assert ws['A2'].fill.fgColor.rgb.endswith('C6EFCE')
+    # results say which code edition they were screened under
+    assert pd.read_excel(path, sheet_name='floor_summary')['code_edition'].tolist() == ['BCBC 2024']
 
 def test_capacity_export_per_code_only_for_visited(tmp_path):
     path = tmp_path / 'capacity.xlsx'

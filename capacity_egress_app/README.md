@@ -107,6 +107,45 @@ If many more people ever need to edit at once, the next step is UVic's SQL Serve
 
 `exit_capacity.py` kept `ROOM_EXCLUDE` and `OPEN_STAIRS_COUNT` in its config block. In the app they are rows in the `settings` table (`room_exclude` = `14.3,16`, `open_stairs_count` = `no`), so changing them goes through **Code factors** with a clause reference and is logged. When Mark rules on open stairs, set `open_stairs_count` to `yes` there.
 
+## When the building code changes
+
+BCBC comes out about every 6 years (2012, 2018, 2024). Each rule the app uses is either a **number in the database** or a **formula in the code**.
+
+| Rule | Clause (BCBC 2024) | Where it lives | Who can change it |
+|---|---|---|---|
+| m² per person by room type | 3.4.3.1.(1) → Table 3.1.17.1. | `area_factors` table | Anyone, in **Code factors** |
+| Which sub-category is which room type | project decision | `category_map` table | Anyone, in **Code factors** |
+| mm per person by exit type | 3.4.3.2.(1) | `width_factors` table | Anyone, in **Code factors** |
+| Minimum exit widths | Table 3.4.3.2.-A | `width_factors` table | Anyone, in **Code factors** |
+| Minimum number of exits | 3.4.2.1. (not checked yet) | `minimum_exits` setting | Anyone, in **Code factors** |
+| Rooms left out of scope | project decision | `room_exclude` setting | Anyone, in **Code factors** |
+| Open stairs count as exits | 3.4.4.1.(1) | `open_stairs_count` setting | Anyone, in **Code factors** |
+| Link door share | 3.4.3.1.(2) | `link_share_method` setting (even_split / half_load) | Anyone, in **Code factors** |
+| Edition the results say | n/a | `code_edition` setting | Anyone, in **Code factors** |
+| Occupant load formula (area ÷ m², round up) | 3.4.3.1.(1) | `occupant_load` in `exit_calc.py` | Someone who can edit Python |
+| Persons per exit formula (width ÷ mm, round down) | 3.4.3.2.(1) | `exit_persons` in `exit_calc.py` | Someone who can edit Python |
+| 50% rule | 3.4.3.2.(7) | `capacity_50_rule` in `exit_calc.py` | Someone who can edit Python |
+| Link door formula | 3.4.3.1.(2) | `people_sent` in `exit_calc.py` | Someone who can edit Python |
+| Stairs not cumulative across floors | 3.4.3.2.(4) | how `build_zones` in `egress.py` groups rooms | Someone who can edit Python |
+| Status and flags | project decision | end of `build_zones` in `egress.py` | Someone who can edit Python |
+
+A new exit type (e.g. `ramp`) is just a new `width_factors` row.
+
+**A number changed** (e.g. doorways go from 6.1 to 5.5 mm/person):
+1. Open **Code factors**, change the value, enter the new clause, check the preview (how many zones change status), save. It's logged.
+2. Change `code_edition` to the new edition (e.g. `BCBC 2030`) the same way.
+3. Export a new results workbook. Old workbooks keep the old edition in their `code_edition` column.
+
+**A formula changed, was removed, or a new rule was added** (e.g. the 50% rule is dropped):
+1. Copy `data/capacity.db` somewhere safe first.
+2. Change the function in `exit_calc.py` (or the step in `egress.py`) and update its comment with the new clause.
+3. Hand-check one real floor with the new rule (Turpin floor 3 wing B is the usual one), then update the expected numbers in `test_exit_calc.py` / `test_egress.py` and the **Test values** table below.
+4. `py -m pytest` from this folder. Everything must pass before anyone uses it.
+5. Update **Method** below, change `code_edition` in **Code factors**, and add a row to **Decisions**.
+6. Copy the changed `.py` files to every machine that runs the app.
+
+Clause numbers were checked against the BCBC **2018** text; confirm them in the 2024 text (see Open questions).
+
 ## Installing on a Windows machine (step 7)
 
 1. Install Python from python.org (tick "Add to PATH"), then `py -m pip install pandas openpyxl`.

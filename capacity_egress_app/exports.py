@@ -8,7 +8,8 @@ SUMMARY_COLS = {'property': 'Property', 'floor': 'Floor', 'zone_wing': 'zone_win
                 'flags': 'flags', 'total_load': 'total_load', 'exit_capacity': 'exit_capacity',
                 'rooms_in_scope': 'rooms_in_scope', 'rooms_counted': 'rooms_counted',
                 'counted_capacity': 'counted_capacity', 'area_based_load': 'area_based_load',
-                'link_inflow': 'link_inflow', 'exit_count': 'exit_count', 'floor_key': 'floor_key'}
+                'link_inflow': 'link_inflow', 'exit_count': 'exit_count', 'code_edition': 'code_edition',
+                'floor_key': 'floor_key'}
 EXIT_COLS = {'property': 'Property', 'floor': 'Floor', 'wing': 'wing', 'exit_id': 'exit_id',
              'exit_type': 'exit_type', 'clear_width_cm': 'clear_width_cm', 'counts_as_exit': 'counts_as_exit',
              'persons': 'persons', 'width_check': 'width_check', 'mm_per_person': 'mm_per_person',
