@@ -211,7 +211,6 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 - **27 sub-category mappings** are marked `needs_review` in the category map.
 - **Horizontal exits:** if a link door is in a fire-rated wall, the horizontal exit rules may apply. Not checked.
 - **Ramps:** BCBC 2024 3.4.3.2.(1) gives 6.1 mm/person up to a 1 in 8 slope, 9.2 if steeper; Table 3.4.3.2.-A minimum 1100 mm. Not added as an exit type yet.
-- **Doorway minimum width:** BCBC 2024 Table 3.4.3.2.-A says **850 mm**; the database still has 800 (the 2018 value). Change it in **Code factors**. No recorded doorway is below 850 today.
 - **Posted signs:** BCBC 2024 3.1.17.1.(2) says a floor area designed for a load other than Table 3.1.17.1. needs a permanent sign showing that load. Rooms using a site count below the per code load may need one. Ask Mark.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).
 
