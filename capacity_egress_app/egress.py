@@ -43,17 +43,20 @@ def prepare_rooms(rooms, factors, settings, warning_rows):
         warning_rows.append({'type': 'no_room_type', 'property': row['property'], 'floor': row['floor'],
                              'detail': f"{row['space']}: {row['area_m2']} m2, no sub-category or override - counted as 0 people"})
 
-    # per code load = area / m2 per person, rounded up
+    # per code load = area / m2 per person, rounded up (BCBC 2024 Table 3.1.17.1.)
     rooms['area_per_person_m2'] = rooms['room_type'].map(area_factor)
     rooms['per_code_load'] = occupant_load(rooms['area_m2'], rooms['area_per_person_m2']).fillna(0).astype(int)
 
     # scope -> every room except the excluded sub-category codes (a code covers its children)
+    # scope is a project decision, not code (Table 3.1.17.1. does give lounges 1.85 m2 per person)
     sub_code = rooms['sub_category'].astype(str).str.split(' - ').str[0].str.strip()
     rooms['in_scope'] = True
     for code in settings['room_exclude']:
         rooms.loc[(sub_code == code) | sub_code.str.startswith(code + '.'), 'in_scope'] = False
 
     # load used -> room capacity when there is one (visited / PM change, 0 stays 0), else per code
+    # BCBC 2024 3.1.17.1.(1)(c) -> not less than Table 3.1.17.1. "unless it can be shown that the area
+    #   will be occupied by fewer persons" (the site count), 3.1.17.1.(2) -> that load needs a posted sign
     capacity = pd.to_numeric(rooms['capacity'], errors='coerce')
     rooms['load_used'] = capacity.fillna(rooms['per_code_load'])
     rooms['load_source'] = np.where(capacity.notna(), rooms['capacity_source'], 'per code')
@@ -80,7 +83,8 @@ def prepare_exits(exits, factors, settings, warning_rows):
     exits['mm_per_person'] = exits['exit_type'].map(width_df['mm_per_person'])
     exits['persons'] = exit_persons(exits['clear_width_cm'], exits['mm_per_person']).fillna(0).astype(int)
 
-    # minimum width (Table 3.4.3.2.-A)
+    # minimum width -> BCBC 2024 3.4.3.2.(8) + Table 3.4.3.2.-A: doorways 850, stairs 900 if serving up to
+    #   2 storeys above the lowest exit level, else 1100. app doesnt know storeys -> 900 to 1099 = review
     exits['width_mm'] = exits['clear_width_cm'] * 10
     exits['minimum_mm'] = exits['exit_type'].map(width_df['minimum_mm'])
     exits['minimum_mm_low_rise'] = exits['exit_type'].map(width_df['minimum_mm_low_rise'])
@@ -89,7 +93,7 @@ def prepare_exits(exits, factors, settings, warning_rows):
     exits.loc[exits['width_mm'] < exits['minimum_mm_low_rise'], 'width_check'] = 'fail - below minimum'
     exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] = 'unknown'
 
-    # open stairs -> not fire separated, not an exit (3.4.4.1.(1)) until Mark rules
+    # open stairs -> BCBC 2024 3.4.4.1.(1) every exit is fire separated (45 min or more), so not an exit until Mark rules
     exits['counts_as_exit'] = True
     if not settings['open_stairs_count']:
         open_stair = exits['exit_id'].astype(str).str.lower().str.contains('open stair')
@@ -110,6 +114,9 @@ def prepare_exits(exits, factors, settings, warning_rows):
 
 # zones -> occupant load vs exit capacity, links, status
 def build_zones(rooms, exits, settings, warning_rows):
+    # zone = the floor. BCBC 2024 counts exits per floor area (3.4.2.1.(1), 3.4.3.2.(1)), and a floor area is a
+    #   storey between exterior walls and firewalls (Div A 1.4.1.2.). wings split only where an exit has a wing
+    #   (supervisor decision, for blocks that aren't open to each other)
     split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
     rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors), '')
 
@@ -128,13 +135,13 @@ def build_zones(rooms, exits, settings, warning_rows):
     pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['exit_count'] == 0)
     zones = zones[~pseudo].copy()
 
-    # exit capacity -> 50% rule (3.4.3.2.(7))
+    # exit capacity -> 50% rule (BCBC 2024 3.4.3.2.(7))
     cap = exits.groupby(ZONE_KEYS, as_index=False)['persons'].agg(total_persons='sum', largest_exit='max')
     cap['exit_capacity'] = capacity_50_rule(cap['total_persons'], cap['largest_exit'])
     zones = zones.merge(cap[ZONE_KEYS + ['exit_capacity']], on=ZONE_KEYS, how='left')
     zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
-    # link doors -> people sent into another wing (3.4.3.1.(2))
+    # link doors -> people sent into another wing (closest clause BCBC 2024 3.4.3.1.(2))
     links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']]
     links = links.merge(zones[ZONE_KEYS + ['load_used', 'exit_count']], on=ZONE_KEYS, how='left')
     if len(links):
@@ -165,8 +172,9 @@ def build_zones(rooms, exits, settings, warning_rows):
     sending = set(links['floor_key'] + ' | ' + links['zone_wing'])
     zones['link_sends'] = (zones['floor_key'] + ' | ' + zones['zone_wing']).isin(sending)
 
-    # stairs are not cumulative across floors (3.4.3.2.(4)) -> each floor only counts its own rooms, nothing to add
+    # stairs are not cumulative across floors (BCBC 2024 3.4.3.2.(4)) -> each floor only counts its own rooms, nothing to add
     # status + flags, minimum exits per zone from the minimum_exits setting
+    # BCBC 2024 3.4.2.1.(1) -> at least 2 exits. (2) allows 1 exit for small floors up to 60 people, not checked -> review
     min_exits = settings['min_exits']
     statuses, flag_texts = [], []
     for _, z in zones.iterrows():

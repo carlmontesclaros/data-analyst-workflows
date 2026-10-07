@@ -113,16 +113,16 @@ BCBC comes out about every 6 years (2012, 2018, 2024). Each rule the app uses is
 
 | Rule | Clause (BCBC 2024) | Where it lives | Who can change it |
 |---|---|---|---|
-| m² per person by room type | 3.4.3.1.(1) → Table 3.1.17.1. | `area_factors` table | Anyone, in **Code factors** |
+| m² per person by room type | 3.4.3.1.(1) → 3.1.17.1. and Table 3.1.17.1. | `area_factors` table | Anyone, in **Code factors** |
 | Which sub-category is which room type | project decision | `category_map` table | Anyone, in **Code factors** |
 | mm per person by exit type | 3.4.3.2.(1) | `width_factors` table | Anyone, in **Code factors** |
-| Minimum exit widths | Table 3.4.3.2.-A | `width_factors` table | Anyone, in **Code factors** |
-| Minimum number of exits | 3.4.2.1. (not checked yet) | `minimum_exits` setting | Anyone, in **Code factors** |
+| Minimum exit widths | 3.4.3.2.(8) and Table 3.4.3.2.-A | `width_factors` table | Anyone, in **Code factors** |
+| Minimum number of exits | 3.4.2.1.(1) | `minimum_exits` setting | Anyone, in **Code factors** |
 | Rooms left out of scope | project decision | `room_exclude` setting | Anyone, in **Code factors** |
 | Open stairs count as exits | 3.4.4.1.(1) | `open_stairs_count` setting | Anyone, in **Code factors** |
 | Link door share | 3.4.3.1.(2) | `link_share_method` setting (even_split / half_load) | Anyone, in **Code factors** |
 | Edition the results say | n/a | `code_edition` setting | Anyone, in **Code factors** |
-| Occupant load formula (area ÷ m², round up) | 3.4.3.1.(1) | `occupant_load` in `exit_calc.py` | Someone who can edit Python |
+| Occupant load formula (area ÷ m², round up) | 3.4.3.1.(1) → 3.1.17.1.(1)(c) | `occupant_load` in `exit_calc.py` | Someone who can edit Python |
 | Persons per exit formula (width ÷ mm, round down) | 3.4.3.2.(1) | `exit_persons` in `exit_calc.py` | Someone who can edit Python |
 | 50% rule | 3.4.3.2.(7) | `capacity_50_rule` in `exit_calc.py` | Someone who can edit Python |
 | Link door formula | 3.4.3.1.(2) | `people_sent` in `exit_calc.py` | Someone who can edit Python |
@@ -144,7 +144,7 @@ A new exit type (e.g. `ramp`) is just a new `width_factors` row.
 5. Update **Method** below, change `code_edition` in **Code factors**, and add a row to **Decisions**.
 6. Copy the changed `.py` files to every machine that runs the app.
 
-Clause numbers were checked against the BCBC **2018** text; confirm them in the 2024 text (see Open questions).
+Clause numbers were checked against the BCBC **2024** text (revision 2) on 2026-10-07. Each formula in `exit_calc.py` and each step in `egress.py` has its clause in a comment.
 
 ## Installing on a Windows machine (step 7)
 
@@ -210,8 +210,9 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.
 - **Horizontal exits:** if a link door is in a fire-rated wall, the horizontal exit rules may apply. Not checked.
-- **Ramps:** mm per person not confirmed, so there's no `ramp` exit type yet.
-- **Code text:** clauses were checked against BCBC 2018 Section 3.4. Confirm them in the 2024 text before quoting.
+- **Ramps:** BCBC 2024 3.4.3.2.(1) gives 6.1 mm/person up to a 1 in 8 slope, 9.2 if steeper; Table 3.4.3.2.-A minimum 1100 mm. Not added as an exit type yet.
+- **Doorway minimum width:** BCBC 2024 Table 3.4.3.2.-A says **850 mm**; the database still has 800 (the 2018 value). Change it in **Code factors**. No recorded doorway is below 850 today.
+- **Posted signs:** BCBC 2024 3.1.17.1.(2) says a floor area designed for a load other than Table 3.1.17.1. needs a permanent sign showing that load. Rooms using a site count below the per code load may need one. Ask Mark.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).
 
 ## Out of scope
