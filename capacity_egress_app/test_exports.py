@@ -1,9 +1,8 @@
 import pytest
 import pandas as pd
 from openpyxl import Workbook, load_workbook
-from openpyxl.worksheet.table import Table
+from openpyxl.worksheet.table import Table, TableFormula
 from openpyxl.worksheet.filters import AutoFilter, FilterColumn, Filters
-from openpyxl.worksheet.datavalidation import DataValidation
 import exports
 import test_egress as t
 
@@ -27,63 +26,61 @@ def test_results_workbook_has_4_formatted_sheets(tmp_path):
     # results say which code edition they were screened under
     assert pd.read_excel(path, sheet_name='floor_summary')['code_edition'].tolist() == ['BCBC 2024']
 
-# fake template like 26-09-15 ROOM CAPACITY: factor table on top, header row 10, table allBLDG, per code formula
-TEMPLATE_HEADER = ['Property', 'Floor', 'Space', 'Building Number', 'Net Space (sq ft)', 'Net Space (sq m)',
-                   'Space Category', 'Space Sub-Category', 'Allocated Group', 'Fund', 'Orgn',
-                   'OCCUPANT COUNT (per dept)', 'CAPACITY (per orem records)', 'OCCUPANT LOAD (per code)',
-                   'ROOM TYPE (per code)', 'NOTES']
-PER_CODE = '=IFERROR(F{r}/XLOOKUP(O{r},$M$3:$M$6,$N$3:$N$6),"")'
+# fake template like carl_space_report: BCBC factor table on top, header row 7, Table1 A-L, Pictures link formula
+TEMPLATE_HEADER = ['Property', 'Floor', 'Space', 'Building Number', 'Net Space (sq m)', 'Space Category',
+                   'Space Sub-Category', 'Capacity (Occupants)', 'Capacity (per code)',
+                   'Room type (per code m^2 used in capacity)', 'Note', 'Pictures']
+PICTURES = 'HYPERLINK("S:\\buildings\\"&SUBSTITUTE(A{r},"/","-")&"\\Floor "&B{r}&"\\"&C{r},"Open")'
 
 def fake_template(path):
     wb = Workbook()
     ws = wb.active
-    ws.title = 'Space_Details_Custom_Report2026'
-    ws['M2'], ws['N2'] = 'room type', 'area/person (m2)'
+    ws.title = 'Sheet1'
+    ws['H1'], ws['H2'] = 'BCBC 2024 (per Table 3.1.17.1)', 'room type'
     for r, (rt, m2) in enumerate([('classroom', 1.85), ('lab', 4.6), ('non-fixed', 0.95), ('office', 9.3)], 3):
-        ws.cell(r, 13, rt)
-        ws.cell(r, 14, m2)
-    ws.append([])
-    ws['E9'] = '=SUBTOTAL(9,E11:E100)'
+        ws.cell(r, 8, rt)
+        ws.cell(r, 9, m2)
     for c, name in enumerate(TEMPLATE_HEADER, 1):
-        ws.cell(10, c, name)
-    # 301 is in the template with group / fund / OREM; 999 is a room the app doesn't have
-    rows = [['Fake Hall', 3, 301, 999, 651.754, 60.55, None, None, 'GEOG, Geography', 10000, 2830, None, 30, None, None, None],
-            ['Fake Hall', 3, 999, 999, 10, 1, None, None, None, None, None, None, None, None, None, 'old room']]
-    for r, row in enumerate(rows, 11):
+        ws.cell(7, c, name)
+    # 301 is in the template with an FMIS count + note; 302 has a count but isn't visited; 999 the app doesn't have
+    rows = [['Fake Hall', 3, 301, 999, 60.55, None, None, 0, 2230, None, 'by window', None],
+            ['Fake Hall', 3, 302, 999, 60.55, None, None, 12, 2230, None, None, None],
+            ['Fake Hall', 3, 999, 999, 1, None, None, None, None, None, 'old room', None]]
+    for r, row in enumerate(rows, 8):
         for c, v in enumerate(row, 1):
             ws.cell(r, c, v)
-        ws.cell(r, 14, PER_CODE.format(r=r))
-    table = Table(displayName='allBLDG', ref='A10:P12')
-    table.autoFilter = AutoFilter(ref='A10:P12')
+        ws.cell(r, 12, '=' + PICTURES.format(r=r))
+    table = Table(displayName='Table1', ref='A7:L10')
+    table.autoFilter = AutoFilter(ref='A7:L10')
     table.autoFilter.filterColumn.append(FilterColumn(colId=0, filters=Filters(filter=['Somewhere Else'])))
+    table._initialise_columns()
+    for column, name in zip(table.tableColumns, TEMPLATE_HEADER):
+        column.name = name
+    table.tableColumns[11].calculatedColumnFormula = TableFormula(attr_text=PICTURES.format(r=8))
     ws.add_table(table)
-    ws.add_data_validation(DataValidation(type='list', formula1='$M$3:$M$6', sqref='O11:O12'))
-    wb.create_sheet('TOTAL EXIT CAP')['A1'] = 'BUILDING'
     wb.save(path)
 
 def test_space_report_fills_the_template(tmp_path):
     template, path = tmp_path / 'template.xlsx', tmp_path / 'space_report.xlsx'
     fake_template(template)
     info = exports.write_space_report(result(), path, template)
-    assert info['rooms'] == 2 and info['matched_template'] == 1
-    df = pd.read_excel(path, header=9)
+    assert info['rooms'] == 2 and info['matched_template'] == 2
+    df = pd.read_excel(path, header=6)
     assert list(df.columns) == TEMPLATE_HEADER and len(df) == 2
     r301, r302 = df.iloc[0], df.iloc[1]
-    # site count -> L, only for visited rooms
-    assert r301['OCCUPANT COUNT (per dept)'] == 30 and pd.isna(r302['OCCUPANT COUNT (per dept)'])
+    # site count for visited rooms; a room not visited keeps the template's count
+    assert r301['Capacity (Occupants)'] == 30 and r302['Capacity (Occupants)'] == 12
+    # per code = the app's load (60.55 m2 classroom -> 33), not the template's broken 2230
+    assert r301['Capacity (per code)'] == 33 and r302['Capacity (per code)'] == 33
     # what the app doesn't store comes from the template's row
-    assert r301['Allocated Group'] == 'GEOG, Geography' and r301['Fund'] == 10000
-    assert r301['CAPACITY (per orem records)'] == 30
-    # no template row -> sq ft from m2
-    assert r302['Net Space (sq ft)'] == round(60.55 * exports.SQ_FT_PER_SQ_M, 3)
+    assert r301['Note'] == 'by window'
     wb = load_workbook(path)
-    ws = wb['Space_Details_Custom_Report2026']
-    assert wb.sheetnames == ['Space_Details_Custom_Report2026', 'TOTAL EXIT CAP']
-    assert ws['M3'].value == 'classroom' and ws['E9'].value == '=SUBTOTAL(9,E11:E100)'
-    assert ws['N11'].value.startswith('=IFERROR(') and ws['N12'].value.startswith('=IFERROR(')
-    # table covers the new rows, old filter gone, dropdown follows
-    assert ws.tables['allBLDG'].ref == 'A10:P12' and not ws.tables['allBLDG'].autoFilter.filterColumn
-    assert str(ws.data_validations.dataValidation[0].sqref) == 'O11:O12'
+    ws = wb['Sheet1']
+    assert ws['H3'].value == 'classroom' and ws['I6'].value == 9.3
+    # Pictures link points at its own row
+    assert ws['L8'].value == '=' + PICTURES.format(r=8) and ws['L9'].value == '=' + PICTURES.format(r=9)
+    # table covers the new rows, old filter gone
+    assert ws.tables['Table1'].ref == 'A7:L9' and not ws.tables['Table1'].autoFilter.filterColumn
 
 def test_space_report_one_floor_and_no_template(tmp_path):
     template = tmp_path / 'template.xlsx'
@@ -91,6 +88,10 @@ def test_space_report_one_floor_and_no_template(tmp_path):
     info = exports.write_space_report(result(), tmp_path / 'none.xlsx', template, ['Nowhere'])
     # an empty selection still writes a valid table (one blank row)
     assert info['rooms'] == 0
-    assert load_workbook(tmp_path / 'none.xlsx')['Space_Details_Custom_Report2026'].tables['allBLDG'].ref == 'A10:P11'
+    assert load_workbook(tmp_path / 'none.xlsx')['Sheet1'].tables['Table1'].ref == 'A7:L8'
     with pytest.raises(FileNotFoundError):
         exports.find_template(tmp_path / 'empty_folder')
+
+def test_formula_for_row_leaves_text_alone():
+    f = 'HYPERLINK("S:\\A8 photos\\"&amp;A8&amp;$B$8&amp;Table1[[#This Row],[Space]],"Open")'
+    assert exports.formula_for_row(f, 8, 15) == 'HYPERLINK("S:\\A8 photos\\"&amp;A15&amp;$B$8&amp;Table1[[#This Row],[Space]],"Open")'

@@ -80,18 +80,16 @@ def write_results_workbook(result, path, properties=None, floors=None):
         raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again")
     return {name: len(df) for name, df in tables.items()}
 
-# space report export -> Carl's baseline template (26-09-15 ROOM CAPACITY), filled with the app's rooms
-# the template has slicers + pivots that openpyxl would destroy, so we never open it with openpyxl:
-# copy the zip, rewrite only the allBLDG table's rows, keep every other file as is
+# space report export -> Carl's space report (carl_space_report), filled with the app's rooms
+# it has slicers that openpyxl would destroy, so we never open it with openpyxl:
+# copy the zip, rewrite only the room table's rows, keep every other file as is
 TEMPLATE_DIR = os.path.join(db.DATA_DIR, "template")
-TEMPLATE_TABLE = 'allBLDG'
-SQ_FT_PER_SQ_M = 10.7639
 
-# template columns A-P, by position. the app fills these; the rest come from the template's own row for that room
-# L = site count (visited rooms), O = room type override, P = note. M (OREM) and I/J/K are only in the template
-APP_COLS = {0: 'property', 1: 'floor', 2: 'space', 3: 'building_number', 5: 'area_m2', 6: 'space_category',
-            7: 'sub_category'}
-SQ_FT_COL, SITE_COUNT_COL, PER_CODE_COL, ROOM_TYPE_COL, NOTES_COL = 4, 11, 13, 14, 15
+# template columns, by header name. the app fills these; the rest come from the template's own row for that room
+APP_COLS = {'Property': 'property', 'Floor': 'floor', 'Space': 'space', 'Building Number': 'building_number',
+            'Net Space (sq m)': 'area_m2', 'Space Category': 'space_category', 'Space Sub-Category': 'sub_category'}
+COUNT_COL, PER_CODE_COL = 'Capacity (Occupants)', 'Capacity (per code)'
+ROOM_TYPE_COL, NOTE_COL = 'Room type (per code m^2 used in capacity)', 'Note'
 
 def find_template(folder=TEMPLATE_DIR):
     # whatever .xlsx is in data/template/ -> no hardcoded filename
@@ -121,17 +119,38 @@ def cell(ref, style, value):
     return f'<c r="{ref}"{s} t="inlineStr"><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 def template_parts(z):
-    # the sheet holding the allBLDG table -> (table xml path, sheet xml path)
-    table_path = next((n for n in z.namelist() if n.startswith('xl/tables/')
-                       and f'name="{TEMPLATE_TABLE}"' in z.read(n).decode('utf-8')), None)
+    # the room table = the one with Property / Floor / Space in its header -> (table xml path, sheet xml path)
+    table_path = None
+    for name in z.namelist():
+        if name.startswith('xl/tables/') and name.endswith('.xml'):
+            names = [unescape(n) for n in re.findall(r'<tableColumn [^>]*?name="([^"]*)"', z.read(name).decode('utf-8'))]
+            if {'Property', 'Floor', 'Space'} <= set(names):
+                table_path = name
+                break
     if table_path is None:
-        raise ValueError(f"template has no table called {TEMPLATE_TABLE}")
+        raise ValueError("template has no table with Property, Floor and Space columns")
     # Excel writes Target="../tables/table1.xml", openpyxl writes Target="/xl/tables/table1.xml"
     target = re.compile(r'Target="[^"]*tables/' + re.escape(os.path.basename(table_path)) + '"')
     for name in z.namelist():
         if name.startswith('xl/worksheets/_rels/') and target.search(z.read(name).decode('utf-8')):
             return table_path, 'xl/worksheets/' + os.path.basename(name).removesuffix('.rels')
-    raise ValueError(f"can't find the sheet for table {TEMPLATE_TABLE}")
+    raise ValueError(f"can't find the sheet for {table_path}")
+
+def table_columns(table_xml):
+    # column names in order + the calculated column formula of each (None if it has none), as written in the xml
+    columns = re.findall(r'<tableColumn [^>]*?name="([^"]*)"[^>]*?(?:/>|>(.*?)</tableColumn>)', table_xml, re.S)
+    names = [unescape(name) for name, _ in columns]
+    formulas = [(re.search(r'<calculatedColumnFormula[^>]*>(.*?)</calculatedColumnFormula>', inner or '', re.S) or [None, None])[1]
+                for _, inner in columns]
+    return names, formulas
+
+def formula_for_row(formula, first, r):
+    # the table's formula points at its first data row (A8) -> point it at row r; text in quotes stays as is
+    parts = formula.split('&quot;') if '&quot;' in formula else formula.split('"')
+    quote = '&quot;' if '&quot;' in formula else '"'
+    parts = [re.sub(rf'(?<![A-Za-z0-9_$])(\$?[A-Z]{{1,3}}){first}(?!\d)', rf'\g<1>{r}', p) if i % 2 == 0 else p
+             for i, p in enumerate(parts)]
+    return quote.join(parts)
 
 def sheet_name(z, sheet_path):
     # xl/worksheets/sheet1.xml -> its tab name, via workbook.xml.rels (r:id) and workbook.xml (name)
@@ -142,19 +161,15 @@ def sheet_name(z, sheet_path):
     sheet = re.search(r'<sheet [^>]*name="([^"]+)"[^>]*r:id="' + rel_id.group(1) + '"', z.read('xl/workbook.xml').decode('utf-8'))
     return unescape(sheet.group(1))
 
-def row_styles_and_formula(data_rows):
-    # most common style per column + the per code formula, from the template's first 50 data rows
-    styles = [Counter() for _ in range(16)]
-    formulas = Counter()
+def row_styles(data_rows, n):
+    # most common style per column, from the template's first 50 data rows
+    styles = [Counter() for _ in range(n)]
     for row in data_rows[:50]:
-        for c in re.finditer(r'<c r="([A-Z]+)\d+"(?: s="(\d+)")?[^>]*?(?:/>|>(.*?)</c>)', row, re.S):
+        for c in re.finditer(r'<c r="([A-Z]+)\d+"(?: s="(\d+)")?', row):
             col = column_index_from_string(c.group(1)) - 1
-            if col < 16:
+            if col < n:
                 styles[col][c.group(2)] += 1
-            f = re.search(r'<f>(.*?)</f>', c.group(3) or '', re.S)
-            if f and col == PER_CODE_COL:
-                formulas[f.group(1)] += 1
-    return [s.most_common(1)[0][0] if s else None for s in styles], (formulas.most_common(1)[0][0] if formulas else None)
+    return [s.most_common(1)[0][0] if s else None for s in styles]
 
 def write_space_report(result, path, template_path=None, properties=None, floors=None):
     template_path = template_path or find_template()
@@ -166,18 +181,22 @@ def write_space_report(result, path, template_path=None, properties=None, floors
         table_xml = z.read(table_path).decode('utf-8')
         sheet_xml = z.read(sheet_path).decode('utf-8')
         header_row = int(re.search(r'<table [^>]*ref="[A-Z]+(\d+):', table_xml).group(1))
+        names, formulas = table_columns(table_xml)
+        n = len(names)
+        col = {name: i for i, name in enumerate(names)}
 
-        # the template's own rows -> baseline for what the app doesn't store (sq ft, group, fund, orgn, OREM)
+        # the template's own rows -> baseline for what the app doesn't store (count of rooms not visited, notes, ...)
         baseline = pd.read_excel(template_path, sheet_name=sheet_name(z, sheet_path), header=header_row - 1)
         baseline_rows = {}
-        for values in baseline.iloc[:, :16].itertuples(index=False):
+        for values in baseline.iloc[:, :n].itertuples(index=False):
             baseline_rows.setdefault((key(values[0]), key(values[1]), key(values[2])), list(values))
 
         start, end = sheet_xml.index('<sheetData>') + len('<sheetData>'), sheet_xml.index('</sheetData>')
         all_rows = re.findall(r'<row [^>]*/>|<row [^>]*>.*?</row>', sheet_xml[start:end], re.S)
         row_number = lambda row: int(re.search(r' r="(\d+)"', row).group(1))
         top_rows = [row for row in all_rows if row_number(row) <= header_row]
-        styles, formula = row_styles_and_formula([row for row in all_rows if row_number(row) > header_row])
+        styles = row_styles([row for row in all_rows if row_number(row) > header_row], n)
+        style = lambda c: f' s="{styles[c]}"' if styles[c] else ''
 
         # new rows -> app values over the template's row for the same room
         first = header_row + 1
@@ -186,27 +205,30 @@ def write_space_report(result, path, template_path=None, properties=None, floors
         for i, room in enumerate(rooms.itertuples(index=False)):
             r = first + i
             k = (key(room.property), key(room.floor), key(room.space))
-            values = list(baseline_rows.get(k, [None] * 16))
+            values = list(baseline_rows.get(k, [None] * n))
             matched += k in baseline_rows
-            for col, field in APP_COLS.items():
-                values[col] = getattr(room, field)
-            if blank(values[SQ_FT_COL]) and not blank(room.area_m2):
-                values[SQ_FT_COL] = round(room.area_m2 * SQ_FT_PER_SQ_M, 3)
-            if room.visited == 1 and not blank(room.capacity):
-                values[SITE_COUNT_COL] = int(room.capacity)
-            if not blank(room.room_type_override):
-                values[ROOM_TYPE_COL] = room.room_type_override
-            if not blank(room.note):
-                values[NOTES_COL] = room.note
+            for name, field in APP_COLS.items():
+                if name in col:
+                    values[col[name]] = getattr(room, field)
+            # site count for visited rooms; the per code load the app works out (the report's own column is broken)
+            if COUNT_COL in col and room.visited == 1 and not blank(room.capacity):
+                values[col[COUNT_COL]] = int(room.capacity)
+            if PER_CODE_COL in col:
+                values[col[PER_CODE_COL]] = int(room.per_code_load)
+            if ROOM_TYPE_COL in col and not blank(room.room_type_override):
+                values[col[ROOM_TYPE_COL]] = room.room_type_override
+            if NOTE_COL in col and not blank(room.note):
+                values[col[NOTE_COL]] = room.note
             cells = [cell(f"{get_column_letter(c + 1)}{r}", styles[c], v) for c, v in enumerate(values)]
-            if formula:
-                s = f' s="{styles[PER_CODE_COL]}"' if styles[PER_CODE_COL] else ''
-                cells[PER_CODE_COL] = f'<c r="{get_column_letter(PER_CODE_COL + 1)}{r}"{s}><f>{formula}</f></c>'
-            new_rows.append(f'<row r="{r}" spans="1:16">' + ''.join(cells) + '</row>')
+            # calculated columns (Pictures link) -> the table's formula for this row, Excel works it out on open
+            for c, f in enumerate(formulas):
+                if f:
+                    cells[c] = f'<c r="{get_column_letter(c + 1)}{r}"{style(c)} t="str"><f>{formula_for_row(f, first, r)}</f></c>'
+            new_rows.append(f'<row r="{r}" spans="1:{n}">' + ''.join(cells) + '</row>')
         if not new_rows:
             # an Excel table needs at least one data row
-            new_rows.append(f'<row r="{first}" spans="1:16">'
-                            + ''.join(cell(f"{get_column_letter(c + 1)}{first}", styles[c], None) for c in range(16)) + '</row>')
+            new_rows.append(f'<row r="{first}" spans="1:{n}">'
+                            + ''.join(cell(f"{get_column_letter(c + 1)}{first}", styles[c], None) for c in range(n)) + '</row>')
         last = first + len(new_rows) - 1
 
         sheet_xml = sheet_xml[:start] + ''.join(top_rows) + ''.join(new_rows) + sheet_xml[end:]
@@ -215,7 +237,7 @@ def write_space_report(result, path, template_path=None, properties=None, floors
         sheet_xml = re.sub(r'activeCell="[A-Z]+\d+" sqref="[^"]*"', f'activeCell="A{first}" sqref="A{first}"', sheet_xml)
         sheet_xml = re.sub(r'(<dataValidation [^>]*sqref=")([A-Z]+)\d+:([A-Z]+)\d+"', rf'\g<1>\g<2>{first}:\g<3>{last}"', sheet_xml)
 
-        # table covers the new rows; clear the saved filter (the template was saved filtered to ECS)
+        # table covers the new rows; clear the saved filter (the template was saved filtered)
         table_xml = re.sub(r'ref="([A-Z]+)(\d+):([A-Z]+)\d+"', rf'ref="\g<1>\g<2>:\g<3>{last}"', table_xml)
         table_xml = re.sub(r'<filterColumn .*?</filterColumn>', '', table_xml, flags=re.S)
 
