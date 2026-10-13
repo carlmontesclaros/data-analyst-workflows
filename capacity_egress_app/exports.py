@@ -32,9 +32,9 @@ ROOM_COLS = {'property': 'Property', 'floor': 'Floor', 'space': 'Space', 'room_w
              'in_latest_report': 'in_latest_report', 'floor_key': 'floor_key'}
 WARNING_COLS = {'type': 'type', 'property': 'Property', 'floor': 'Floor', 'detail': 'detail'}
 
-STATUS_FILLS = {egress.STATUS_REVIEW: PatternFill('solid', fgColor='F8CBAD'),
-                egress.STATUS_WITHIN: PatternFill('solid', fgColor='C6EFCE'),
-                egress.STATUS_NOT_SURVEYED: PatternFill('solid', fgColor='E7E6E6')}
+# row colours -> same as the app: red over exit capacity, amber other review, green within, grey not surveyed
+COLOUR_FILLS = {egress.GREEN: PatternFill('solid', fgColor='C6EFCE'), egress.AMBER: PatternFill('solid', fgColor='FFEB9C'),
+                egress.RED: PatternFill('solid', fgColor='FFC7CE'), egress.GREY: PatternFill('solid', fgColor='E7E6E6')}
 
 def pick(df, properties=None, floors=None):
     if properties:
@@ -68,14 +68,12 @@ def write_results_workbook(result, path, properties=None, floors=None):
             for name, df in tables.items():
                 df.to_excel(writer, sheet_name=name, index=False)
             format_sheets(writer)
-            # status colours -> whole row on floor_summary
+            # zone colours -> whole row on floor_summary
             ws = writer.sheets['floor_summary']
-            status_idx = list(summary.columns).index('status')
-            for row in ws.iter_rows(min_row=2):
-                fill = STATUS_FILLS.get(row[status_idx].value)
-                if fill:
-                    for cell in row:
-                        cell.fill = fill
+            colours = pick(result['zones'], properties, floors).apply(egress.zone_colour, axis=1).tolist() if len(summary) else []
+            for row, colour in zip(ws.iter_rows(min_row=2), colours):
+                for cell in row:
+                    cell.fill = COLOUR_FILLS[colour]
     except PermissionError:
         raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again")
     return {name: len(df) for name, df in tables.items()}
@@ -265,3 +263,124 @@ def write_space_report(result, path, template_path=None, properties=None, floors
         except PermissionError:
             raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again")
     return {'rooms': len(rooms), 'matched_template': int(matched), 'template': os.path.basename(template_path)}
+
+
+# capacity check summary -> one-page .docx to attach to the email to Mark
+# a .docx is a zip of xml files, so it's written here directly: nothing extra to install
+FILL = {egress.GREEN: 'C6EFCE', egress.AMBER: 'FFEB9C', egress.RED: 'FFC7CE', egress.GREY: 'E7E6E6', egress.NONE: None}
+CHECK_FOOTER = ("Screening only, not an approval. An editor reviews every change before it is saved. "
+                "Email this summary to Mark Arrojado with the reason for the request.")
+
+DOCX_TYPES = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+              '<Default Extension="xml" ContentType="application/xml"/>'
+              '<Override PartName="/word/document.xml" '
+              'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+              '<Override PartName="/word/styles.xml" '
+              'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>')
+DOCX_RELS = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+             'Target="word/document.xml"/></Relationships>')
+DOCX_DOC_RELS = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                 '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+                 'Target="styles.xml"/></Relationships>')
+W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+DOCX_STYLES = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+               f'<w:styles {W}><w:docDefaults><w:rPrDefault><w:rPr>'
+               '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="20"/></w:rPr></w:rPrDefault>'
+               '<w:pPrDefault><w:pPr><w:spacing w:after="80"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>')
+
+def para(text, bold=False, size=None, colour=None, after=None):
+    rpr = ('<w:b/>' if bold else '') + (f'<w:color w:val="{colour}"/>' if colour else '') + \
+          (f'<w:sz w:val="{size * 2}"/>' if size else '')
+    ppr = f'<w:pPr><w:spacing w:after="{after}"/></w:pPr>' if after is not None else ''
+    return (f'<w:p>{ppr}<w:r>{"<w:rPr>" + rpr + "</w:rPr>" if rpr else ""}'
+            f'<w:t xml:space="preserve">{escape(str(text))}</w:t></w:r></w:p>')
+
+def table(header, rows, fills, widths):
+    # widths in twentieths of a point; fills = one colour per row (or None)
+    border = ''.join(f'<w:{side} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>'
+                     for side in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'])
+    def row(values, fill, bold=False):
+        cells = ''
+        for value, width in zip(values, widths):
+            shade = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>' if fill else ''
+            cells += (f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa"/>{shade}</w:tcPr>'
+                      f'{para(value, bold=bold, after=0)}</w:tc>')
+        return f'<w:tr>{cells}</w:tr>'
+    grid = ''.join(f'<w:gridCol w:w="{w}"/>' for w in widths)
+    return (f'<w:tbl><w:tblPr><w:tblW w:w="{sum(widths)}" w:type="dxa"/><w:tblBorders>{border}</w:tblBorders>'
+            f'<w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>'
+            f'<w:tblGrid>{grid}</w:tblGrid>{row(header, "D9D9D9", bold=True)}'
+            + ''.join(row(r, f) for r, f in zip(rows, fills)) + '</w:tbl>')
+
+def check_file_name(check, when=None):
+    first = check['rooms'][0]
+    initials = ''.join(word[0] for word in re.findall(r'[A-Za-z]+', first['property']) if word[0].isupper())
+    rooms = '_'.join(sanitize_part(r['space']) for r in check['rooms'][:3]) + ('_more' if len(check['rooms']) > 3 else '')
+    return f"capacity_check_{initials}_{rooms}_{(when or pd.Timestamp.now()):%Y-%m-%d}.docx"
+
+def sanitize_part(text):
+    return re.sub(r'[^A-Za-z0-9-]+', '-', str(text)).strip('-')
+
+def write_check_summary(check, path, user_name, when=None):
+    when = when or pd.Timestamp.now()
+    if not check['rooms']:
+        raise ValueError("the check has no rooms")
+    prop = check['rooms'][0]['property']
+    body = [para("Room capacity check", bold=True, size=16, after=40),
+            para(f"{prop}   |   {when:%B %d, %Y %H:%M}   |   run by {user_name}   |   {check['code_edition']}",
+                 colour='595959', after=200)]
+
+    body.append(para("Rooms", bold=True, size=12, after=60))
+    rows, fills = [], []
+    for r in check['rooms']:
+        current = '-' if r['current'] is None else r['current']
+        scope = '' if r['in_scope'] else ' (out of scope: not counted toward the floor)'
+        rows.append([f"Floor {r['floor']}  {r['space']}", r['room_type'] or '-', f"{current} ({r['current_source']})",
+                     r['proposed'], r['per_code_load'], r['verdict'] + scope])
+        fills.append(FILL[r['colour']])
+    body.append(table(['Room', 'Type', 'Capacity now', 'Proposed', 'Per code load', 'Result'], rows, fills,
+                      [1500, 1100, 1500, 1000, 1100, 3400]))
+
+    body.append(para("", after=120))
+    body.append(para("Floor exits: occupant load vs exit capacity", bold=True, size=12, after=60))
+    rows, fills = [], []
+    for z in check['zones']:
+        zone = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '')
+        capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
+        result = z['verdict'] + (f" (also: {z['other_flags']})" if z['other_flags'] else '')
+        rows.append([zone + (' *' if z['has_checked_room'] else ''), f"{z['load_before']} -> {z['load_after']}", capacity, result])
+        fills.append(FILL[z['colour']])
+    body.append(table(['Zone', 'Occupant load now -> with change', 'Exit capacity', 'Result'], rows, fills,
+                      [1800, 2400, 1300, 4100]))
+    body.append(para("* zone holding a room in this check", colour='595959', after=200))
+
+    body.append(para("What the results mean", bold=True, after=40))
+    for line in ["Within per code: the proposed number is at or under the building code's area-based number for the room.",
+                 "Needs justification: over the per code load. Allowed only when the higher number can be shown "
+                 "(fixed seats, a posted sign; BCBC 2024 3.1.17.1.(1)(c)), so an editor looks into it.",
+                 "Over exit capacity: the floor's measured exits can't carry the occupant load with this change.",
+                 egress.CANT_CHECK]:
+        body.append(para("- " + line, after=20))
+    body.append(para("", after=120))
+    body.append(para(CHECK_FOOTER, bold=True))
+
+    sect = ('<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>'
+            '<w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000" w:header="500" w:footer="500" w:gutter="0"/>'
+            '</w:sectPr>')
+    document = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W}><w:body>'
+                + ''.join(body) + sect + '</w:body></w:document>')
+    try:
+        with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as out:
+            out.writestr('[Content_Types].xml', DOCX_TYPES)
+            out.writestr('_rels/.rels', DOCX_RELS)
+            out.writestr('word/_rels/document.xml.rels', DOCX_DOC_RELS)
+            out.writestr('word/styles.xml', DOCX_STYLES)
+            out.writestr('word/document.xml', document)
+    except PermissionError:
+        raise PermissionError(f"can't write {path} - it's probably open in Word. close it and try again")
+    return path

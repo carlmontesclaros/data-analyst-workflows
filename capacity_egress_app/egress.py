@@ -225,3 +225,96 @@ def calculate_floor(rooms, exits, factors, prop, floor):
     r = rooms[(rooms['property'] == prop) & (rooms['floor'] == floor)]
     e = exits[(exits['property'] == prop) & (exits['floor'] == floor)]
     return calculate(r, e, factors)
+
+# colours -> same meaning on every table (README "Colours"): red only ever means over a hard limit
+GREEN, AMBER, RED, GREY, NONE = 'green', 'amber', 'red', 'grey', ''
+
+def room_colour(room):
+    if not room['in_scope']:
+        return NONE
+    capacity = pd.to_numeric(room['capacity'], errors='coerce')
+    if pd.isna(capacity):
+        return GREY                                   # not visited -> per code
+    if pd.notna(room['area_per_person_m2']) and capacity > room['per_code_load']:
+        return AMBER                                  # needs justification (BCBC 2024 3.1.17.1.(1)(c))
+    return GREEN
+
+def zone_colour(zone):
+    if zone['status'] == STATUS_NOT_SURVEYED:
+        return GREY
+    if zone['total_load'] > zone['exit_capacity']:
+        return RED
+    return AMBER if zone['status'] == STATUS_REVIEW else GREEN
+
+def exit_colour(exit_row):
+    check = str(exit_row['width_check'])
+    if not exit_row['counts_as_exit'] or check == 'unknown':
+        return GREY
+    if check.startswith('fail'):
+        return RED
+    return AMBER if check.startswith('review') else GREEN
+
+# capacity check -> what if these rooms had these capacities? nothing is saved
+CANT_CHECK = "Can't check egress: exits on this floor haven't been measured."
+
+def room_verdict(room, proposed):
+    if pd.isna(room['area_per_person_m2']):
+        return 'no per code load (no room type)', 0
+    over = int(proposed) - int(room['per_code_load'])
+    if over > 0:
+        return f"needs justification, +{over} over per code", over
+    return 'within per code', 0
+
+def check_capacities(rooms, exits, factors, changes):
+    # rooms / exits / factors straight from the database; changes = {room_id: proposed capacity}
+    changes = {int(k): int(v) for k, v in changes.items()}
+    picked = rooms[rooms['room_id'].isin(changes)]
+    if len(picked) != len(changes):
+        raise ValueError("a room in the check isn't in the database any more")
+    if picked['property'].nunique() > 1:
+        raise ValueError("a check holds rooms from one building only")
+    trial = rooms.copy()
+    for room_id, proposed in changes.items():
+        if proposed < 0:
+            raise ValueError("a capacity can't be negative")
+        mask = trial['room_id'] == room_id
+        trial.loc[mask, 'capacity'] = proposed
+        trial.loc[mask, 'capacity_source'] = 'PM change'
+
+    room_rows, zone_rows = [], []
+    for (prop, floor), floor_rooms in picked.groupby(['property', 'floor'], sort=True):
+        before = calculate_floor(rooms, exits, factors, prop, floor)
+        after = calculate_floor(trial, exits, factors, prop, floor)
+        split = (after['zones']['zone_wing'] != '').any()
+        now = before['rooms'].set_index('room_id')
+        for room_id in floor_rooms['room_id']:
+            r = now.loc[room_id]
+            verdict, over = room_verdict(r, changes[room_id])
+            capacity = pd.to_numeric(r['capacity'], errors='coerce')
+            room_rows.append({'room_id': int(room_id), 'property': prop, 'floor': floor, 'space': r['space'],
+                              'zone_wing': r['room_wing'] if split else '',
+                              'room_type': r['room_type'], 'area_m2': r['area_m2'],
+                              'current': None if pd.isna(capacity) else int(capacity),
+                              'current_source': r['capacity_source'] if pd.notna(capacity) else 'per code',
+                              'proposed': changes[room_id], 'per_code_load': int(r['per_code_load']),
+                              'in_scope': bool(r['in_scope']), 'verdict': verdict, 'over_per_code': over,
+                              'colour': AMBER if over > 0 else (GREEN if r['in_scope'] else NONE)})
+        old = before['zones'].set_index('zone_wing')
+        changed_wings = {row['zone_wing'] for row in room_rows if row['floor'] == floor and row['property'] == prop}
+        for _, z in after['zones'].sort_values('zone_wing').iterrows():
+            load_before = int(old.loc[z['zone_wing'], 'total_load']) if z['zone_wing'] in old.index else 0
+            over = int(z['total_load']) - int(z['exit_capacity'])
+            if z['status'] == STATUS_NOT_SURVEYED:
+                verdict = CANT_CHECK
+            elif over > 0:
+                verdict = f"over exit capacity by {over}"
+            else:
+                verdict = 'within exit capacity'
+            other = [f for f in z['flags'].split('; ') if f and f != 'occupant load over exiting capacity']
+            zone_rows.append({'property': prop, 'floor': floor, 'zone_wing': z['zone_wing'],
+                              'has_checked_room': z['zone_wing'] in changed_wings,
+                              'load_before': load_before, 'load_after': int(z['total_load']),
+                              'exit_capacity': int(z['exit_capacity']), 'verdict': verdict,
+                              'other_flags': '; '.join(other), 'colour': zone_colour(z)})
+    return {'rooms': room_rows, 'zones': zone_rows,
+            'code_edition': read_settings(factors['settings'])['code_edition']}

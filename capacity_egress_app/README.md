@@ -24,7 +24,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 ## How it will work
 
 - **One SQLite database file** in the project folder on the S: drive. It's the only place anyone types.
-- **A Tkinter desktop app** installed on each user's Windows machine (Python + `pandas` + `openpyxl`). Everyone who has it can edit everything.
+- **A Tkinter desktop app** installed on each user's Windows machine (Python + `pandas` + `openpyxl`). **Editors** change the numbers; everyone else is a **viewer** and can only look things up and run capacity checks (see [Editors and viewers](#editors-and-viewers)).
 - **The FMIS space report is read-only input.** It supplies the list of rooms. The app never writes to it.
 - **Excel only comes out as exports:** the space report (Carl's own space report as the template, filled with the app's rooms), and the results workbook (the 4-sheet egress output).
 
@@ -59,25 +59,88 @@ Steps 1–6 were built by Claude at Carl's request (2026-10-05), each checked ag
 | 5 | Exits + code factors editing | | done |
 | 6 | Space report export, results workbook, daily backup | | done |
 | 7 | Install on Mark's machine + written instructions | | next |
+| 8 | Editors and viewers: editor list by Windows login, Editors screen, change log of adds/removes ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)) | a viewer can't open the editor screen; the last editor can't be removed | built 2026-10-13, not yet tried by Carl |
+| 9 | Capacity check screen for everyone: search, try a number, floor result, summary .docx | DTB A120 → 300: needs justification (+117 over 183), Turpin 1 "can't check egress"; Turpin B303 24 → 160: wing B 161 → 297 vs 288, over by 9 | built 2026-10-13, not yet tried by Carl |
+| 10 | Colours on rooms, zones and exits + one legend | campus: zones 787 grey / 3 green; rooms 664 green, 54 amber, 13,734 grey | built 2026-10-13 |
+
+## Editors and viewers
+
+Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)).
+
+| | Editor | Viewer |
+|---|---|---|
+| Who | Mark, Carl, Carolyn, Karine, and whoever an editor adds | anyone else who opens the app (planning team; OREM later) |
+| Opens on | the capacity check screen | the capacity check screen |
+| Editor screen (today's full screen) | yes, with the **Editor screen** button | no |
+| Change room capacities, exits, code factors, notes | yes, each logged with why | no |
+| Load a space report, exports | yes | no |
+| Add or remove editors | yes, on the **Editors** screen | no |
+
+- **Who you are** comes from your Windows login (your own UVic account, on any PC). No password, nothing to type.
+- **Adding an editor:** they open the app once (they show up on the Editors screen), then any editor ticks **Editor** beside their name. A login can also be typed in for someone who hasn't opened it yet. Every add and remove goes in the change log. The last editor can't be removed.
+- **Never tick a shared or generic Windows account.** Everyone using it would be an editor.
+- **First editor:** if the editor list is empty (a new database), the first person to open the app is asked to become the first editor. Carl opens it first after installing.
+- **The lock is inside the app.** Someone with write access to the S: drive folder could still change the database file with other tools. To-do: ask IT to make the folder read-only for everyone except the editors.
+
+## Capacity check screen
+
+The first screen everyone sees. Built for a quick question like "can DTB A120 go from 250 to 300?" before emailing Mark.
+
+1. **Search** a building, floor or room (`DTB A120`, `Turpin`, `A120`), or pick building → floor → room.
+2. **Room card:** room, type, area, current room capacity and its source, per code load, colour.
+3. **New capacity → Check.** **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
+4. **Result:**
+   - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) allows a higher number when it can be shown (fixed seats, a posted sign), so an editor looks into it.
+   - **Each zone on the floor:** occupant load now → with the change, against exit capacity: **within**, **over by N**, or **"Can't check egress: exits on this floor haven't been measured."** An unmeasured floor is never shown as fine.
+5. **Save summary (.docx)**: one page to attach to the email to Mark. It lists, for each room, current capacity and source, proposed number, per code load and verdict; for each zone, occupant load now → after, exit capacity and verdict; the date, who ran it and the code edition. The footer reads "Screening only, not an approval. An editor reviews every change." The request's reason goes in the email. The file is written by the app itself, so nothing extra is installed.
+
+The check screen **never saves**. An editor who wants to apply a change presses **Editor screen**: the check screen is replaced by the editor screen, opened on the room picked (if any), where Change capacity previews the floor and asks why. **← Check screen** on the editor screen switches back, showing anything just saved. One window at a time; closing the editor screen closes the app.
+
+The look uses the Sun Valley ttk theme (MIT licence). Its files sit in the app folder, so there's nothing to install.
+
+## Colours
+
+Same meaning on every table. One legend sits on both screens.
+
+| Colour | Rooms | Zones | Exits |
+|---|---|---|---|
+| Green | visited, capacity at or under the per code load | within exit capacity | width OK |
+| Amber | capacity over the per code load: **needs justification** | REVIEW for any other flag (fewer than 2 exits, width review, link traffic both ways, ...) | width needs review |
+| Red | | occupant load **over exit capacity** | width under the minimum |
+| Grey | not visited (uses the per code load) | NOT SURVEYED (no exits measured) | not counted as an exit (open stair, unknown type) |
+| No colour | out of scope (lounges, non-assignable) | | |
+
+Red only ever means over a hard limit.
+
+## Future (recorded, not built)
+
+- **A web link for viewers**, so OREM and others don't need anything installed. Starts with asking UVic IT and Mark; Mark's comment on the NFR questions says there will be no outside hosting. `egress.py` already holds the calculation apart from the window, so a web version can reuse it.
+- **"Request this change"**: a check saved as a request that editors approve or reject in the app.
+- **S: drive folder permissions** from IT (editors write, everyone else reads).
+- The `.db` stays on the S: drive, not a SharePoint-synced folder (sync can corrupt it mid-save). Exports and the guide can go on SharePoint.
 
 ## Folder layout
 
 ```
 capacity_egress_app/
   README.md
-  app.py                   the desktop app (Tkinter)
-  capacity_db.py           schema, first import, space report refresh, edits + audit log, backup
+  app.py                   start-up (editor or viewer), the editor screen, the Editors screen
+  check_screen.py          the capacity check screen everyone opens on
+  colours.py               row colours + legend shared by both screens
+  capacity_db.py           schema, first import, space report refresh, edits + audit log, editors, backup
   egress.py                occupant load vs exit capacity, read from the database
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
-  exports.py               results workbook + space report export
+  exports.py               results workbook, space report export, capacity check summary (.docx)
+  theme/sun_valley/        Sun Valley ttk theme files (MIT licence), loaded from the folder, nothing to install
   build_database.py        one-time first import
-  test_*.py                pytest (57 tests)
+  test_*.py                pytest (70 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
     backups/               daily copies, last 30
     input/                 space report + floor_exits.xlsx for the first import
     template/              the space report template the export fills (any .xlsx name)
+    old_templates/         earlier templates (26-09-15 ROOM CAPACITY)
     old_results/           workbooks from the retired exit_capacity.py script
 ```
 
@@ -221,6 +284,7 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 | Residences (17.x) excluded; they use persons per sleeping room, not area | Pending | |
 
 ## Open questions
+
 
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.

@@ -2,13 +2,14 @@ import os
 import sys
 import getpass
 import sqlite3
-import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import pandas as pd
 import capacity_db as db
 import egress
 import exports
+import colours
+from check_screen import CheckScreen, open_path, use_theme
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,8 +23,6 @@ BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py s
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
 
-STATUS_TAGS = {egress.STATUS_REVIEW: 'review', egress.STATUS_WITHIN: 'within', egress.STATUS_NOT_SURVEYED: 'not_surveyed'}
-
 def sanitize(name):
     for c in BAD_CHARS:
         name = name.replace(c, '-')
@@ -32,22 +31,15 @@ def sanitize(name):
 def text_or_blank(v):
     return '' if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
 
-def open_path(path):
-    if sys.platform == 'win32':
-        os.startfile(path)
-    elif sys.platform == 'darwin':
-        subprocess.run(['open', path])
-    else:
-        subprocess.run(['xdg-open', path])
-
 
 class App:
-    def __init__(self, root, conn, user_login, user_name):
+    def __init__(self, root, conn, user_login, user_name, on_back=None):
         self.root = root
         self.conn = conn
         self.user_login = user_login
         self.user_name = user_name
-        root.title(f"Capacity & Egress - {user_name}")
+        self.on_back = on_back                         # back to the check screen
+        root.title(f"Capacity & Egress - editor screen - {user_name}")
         root.geometry("1400x820")
         self.build_widgets()
         self.reload()
@@ -126,9 +118,12 @@ class App:
 
         menu = ttk.Frame(self.root, padding=(6, 0))
         menu.pack(fill='x')
+        if self.on_back:
+            ttk.Button(menu, text="← Check screen", style='Accent.TButton', command=self.on_back).pack(side='left', padx=(2, 12))
         for text, cmd in [("Refresh", self.manual_refresh),
                           ("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
                           ("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
+                          ("Editors", lambda: editors_dialog(self.root, self.conn, self.user_login, self.user_name)),
                           ("Change my name", self.change_name)]:
             ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=2)
 
@@ -140,9 +135,7 @@ class App:
         self.zone_tree = self.make_tree(zone_frame, [
             ('floor', 70), ('zone_wing', 60), ('status', 260), ('total_load', 90), ('exit_capacity', 100),
             ('exit_count', 70), ('rooms_counted', 100), ('rooms_in_scope', 100), ('link_inflow', 80), ('flags', 420)], height=7)
-        self.zone_tree.tag_configure('review', background='#F8CBAD')
-        self.zone_tree.tag_configure('within', background='#C6EFCE')
-        self.zone_tree.tag_configure('not_surveyed', background='#E7E6E6')
+        colours.colour_tags(self.zone_tree)
         self.zone_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_zone())
         panes.add(zone_frame, weight=2)
 
@@ -157,7 +150,8 @@ class App:
             ('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 70), ('room_type', 80),
             ('per_code_load', 90), ('capacity', 70), ('capacity_source', 90), ('load_used', 75), ('in_scope', 65),
             ('flag', 180), ('note', 250)], height=12)
-        self.room_tree.tag_configure('missing', foreground='#A00000')
+        colours.colour_tags(self.room_tree)
+        self.room_tree.tag_configure('missing', foreground='#A00000')     # after the colours, so red text wins
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
         panes.add(room_frame, weight=4)
 
@@ -172,11 +166,13 @@ class App:
             ('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 100), ('persons', 70),
             ('counts_as_exit', 100), ('width_check', 220), ('into_wing', 70), ('measured_date', 100),
             ('measured_by', 90), ('notes', 250)], height=5)
+        colours.colour_tags(self.exit_tree)
         self.exit_tree.bind('<Double-1>', lambda e: self.edit_exit())
         panes.add(exit_frame, weight=2)
 
         self.status_var = tk.StringVar()
         ttk.Label(self.root, textvariable=self.status_var, padding=4, relief='sunken').pack(fill='x', side='bottom')
+        colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
@@ -255,7 +251,7 @@ class App:
             values = [z['floor'] if self.building_var.get() else f"{z['property']} {z['floor']}"] + \
                      [z[c] for c in ['zone_wing', 'status', 'total_load', 'exit_capacity', 'exit_count',
                                      'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
-            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(STATUS_TAGS.get(z['status'], ''),))
+            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(egress.zone_colour(z),))
 
         self.room_tree.delete(*self.room_tree.get_children())
         for _, r in rooms.sort_values(['property', 'floor', 'space']).head(3000).iterrows():
@@ -268,8 +264,8 @@ class App:
             values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
                       '; '.join(flag), text_or_blank(r['note'])]
-            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
-                                  tags=('missing',) if r['in_latest_report'] == 0 else ())
+            tags = [egress.room_colour(r)] + (['missing'] if r['in_latest_report'] == 0 else [])
+            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values, tags=[t for t in tags if t])
 
         self.exit_tree.delete(*self.exit_tree.get_children())
         for _, e in exits.sort_values(['floor', 'wing', 'exit_id']).iterrows():
@@ -277,7 +273,7 @@ class App:
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, e['persons'],
                       'yes' if e['counts_as_exit'] else 'no', e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
-            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values)
+            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
 
         shown = f"{len(rooms)} rooms" + (" (first 3000 shown)" if len(rooms) > 3000 else '')
         self.status_var.set(f"{shown}, {len(zones)} zones, {len(exits)} exits   |   database: {DB_PATH}")
@@ -319,6 +315,17 @@ class App:
     def after_change(self, message):
         self.reload()
         self.status_var.set(message)
+
+    # from the check screen -> show that room's building and floor, room selected
+    def focus_room(self, room):
+        self.building_var.set(room['property'])
+        self.pick_building()
+        self.floor_var.set(room['floor'])
+        self.show()
+        iid = f"r{int(room['room_id'])}"
+        if self.room_tree.exists(iid):
+            self.room_tree.selection_set(iid)
+            self.room_tree.see(iid)
 
     # change capacity -> preview the zone, then save or cancel
     def change_capacity(self):
@@ -778,29 +785,138 @@ class App:
             self.root.title(f"Capacity & Egress - {self.user_name}")
 
 
+# editors -> any editor adds or removes editors; every change is in the change log (ADR 0003)
+def editors_dialog(parent, conn, user_login, user_name):
+    if not db.is_editor(conn, user_login):
+        messagebox.showinfo("Editors only", "Only editors can change who is an editor.", parent=parent)
+        return
+    win = tk.Toplevel(parent)
+    win.title("Editors")
+    win.transient(parent)
+    win.grab_set()
+    frame = ttk.Frame(win, padding=14)
+    frame.pack(fill='both', expand=True)
+    ttk.Label(frame, text="Editors change room capacities, exits and code factors. Everyone else is a viewer.",
+              wraplength=520).pack(anchor='w')
+    ttk.Label(frame, text="Only tick a person's own UVic login, never a shared or generic account.",
+              foreground='#B00020', wraplength=520).pack(anchor='w', pady=(4, 8))
+    tree = ttk.Treeview(frame, columns=['name', 'login', 'editor'], show='headings', height=12, selectmode='browse')
+    for col, text, width in [('name', 'Name', 200), ('login', 'Windows login', 180), ('editor', 'Editor', 80)]:
+        tree.heading(col, text=text, anchor='w')
+        tree.column(col, width=width, anchor='w')
+    tree.pack(fill='both', expand=True)
+    ttk.Label(frame, text="Not in the list? They open the app once, or use Add by login.",
+              foreground='#6A6A6A').pack(anchor='w', pady=(6, 0))
+
+    def fill():
+        tree.delete(*tree.get_children())
+        for _, u in db.list_users(conn).iterrows():
+            tree.insert('', 'end', iid=u['user_login'], values=[u['user_name'], u['user_login'], 'yes' if u['is_editor'] else ''])
+
+    def change(login, editor):
+        try:
+            db.set_editor(conn, login, editor, user_login, user_name)
+        except (ValueError, PermissionError, sqlite3.Error) as err:
+            messagebox.showerror("Not changed", str(err), parent=win)
+            return
+        fill()
+
+    def selected():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showinfo("Pick a person", "Select a person in the list first.", parent=win)
+        return sel[0] if sel else None
+
+    def make():
+        login = selected()
+        if login:
+            change(login, True)
+
+    def remove():
+        login = selected()
+        if login and messagebox.askyesno("Remove editor", f"{login} will only be able to view. Continue?", parent=win):
+            change(login, False)
+            if login == user_login:
+                messagebox.showinfo("You are a viewer now", "Close and reopen the app.", parent=win)
+
+    def add_by_login():
+        login = simpledialog.askstring("Add by login", "Their Windows login (UVic account):", parent=win)
+        if login and login.strip():
+            change(login.strip(), True)
+
+    def set_name():
+        login = selected()
+        if login:
+            name = simpledialog.askstring("Name", f"Name shown for {login}:", parent=win)
+            if name and name.strip():
+                db.set_user_name(conn, login, name.strip())
+                fill()
+
+    buttons = ttk.Frame(frame)
+    buttons.pack(fill='x', pady=(10, 0))
+    ttk.Button(buttons, text="Make editor", command=make).pack(side='left', padx=(0, 4))
+    ttk.Button(buttons, text="Remove editor", command=remove).pack(side='left', padx=4)
+    ttk.Button(buttons, text="Add by login", command=add_by_login).pack(side='left', padx=4)
+    ttk.Button(buttons, text="Set name", command=set_name).pack(side='left', padx=4)
+    ttk.Button(buttons, text="Close", command=win.destroy).pack(side='right')
+    win.bind('<Escape>', lambda e: win.destroy())
+    fill()
+
+
 def main():
     root = tk.Tk()
+    root.withdraw()
     if not os.path.exists(DB_PATH):
-        root.withdraw()
         messagebox.showerror("No database", f"{DB_PATH} doesn't exist.\nRun build_database.py once first.")
         return
     conn = db.connect(DB_PATH)
-    db.create_schema(conn)                       # adds any table a newer version needs
-    db.backup_database(conn, BACKUP_DIR)
-
     user_login = getpass.getuser()
-    user_name = db.get_user_name(conn, user_login)
-    if not user_name:
-        root.withdraw()
-        user_name = simpledialog.askstring("Your name", f"First time on this computer ({user_login}).\n"
-                                           "Name to show in the change log:", parent=root)
-        if not user_name or not user_name.strip():
-            return
-        user_name = user_name.strip()
-        db.set_user_name(conn, user_login, user_name)
-        root.deiconify()
+    try:
+        db.create_schema(conn)                   # adds any table or column a newer version needs
+        db.backup_database(conn, BACKUP_DIR)
+        db.register_user(conn, user_login)       # so an editor can find them on the Editors screen
+    except (sqlite3.Error, OSError):
+        pass                                     # read-only folder (viewers) -> reading still works
 
-    App(root, conn, user_login, user_name)
+    # no editors yet (new database, or the first open after editors were added) -> first person becomes one
+    if db.editor_count(conn) == 0:
+        if messagebox.askyesno("First editor", f"Nobody is an editor yet.\n\nMake {user_login} the first editor? "
+                               "Editors can change capacities, exits and code factors, and add other editors."):
+            db.set_editor(conn, user_login, True, user_login, db.get_user_name(conn, user_login) or user_login,
+                          why='first editor')
+
+    themed = use_theme(root)
+    editor_screen = {}
+
+    # one window at a time: the editor screen replaces the check screen, and back
+    def open_editor(room=None):
+        if not db.is_editor(conn, user_login):
+            messagebox.showinfo("Editors only", "Only editors can open the editor screen.", parent=root)
+            return
+        app = editor_screen.get('app')
+        if app is None or not app.root.winfo_exists():
+            win = tk.Toplevel(root)
+            app = App(win, conn, user_login, db.get_user_name(conn, user_login) or user_login, on_back=back_to_check)
+            editor_screen['app'] = app
+            win.protocol('WM_DELETE_WINDOW', root.destroy)      # closing the editor screen closes the app
+        else:
+            app.refresh_if_changed()
+        root.withdraw()
+        app.root.deiconify()
+        app.root.lift()
+        if room is not None:
+            app.focus_room(room)
+
+    def back_to_check():
+        editor_screen['app'].root.withdraw()             # kept, so going back to it is instant
+        check.reload()                                   # shows anything saved on the editor screen
+        root.deiconify()
+        root.lift()
+
+    check = CheckScreen(root, conn, user_login, themed, open_editor=open_editor,
+                        open_editors=lambda: editors_dialog(root, conn, user_login,
+                                                            db.get_user_name(conn, user_login) or user_login))
+    root.deiconify()
     root.mainloop()
     conn.close()
 

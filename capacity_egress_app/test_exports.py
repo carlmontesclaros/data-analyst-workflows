@@ -1,3 +1,4 @@
+import re
 import pytest
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -95,3 +96,31 @@ def test_space_report_one_floor_and_no_template(tmp_path):
 def test_formula_for_row_leaves_text_alone():
     f = 'HYPERLINK("S:\\A8 photos\\"&amp;A8&amp;$B$8&amp;Table1[[#This Row],[Space]],"Open")'
     assert exports.formula_for_row(f, 8, 15) == 'HYPERLINK("S:\\A8 photos\\"&amp;A15&amp;$B$8&amp;Table1[[#This Row],[Space]],"Open")'
+
+# capacity check summary .docx
+def test_check_summary_docx(tmp_path):
+    import zipfile
+    from xml.dom.minidom import parseString
+    rooms = pd.DataFrame([t.room('301', 60.55, 30, 'site count')])
+    rooms['room_id'] = [7]
+    check = t.egress.check_capacities(rooms, pd.DataFrame(t.TWO_DOORS, columns=t.EXIT_COLUMNS), t.factors(), {7: 40})
+    when = pd.Timestamp('2026-10-13 10:30')
+    name = exports.check_file_name(check, when)
+    assert name == 'capacity_check_FH_301_2026-10-13.docx'
+    path = exports.write_check_summary(check, tmp_path / name, 'Carl & co', when)
+    with zipfile.ZipFile(path) as z:
+        assert sorted(z.namelist()) == ['[Content_Types].xml', '_rels/.rels', 'word/_rels/document.xml.rels',
+                                        'word/document.xml', 'word/styles.xml']
+        doc = z.read('word/document.xml').decode('utf-8')
+        for part in z.namelist():
+            parseString(z.read(part))
+    text = ''.join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', doc))
+    for expected in ['Fake Hall', 'Carl &amp; co', 'needs justification, +7 over per code', '30 (site count)',
+                     'within exit capacity', 'Screening only, not an approval']:
+        assert expected in text
+    assert 'w:fill="FFEB9C"' in doc          # amber room row
+
+def test_results_workbook_zone_colours(tmp_path):
+    path = tmp_path / 'results.xlsx'
+    exports.write_results_workbook(result(), path)
+    assert load_workbook(path)['floor_summary']['A2'].fill.fgColor.rgb.endswith('C6EFCE')

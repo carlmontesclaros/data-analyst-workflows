@@ -89,12 +89,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE TABLE IF NOT EXISTS users (
     user_login TEXT PRIMARY KEY,
-    user_name TEXT NOT NULL
+    user_name TEXT NOT NULL,
+    is_editor INTEGER NOT NULL DEFAULT 0
 );
 """
 
 def create_schema(conn):
     conn.executescript(SCHEMA)
+    # databases built before editors existed -> add the column (nobody is an editor yet)
+    if 'is_editor' not in [row[1] for row in conn.execute("PRAGMA table_info(users)")]:
+        conn.execute("ALTER TABLE users ADD COLUMN is_editor INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
 
 # header detection
 SPACE_REPORT_HEADERS = {'property', 'floor', 'space'}
@@ -439,6 +444,43 @@ def set_user_name(conn, user_login, user_name):
     conn.execute("INSERT INTO users (user_login, user_name) VALUES (?, ?) "
                  "ON CONFLICT(user_login) DO UPDATE SET user_name = excluded.user_name", (user_login, user_name))
     conn.commit()
+
+def register_user(conn, user_login):
+    # everyone who opens the app is listed, so an editor can tick them without typing a login
+    conn.execute("INSERT OR IGNORE INTO users (user_login, user_name) VALUES (?, ?)", (user_login, user_login))
+    conn.commit()
+
+# editors -> change capacities, exits and code factors; everyone else is a viewer (ADR 0003)
+def is_editor(conn, user_login):
+    row = conn.execute("SELECT is_editor FROM users WHERE user_login = ?", (user_login,)).fetchone()
+    return bool(row and row[0])
+
+def editor_count(conn):
+    return conn.execute("SELECT COUNT(*) FROM users WHERE is_editor = 1").fetchone()[0]
+
+def list_users(conn):
+    return pd.read_sql("SELECT user_login, user_name, is_editor FROM users ORDER BY is_editor DESC, user_name", conn)
+
+def set_editor(conn, user_login, editor, by_login, by_name, why=None):
+    # by_login must be an editor, except when the list is empty (the first editor)
+    user_login = str(user_login or '').strip()
+    if not user_login:
+        raise ValueError("type the person's Windows login")
+    with write_transaction(conn):
+        editors = conn.execute("SELECT COUNT(*) FROM users WHERE is_editor = 1").fetchone()[0]
+        if editors and not is_editor(conn, by_login):
+            raise PermissionError("only editors can add or remove editors")
+        old = conn.execute("SELECT is_editor FROM users WHERE user_login = ?", (user_login,)).fetchone()
+        old = bool(old and old[0])
+        if old == bool(editor):
+            return False
+        if not editor and editors <= 1:
+            raise ValueError("can't remove the last editor - add someone else first")
+        conn.execute("INSERT OR IGNORE INTO users (user_login, user_name) VALUES (?, ?)", (user_login, user_login))
+        conn.execute("UPDATE users SET is_editor = ? WHERE user_login = ?", (int(bool(editor)), user_login))
+        log_change(conn, by_login, by_name, 'users', user_login, 'is_editor', int(old), int(bool(editor)),
+                   why or ('made an editor' if editor else 'no longer an editor'))
+    return True
 
 # change capacity -> site count (counted on a visit) or PM change, always with a reason
 CAPACITY_SOURCES = ['site count', 'PM change']

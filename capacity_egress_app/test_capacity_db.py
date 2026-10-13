@@ -166,3 +166,36 @@ def test_backup_once_a_day_keeps_last(conn, tmp_path):
     assert db.backup_database(conn, str(tmp_path), keep=3) is not None
     assert db.backup_database(conn, str(tmp_path), keep=3) is None
     assert len(list(tmp_path.iterdir())) == 3
+
+# editors and viewers (ADR 0003)
+def test_first_editor_then_only_editors_change_the_list(conn):
+    db.register_user(conn, 'mark')
+    db.register_user(conn, 'viewer1')
+    assert db.editor_count(conn) == 0 and not db.is_editor(conn, 'mark')
+    # empty list -> the first editor can be set by anyone
+    assert db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
+    assert db.is_editor(conn, 'carl')
+    # a viewer can't make themselves an editor
+    with pytest.raises(PermissionError):
+        db.set_editor(conn, 'viewer1', True, 'viewer1', 'viewer1')
+    assert db.set_editor(conn, 'mark', True, 'carl', 'Carl')
+    assert not db.set_editor(conn, 'mark', True, 'carl', 'Carl')        # already one -> nothing logged
+    log = conn.execute("SELECT user_login, record_key, old_value, new_value FROM audit_log "
+                       "WHERE table_name = 'users'").fetchall()
+    assert [tuple(r) for r in log] == [('carl', 'carl', '0', '1'), ('carl', 'mark', '0', '1')]
+
+def test_last_editor_cant_be_removed(conn):
+    db.set_editor(conn, 'carl', True, 'carl', 'Carl')
+    with pytest.raises(ValueError):
+        db.set_editor(conn, 'carl', False, 'carl', 'Carl')
+    db.set_editor(conn, 'karine', True, 'carl', 'Carl')                  # typed login, never opened the app
+    assert db.set_editor(conn, 'carl', False, 'karine', 'karine')
+    assert db.editor_count(conn) == 1
+    assert db.list_users(conn)['user_login'].tolist()[0] == 'karine'
+
+def test_old_database_gets_the_editor_column():
+    c = sqlite3.connect(':memory:')
+    c.execute("CREATE TABLE users (user_login TEXT PRIMARY KEY, user_name TEXT NOT NULL)")
+    c.execute("INSERT INTO users VALUES ('carl', 'Carl')")
+    db.create_schema(c)
+    assert not db.is_editor(c, 'carl') and db.editor_count(c) == 0
