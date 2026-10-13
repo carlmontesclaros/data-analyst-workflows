@@ -128,7 +128,7 @@ class App:
         menu.pack(fill='x')
         for text, cmd in [("Refresh", self.manual_refresh),
                           ("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
-                          ("Export results workbook", self.export_results), ("Export capacity file", self.export_capacity),
+                          ("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
                           ("Change my name", self.change_name)]:
             ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=2)
 
@@ -751,18 +751,23 @@ class App:
             return
         self.status_var.set(f"written: {path}  {counts}")
 
-    def export_capacity(self):
+    def export_space_report(self):
         props, floors, tag = self.export_scope()
-        path = filedialog.asksaveasfilename(title="Save capacity file", defaultextension='.xlsx',
-                                            initialfile=f"room_capacity_export{tag}.xlsx")
+        try:
+            template = exports.find_template()
+        except FileNotFoundError as err:
+            messagebox.showerror("No template", str(err))
+            return
+        path = filedialog.asksaveasfilename(title="Save space report", defaultextension='.xlsx',
+                                            initialfile=f"space_report{tag}.xlsx")
         if not path:
             return
         try:
-            n = exports.write_capacity_export(self.result, path, props, floors)
+            info = exports.write_space_report(self.result, path, template, props, floors)
         except PermissionError as err:
             messagebox.showerror("Not written", str(err))
             return
-        self.status_var.set(f"written: {path}  ({n} rooms)")
+        self.status_var.set(f"written: {path}  ({info['rooms']} rooms, template {info['template']})")
 
     def change_name(self):
         name = simpledialog.askstring("Your name", "Name shown in the change log:", initialvalue=self.user_name,

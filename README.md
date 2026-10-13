@@ -33,7 +33,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
   3. Change capacity -> type the new number, preview the floor result, then save or cancel. Every change is logged: who, when, old value, new value and why.
   4. Add or edit exits with the same checks the Excel exits sheet had (exit type dropdown, width 50-500 cm).
   5. Code factors (m² per person, mm per person, settings) can be edited in the app, but only with a building code clause reference, and it previews how many floors change status first.
-  6. Exports -> results workbook (4 sheets, same as the old script) and a capacity file in the space report layout for the FMIS capacity import.
+  6. Exports -> results workbook (4 sheets, same as the old script) and the space report, filled into the baseline template (slicers kept).
   7. Backs up the database every day it's opened (last 30 kept).
   8. Screening only: results say "review", never "approved".
 * **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest (55 tests).

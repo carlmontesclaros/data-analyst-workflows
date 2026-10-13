@@ -26,7 +26,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 - **One SQLite database file** in the project folder on the S: drive. It's the only place anyone types.
 - **A Tkinter desktop app** installed on each user's Windows machine (Python + `pandas` + `openpyxl`). Everyone who has it can edit everything.
 - **The FMIS space report is read-only input.** It supplies the list of rooms. The app never writes to it.
-- **Excel only comes out as exports:** a capacity export in the space report layout (for the FMIS capacity import), and the results workbook (the 4-sheet egress output).
+- **Excel only comes out as exports:** the space report (Carl's baseline template `26-09-15 ROOM CAPACITY`, filled with the app's rooms), and the results workbook (the 4-sheet egress output).
 
 ### What a user can do
 - Search a room (`B303`) or browse building → floor
@@ -36,7 +36,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 - Edit code factors (m² per person, mm per person, settings), with a required building code clause reference
 - Keep one note per room and per exit
 - Open the room's photo folder
-- Export the capacity file and the results workbook
+- Export the space report and the results workbook
 
 ### Rules the data follows
 - **Room capacity** is the accepted number of people for a room. Its **source** is `site count`, `PM change` or `per code` (not visited yet, so the area-based code number is used).
@@ -57,7 +57,7 @@ Steps 1–6 were built by Claude at Carl's request (2026-10-05), each checked ag
 | 3 | Read-only GUI: search, browse, zones + rooms, open photos | | done |
 | 4 | Change capacity: preview, audit log, user nickname | | done |
 | 5 | Exits + code factors editing | | done |
-| 6 | Capacity export, results workbook, daily backup | | done |
+| 6 | Space report export, results workbook, daily backup | | done |
 | 7 | Install on Mark's machine + written instructions | | next |
 
 ## Folder layout
@@ -69,14 +69,15 @@ capacity_egress_app/
   capacity_db.py           schema, first import, space report refresh, edits + audit log, backup
   egress.py                occupant load vs exit capacity, read from the database
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
-  exports.py               results workbook + capacity export
+  exports.py               results workbook + space report export
   build_database.py        one-time first import
-  test_*.py                pytest (55 tests)
+  test_*.py                pytest (56 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
     backups/               daily copies, last 30
     input/                 space report + floor_exits.xlsx for the first import
+    template/              the space report template the export fills (any .xlsx name)
     old_results/           workbooks from the retired exit_capacity.py script
 ```
 
@@ -91,6 +92,20 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 3. Tests: `python3 -m pytest`
 
 Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities.
+
+### Export space report
+
+**Export space report** fills the template in `data/template/` (`26-09-15 ROOM CAPACITY (version 1)`) with the app's rooms: the whole campus, or the building / floor picked. The template's slicers, pivot tables, other sheets, BCBC table and subtotal row stay as they are; only the rows of the `allBLDG` table are replaced.
+
+| Column | Comes from |
+|---|---|
+| Property, Floor, Space, Building Number, Net Space (sq m), Space Category, Sub-Category | the app |
+| OCCUPANT COUNT (per dept) | the site count, for visited rooms; otherwise whatever the template had |
+| ROOM TYPE (per code), NOTES | the app if set; otherwise the template |
+| Net Space (sq ft), Allocated Group, Fund, Orgn, CAPACITY (per orem records) | the template's row for the same room (sq ft is worked out from m² if the room isn't in the template) |
+| OCCUPANT LOAD (per code) | the template's formula, worked out by Excel when the file opens |
+
+The template is never opened with pandas or openpyxl (that would delete the slicers): the export copies the file and rewrites only the table's rows. Pivot tables refresh when the file opens. A new template = drop it in `data/template/` (keep only one there); it needs a table called `allBLDG` with the same 16 columns.
 
 ## Several people at once
 
