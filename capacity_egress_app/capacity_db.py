@@ -1,4 +1,6 @@
 import os
+import sys
+import getpass
 import sqlite3
 from contextlib import contextmanager
 import pandas as pd
@@ -350,7 +352,8 @@ def insert_extra_settings(conn):
 # only FMIS columns change, capacity / source / visited / note / override are never touched
 FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
 
-def refresh_space_report(conn, df, report_name):
+def refresh_space_report(conn, df, report_name, user_login=None):
+    require_editor(conn, user_login)
     report = df.rename(columns=ROOM_COLUMN_NAMES).copy()
     report['fmis_count'] = pd.to_numeric(report['Capacity (Occupants)'], errors='coerce')
     # same room twice, one copy blank -> keep one (ECS 242A)
@@ -450,6 +453,22 @@ def register_user(conn, user_login):
     conn.execute("INSERT OR IGNORE INTO users (user_login, user_name) VALUES (?, ?)", (user_login, user_login))
     conn.commit()
 
+# who is running the app -> on Windows ask Windows for the logged-in account. getpass.getuser()
+# reads the USERNAME variable first, so `set USERNAME=<an editor>` in a terminal would pass as them
+def current_login():
+    if sys.platform != 'win32':
+        return getpass.getuser()                    # mac dev copy only
+    import ctypes
+    size = ctypes.c_ulong(257)
+    buffer = ctypes.create_unicode_buffer(size.value)
+    if not ctypes.windll.advapi32.GetUserNameW(buffer, ctypes.byref(size)):
+        raise OSError("couldn't read your Windows login")
+    return buffer.value
+
+# viewer tried to save -> a ValueError too, so every save dialog already shows the message
+class NotEditorError(PermissionError, ValueError):
+    pass
+
 # editors -> change capacities, exits and code factors; everyone else is a viewer (ADR 0003)
 def is_editor(conn, user_login):
     row = conn.execute("SELECT is_editor FROM users WHERE user_login = ?", (user_login,)).fetchone()
@@ -457,6 +476,11 @@ def is_editor(conn, user_login):
 
 def editor_count(conn):
     return conn.execute("SELECT COUNT(*) FROM users WHERE is_editor = 1").fetchone()[0]
+
+# every save checks this itself, not only the screens. No editors yet (new database, first build) -> allowed
+def require_editor(conn, user_login):
+    if editor_count(conn) and not is_editor(conn, user_login):
+        raise NotEditorError(f"{user_login} is not an editor, so this wasn't saved. Ask an editor to add you.")
 
 def list_users(conn):
     return pd.read_sql("SELECT user_login, user_name, is_editor FROM users ORDER BY is_editor DESC, user_name", conn)
@@ -469,7 +493,7 @@ def set_editor(conn, user_login, editor, by_login, by_name, why=None):
     with write_transaction(conn):
         editors = conn.execute("SELECT COUNT(*) FROM users WHERE is_editor = 1").fetchone()[0]
         if editors and not is_editor(conn, by_login):
-            raise PermissionError("only editors can add or remove editors")
+            raise NotEditorError("only editors can add or remove editors")
         old = conn.execute("SELECT is_editor FROM users WHERE user_login = ?", (user_login,)).fetchone()
         old = bool(old and old[0])
         if old == bool(editor):
@@ -496,6 +520,7 @@ def change_capacity(conn, room_id, new_capacity, source, user_login, user_name, 
         raise ValueError("capacity can't be negative")
 
     with write_transaction(conn):
+        require_editor(conn, user_login)
         old = conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
         if old is None:
             raise ValueError(f"no room with room_id {room_id}")
@@ -519,6 +544,7 @@ def set_note(conn, table_name, record_id, note, user_login, user_name, expected=
     column, key = {'rooms': ('note', 'room_id'), 'exits': ('notes', 'exit_pk')}[table_name]
     note = str(note or '').strip() or None
     with write_transaction(conn):
+        require_editor(conn, user_login)
         old = conn.execute(f"SELECT {column} FROM {table_name} WHERE {key} = ?", (record_id,)).fetchone()
         if old is None:
             raise StaleDataError("This record was deleted by someone else. The screen has been refreshed.")
@@ -598,6 +624,7 @@ def save_exit(conn, values, user_login, user_name, exit_pk=None, expected=NO_CHE
     if problems:
         raise ValueError('\n'.join(problems))
     with write_transaction(conn):
+        require_editor(conn, user_login)
         same = conn.execute("SELECT exit_pk FROM exits WHERE property = ? AND floor = ? AND exit_id = ?",
                             (values['property'], values['floor'], values['exit_id'])).fetchone()
         if same and same[0] != exit_pk:
@@ -627,6 +654,7 @@ def delete_exit(conn, exit_pk, user_login, user_name, why, expected=NO_CHECK):
     if not str(why or '').strip():
         raise ValueError("say why the exit is deleted")
     with write_transaction(conn):
+        require_editor(conn, user_login)
         old = conn.execute("SELECT * FROM exits WHERE exit_pk = ?", (exit_pk,)).fetchone()
         if old is None:
             raise StaleDataError("This exit was already deleted by someone else. The screen has been refreshed.")
@@ -653,6 +681,7 @@ def change_code_factor(conn, table_name, key_value, field, new_value, clause_ref
     if field not in columns or field == key:
         raise ValueError(f"{field} is not an editable column of {table_name}")
     with write_transaction(conn):
+        require_editor(conn, user_login)
         old = conn.execute(f"SELECT {field} FROM {table_name} WHERE {key} = ?", (key_value,)).fetchone()
         if old is None:
             raise ValueError(f"no row '{key_value}' in {table_name}")

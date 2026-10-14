@@ -1,6 +1,5 @@
 import os
 import glob
-import getpass
 import capacity_db as db
 
 # configs
@@ -33,7 +32,7 @@ report_name = os.path.basename(report)
 print(f"space report: {report_name}")
 print(f"exit files: {[os.path.basename(f) for f in exit_files]}")
 
-user_login = getpass.getuser()
+user_login = db.current_login()
 os.makedirs(db.DATA_DIR, exist_ok=True)
 conn = db.connect(DB_PATH)
 

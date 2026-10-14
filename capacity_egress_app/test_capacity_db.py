@@ -199,3 +199,34 @@ def test_old_database_gets_the_editor_column():
     c.execute("INSERT INTO users VALUES ('carl', 'Carl')")
     db.create_schema(c)
     assert not db.is_editor(c, 'carl') and db.editor_count(c) == 0
+
+def test_viewer_cant_save_once_there_are_editors(conn):
+    # the screens hide the buttons, but every save also checks for itself
+    db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
+    rid = room_id(conn, 'A201')
+    pk = db.save_exit(conn, good_exit(), 'carl', 'Carl')
+    tries = [lambda: db.change_capacity(conn, rid, 36, 'PM change', 'viewer1', 'Viewer', 'x'),
+             lambda: db.set_note(conn, 'rooms', rid, 'x', 'viewer1', 'Viewer'),
+             lambda: db.save_exit(conn, good_exit(exit_id='S2 - doorway'), 'viewer1', 'Viewer'),
+             lambda: db.delete_exit(conn, pk, 'viewer1', 'Viewer', 'x'),
+             lambda: db.change_code_factor(conn, 'width_factors', 'doorway', 'mm_per_person', 6.0,
+                                           'BCBC 2024 3.4.3.2.(1)', 'viewer1', 'Viewer'),
+             lambda: db.refresh_space_report(conn, report(BASE_ROWS), 'second.xlsx', 'viewer1')]
+    for attempt in tries:
+        with pytest.raises(db.NotEditorError):
+            attempt()
+    assert conn.execute("SELECT count(*) FROM audit_log WHERE user_login = 'viewer1'").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM exits").fetchone()[0] == 1
+    # an editor still saves
+    db.change_capacity(conn, rid, 36, 'PM change', 'carl', 'Carl', 'OREM request')
+
+def test_current_login_ignores_username_variable_on_windows(monkeypatch):
+    # off Windows (the mac dev copy) it falls back to getpass; on Windows it never reads USERNAME
+    monkeypatch.setenv('USERNAME', 'someone_else')
+    if db.sys.platform == 'win32':
+        assert db.current_login() != 'someone_else'
+    else:
+        monkeypatch.delenv('LOGNAME', raising=False)
+        monkeypatch.delenv('USER', raising=False)
+        monkeypatch.delenv('LNAME', raising=False)
+        assert db.current_login() == 'someone_else'

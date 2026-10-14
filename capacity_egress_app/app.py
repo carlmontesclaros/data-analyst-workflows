@@ -1,6 +1,5 @@
 import os
 import sys
-import getpass
 import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
@@ -725,11 +724,11 @@ class App:
         try:
             # one transaction -> nobody sees a half-refreshed room list
             with db.write_transaction(self.conn):
-                result = db.refresh_space_report(self.conn, df, os.path.basename(path))
+                result = db.refresh_space_report(self.conn, df, os.path.basename(path), self.user_login)
                 db.log_change(self.conn, self.user_login, self.user_name, 'rooms', 'all', 'space report', None,
                               os.path.basename(path), f"refresh: {result['matched']} matched, {result['new']} new, "
                               f"{result['missing']} missing")
-        except sqlite3.Error as err:
+        except (ValueError, sqlite3.Error) as err:
             self.save_failed(err)
             return
         self.after_change("space report refreshed")
@@ -870,20 +869,33 @@ def main():
         messagebox.showerror("No database", f"{DB_PATH} doesn't exist.\nRun build_database.py once first.")
         return
     conn = db.connect(DB_PATH)
-    user_login = getpass.getuser()
+    try:
+        user_login = db.current_login()
+    except OSError as err:
+        messagebox.showerror("Who are you?", str(err))
+        return
+    start_problem = None
     try:
         db.create_schema(conn)                   # adds any table or column a newer version needs
         db.backup_database(conn, BACKUP_DIR)
         db.register_user(conn, user_login)       # so an editor can find them on the Editors screen
-    except (sqlite3.Error, OSError):
-        pass                                     # read-only folder (viewers) -> reading still works
+    except (sqlite3.Error, OSError) as err:
+        start_problem = err                      # read-only folder (viewers) -> reading still works
+
+    # an editor should know when today's backup wasn't made
+    if start_problem is not None and db.is_editor(conn, user_login):
+        messagebox.showwarning("No backup today", "Today's backup of the database couldn't be made, so "
+                               f"changes today have no copy to go back to.\n\n({start_problem})")
 
     # no editors yet (new database, or the first open after editors were added) -> first person becomes one
     if db.editor_count(conn) == 0:
         if messagebox.askyesno("First editor", f"Nobody is an editor yet.\n\nMake {user_login} the first editor? "
                                "Editors can change capacities, exits and code factors, and add other editors."):
-            db.set_editor(conn, user_login, True, user_login, db.get_user_name(conn, user_login) or user_login,
-                          why='first editor')
+            try:
+                db.set_editor(conn, user_login, True, user_login, db.get_user_name(conn, user_login) or user_login,
+                              why='first editor')
+            except (ValueError, sqlite3.Error) as err:     # someone else became the first editor a moment ago
+                messagebox.showinfo("Not made an editor", str(err))
 
     themed = use_theme(root)
     editor_screen = {}

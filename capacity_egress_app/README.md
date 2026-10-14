@@ -80,7 +80,9 @@ Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-w
 - **Adding an editor:** they open the app once (they show up on the Editors screen), then any editor ticks **Editor** beside their name. A login can also be typed in for someone who hasn't opened it yet. Every add and remove goes in the change log. The last editor can't be removed.
 - **Never tick a shared or generic Windows account.** Everyone using it would be an editor.
 - **First editor:** if the editor list is empty (a new database), the first person to open the app is asked to become the first editor. Carl opens it first after installing.
-- **The lock is inside the app.** Someone with write access to the S: drive folder could still change the database file with other tools. To-do: ask IT to make the folder read-only for everyone except the editors.
+- **Who you are is asked from Windows**, not read from the `USERNAME` variable, so typing `set USERNAME=<an editor>` before starting the app doesn't work (`capacity_db.current_login`).
+- **Every save checks the editor list itself**, not only the screens: change capacity, notes, exits, code factors and a space report refresh refuse a viewer once there is at least one editor (`require_editor`).
+- **The lock is still inside the app.** Someone with write access to the S: drive folder could change the database file with other tools, including the change log. To-do list below.
 
 ## Capacity check screen
 
@@ -116,7 +118,10 @@ Red only ever means over a hard limit.
 
 - **A web link for viewers**, so OREM and others don't need anything installed. Starts with asking UVic IT and Mark; Mark's comment on the NFR questions says there will be no outside hosting. `egress.py` already holds the calculation apart from the window, so a web version can reuse it.
 - **"Request this change"**: a check saved as a request that editors approve or reject in the app.
-- **S: drive folder permissions** from IT (editors write, everyone else reads).
+- **Security to-do (needs IT or the workstation, can't be fixed in code):**
+  - **S: drive folder permissions** from IT: the app folder, the `.db` and `backups/` writable by the editors only, read-only for everyone else. This is the only thing that stops someone editing the database (or the change log) with another SQLite tool, or running a changed copy of the app.
+  - **Check the login on Windows** after installing: open the Editors screen and make sure your login there matches the one in the editor list (same spelling). `current_login` has only been tested on the Mac.
+  - **Never tick a shared or generic Windows account** as an editor.
 - The `.db` stays on the S: drive, not a SharePoint-synced folder (sync can corrupt it mid-save). Exports and the guide can go on SharePoint.
 
 ## Folder layout
