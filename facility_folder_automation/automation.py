@@ -44,8 +44,10 @@ for excel_file in glob_list:
             header_row = i
             break
 
+    # not a space report (e.g. floor_exits.xlsx has no Space column) -> skip it
     if header_row is None:
-        raise ValueError("No header row containing Property/Floor/Space found in the first 50 rows")
+        print("Skipping, no Property/Floor/Space header in the first 50 rows:", excel_file)
+        continue
 
     print(excel_file, header_row)
     files_processed += 1
