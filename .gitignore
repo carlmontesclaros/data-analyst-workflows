@@ -18,8 +18,9 @@ input/
 buildings/
 output/
 CLAUDE.md
-carl_space_report_23sept.xlsx
-floor_exits.xlsx
+carl_space_report*.xlsx
+floor_exits*.xlsx
+building floor mappings/
 ARCHITECTURE_PLAN.md
 exiting_capacity_results*.xlsx
 bcbc_2018dbp3s34.pdf
