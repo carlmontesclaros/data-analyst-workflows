@@ -135,3 +135,16 @@ def test_check_summary_shows_room_type_tried(tmp_path):
         text = ''.join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', z.read('word/document.xml').decode('utf-8')))
     for expected in ['classroom -&gt; lab', '33 -&gt; 14', 'uses the per code load']:
         assert expected in text
+
+def test_space_report_pm_change_on_a_visited_room_goes_into_capacity_occupants(tmp_path):
+    # Carl, 2026-10-16: Capacity (Occupants) is the room capacity FMIS gets, so a PM change after the visit goes in
+    rooms = pd.DataFrame([t.room('301', 60.55, 36, 'PM change'), t.room('302', 60.55)])
+    for col, val in [('building_number', '999'), ('space_category', None), ('note', None),
+                     ('fmis_capacity', None), ('in_latest_report', 1)]:
+        rooms[col] = val
+    rooms['visited'] = [1, 0]
+    res = t.egress.calculate(rooms, pd.DataFrame(t.TWO_DOORS, columns=t.EXIT_COLUMNS), t.factors())
+    template, path = tmp_path / 'template.xlsx', tmp_path / 'space_report.xlsx'
+    fake_template(template)
+    exports.write_space_report(res, path, template)
+    assert pd.read_excel(path, header=6).iloc[0]['Capacity (Occupants)'] == 36

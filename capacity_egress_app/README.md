@@ -292,13 +292,13 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |
 | Viewers can try a room type on the check screen (not saved); editors change it on the editor screen, logged with why | Supervisor feedback, Carl | 2026-10-16 |
+| Space report export: a visited room's PM change goes into `Capacity (Occupants)` (it's the room capacity FMIS gets; the site count stays in the change log) | Carl | 2026-10-16 |
 | Health services (13.1) and day care (19.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
 | Residences (17.x) excluded; they use persons per sleeping room, not area | Pending | |
 
 ## Open questions
 
 
-- **Space report export, visited room with a PM change:** `Capacity (Occupants)` gets the room's current capacity for every visited room, so a PM change on a visited room (e.g. 24 counted, PM 36) exports 36 into the column that holds site counts. Keep it (the column is the room capacity FMIS gets), or export the last site count? Carl to decide.
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.
 - **Horizontal exits:** if a link door is in a fire-rated wall, the horizontal exit rules may apply. Not checked.
