@@ -258,6 +258,8 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 
 ## Method
 
+**Visited vs capacity source.** Two separate facts about a room: `visited` = it was counted on a site visit at some point (it stays visited after a PM change), `capacity_source` = where today's room capacity came from (`site count`, `PM change`, or `per code` when there's no room capacity). A visited room can have a PM change; a room that was never visited can too. The screens say "not visited" only when a room has no room capacity at all (`test_visited_means_ever_counted_source_means_current_number`).
+
 1. **Room type.** The room's override if set, otherwise the default from the category map. Rooms with area but no sub-category count as excluded and are listed in the warnings.
 2. **Per code load** = net area ÷ m² per person, **rounded up** (3.4.3.1.(1) → Subsection 3.1.17).
 3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (lounges 14.3, all non-assignable 16.x) count as 0, `out of scope`.
@@ -296,6 +298,7 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 ## Open questions
 
 
+- **Space report export, visited room with a PM change:** `Capacity (Occupants)` gets the room's current capacity for every visited room, so a PM change on a visited room (e.g. 24 counted, PM 36) exports 36 into the column that holds site counts. Keep it (the column is the room capacity FMIS gets), or export the last site count? Carl to decide.
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.
 - **Horizontal exits:** if a link door is in a fire-rated wall, the horizontal exit rules may apply. Not checked.

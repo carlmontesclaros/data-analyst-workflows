@@ -208,7 +208,8 @@ def write_space_report(result, path, template_path=None, properties=None, floors
             for name, field in APP_COLS.items():
                 if name in col:
                     values[col[name]] = getattr(room, field)
-            # site count for visited rooms; the per code load the app works out (the report's own column is broken)
+            # visited rooms -> their current room capacity (a site count, or a PM change made after the visit: see README
+            # open questions); the per code load the app works out (the report's own column is broken)
             if COUNT_COL in col and room.visited == 1 and not blank(room.capacity):
                 values[col[COUNT_COL]] = int(room.capacity)
             if PER_CODE_COL in col:

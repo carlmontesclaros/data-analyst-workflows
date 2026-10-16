@@ -250,3 +250,14 @@ def test_change_room_type_logs_and_can_go_back_to_default(conn):
     db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
     with pytest.raises(db.NotEditorError):
         db.change_room_type(conn, rid, 'office', 'viewer1', 'Viewer', 'x')
+
+def test_visited_means_ever_counted_source_means_current_number(conn):
+    # visited = counted on a site visit at some point; capacity_source = where today's number came from
+    rid = room_id(conn, '101')                                    # counted 20 on the first import
+    assert tuple(conn.execute("SELECT capacity_source, visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()) == ('site count', 1)
+    db.change_capacity(conn, rid, 36, 'PM change', 'mark', 'Mark', 'OREM request')
+    assert tuple(conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()) == \
+        (36, 'PM change', 1)                                      # still visited: the room was counted
+    rid = room_id(conn, 'A201')                                   # never counted
+    db.change_capacity(conn, rid, 30, 'PM change', 'mark', 'Mark', 'OREM request')
+    assert conn.execute("SELECT visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()[0] == 0
