@@ -1,6 +1,7 @@
 import os
 import glob
 import capacity_db as db
+import excel_inputs as xi
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,9 +21,9 @@ for excel_file in sorted(glob.glob(os.path.join(INPUT_DIR, "*.xlsx"))):
     name = os.path.basename(excel_file)
     if name.startswith("~$"):
         continue
-    if db.find_header(excel_file, db.SPACE_REPORT_HEADERS) is not None:
+    if xi.find_header(excel_file, xi.SPACE_REPORT_HEADERS) is not None:
         space_reports.append(excel_file)
-    elif db.find_header(excel_file, db.EXITS_HEADERS) is not None:
+    elif xi.find_header(excel_file, xi.EXITS_HEADERS) is not None:
         exit_files.append(excel_file)
 
 if len(space_reports) != 1:
@@ -46,7 +47,7 @@ try:
     print(f"code factors: {counts}")
 
     # rooms
-    rooms = db.classify_rooms(db.read_space_report(report))
+    rooms = xi.classify_rooms(xi.read_space_report(report))
     n_rooms = db.insert_rooms(conn, rooms, report_name)
     print(f"rooms: {n_rooms}")
     print(f"  {rooms['capacity_source'].value_counts().to_dict()}")
@@ -54,7 +55,7 @@ try:
     # exits
     n_exits = 0
     for exit_file in exit_files:
-        count, warnings = db.insert_exits(conn, db.read_exits(exit_file))
+        count, warnings = db.insert_exits(conn, xi.read_exits(exit_file))
         n_exits += count
         for w in warnings:
             print(f"  warning: {w}")

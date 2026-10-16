@@ -3,6 +3,7 @@ import time
 import multiprocessing as mp
 import pytest
 import capacity_db as db
+import excel_inputs as xi
 from test_capacity_db import report, BASE_ROWS, CONFIG_DIR, good_exit
 
 # two people = two connections to the same file, like two computers on the S: drive
@@ -14,7 +15,7 @@ def db_path(tmp_path):
     db.create_schema(c)
     db.import_code_factors(c, CONFIG_DIR)
     db.insert_extra_settings(c)
-    db.insert_rooms(c, db.classify_rooms(report(BASE_ROWS)), 'first.xlsx')
+    db.insert_rooms(c, xi.classify_rooms(report(BASE_ROWS)), 'first.xlsx')
     c.commit()
     c.close()
     return path

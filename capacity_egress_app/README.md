@@ -134,14 +134,15 @@ capacity_egress_app/
   check_screen.py          the capacity check screen everyone opens on
   colours.py               row colours + legend shared by both screens
   widgets.py               building box you can type in, theme loading, open a file or folder (both screens)
-  capacity_db.py           schema, first import, space report refresh, edits + audit log, editors, backup
+  excel_inputs.py          reads the space report and exits workbooks (header detection, first-import visited rule)
+  capacity_db.py           schema, inserts, space report refresh, edits + audit log, editors, backup
   egress.py                occupant load vs exit capacity, read from the database; the one rule for room and zone verdicts
   code_factors.py          the only place that reads the code factor tables (room types, m2 per person, default type)
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
   exports.py               results workbook, space report export, capacity check summary (.docx)
   theme/sun_valley/        Sun Valley ttk theme files (MIT licence), loaded from the folder, nothing to install
   build_database.py        one-time first import
-  test_*.py                pytest (85 tests)
+  test_*.py                pytest (88 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
