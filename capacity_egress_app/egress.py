@@ -229,15 +229,25 @@ def calculate_floor(rooms, exits, factors, prop, floor):
 # colours -> same meaning on every table (README "Colours"): red only ever means over a hard limit
 GREEN, AMBER, RED, GREY, NONE = 'green', 'amber', 'red', 'grey', ''
 
-def room_colour(room):
-    if not room['in_scope']:
-        return NONE
+# one room with a room type and / or capacity tried -> per code load and verdict, nothing saved
+def try_room(room, factors, room_type=None, capacity=None):
+    area_factor = dict(zip(factors['area_factors']['room_type'], factors['area_factors']['area_per_person_m2']))
+    tried = dict(room)
+    if room_type is not None:
+        tried['room_type'] = room_type
+        tried['area_per_person_m2'] = area_factor.get(room_type, np.nan)
+        load = occupant_load(room['area_m2'], tried['area_per_person_m2'])
+        tried['per_code_load'] = 0 if pd.isna(load) else int(load)
+    tried['capacity'] = room_capacity(room) if capacity is None else int(capacity)
+    tried['verdict'], tried['colour'], tried['over'] = judge_room(tried, tried['capacity'])
+    return tried
+
+def room_capacity(room):
     capacity = pd.to_numeric(room['capacity'], errors='coerce')
-    if pd.isna(capacity):
-        return GREY                                   # not visited -> per code
-    if pd.notna(room['area_per_person_m2']) and capacity > room['per_code_load']:
-        return AMBER                                  # needs justification (BCBC 2024 3.1.17.1.(1)(c))
-    return GREEN
+    return None if pd.isna(capacity) else int(capacity)
+
+def room_colour(room):
+    return judge_room(room, room_capacity(room))[1]
 
 def zone_colour(zone):
     if zone['status'] == STATUS_NOT_SURVEYED:
@@ -257,17 +267,31 @@ def exit_colour(exit_row):
 # capacity check -> what if these rooms had these capacities? nothing is saved
 CANT_CHECK = "Can't check egress: exits on this floor haven't been measured."
 
-def room_verdict(room, proposed):
+# one rule for a zone's verdict -> the check result, the floor as it is now and the summary all use it
+def zone_verdict(zone):
+    if zone['status'] == STATUS_NOT_SURVEYED:
+        return CANT_CHECK                             # an unmeasured floor is never shown as fine
+    over = int(zone['total_load']) - int(zone['exit_capacity'])
+    return f"over exit capacity by {over}" if over > 0 else 'within exit capacity'
+
+# one rule for a room's verdict and colour -> every screen, table and summary uses it (README "Colours")
+# room = a prepared room row (room_type, area_per_person_m2, per_code_load, in_scope); capacity None = not visited
+def judge_room(room, capacity):
     if pd.isna(room['area_per_person_m2']):
-        if room['room_type'] == 'excluded':
-            return 'excluded room type: no per code load', 0
-        return 'no per code load (no room type)', 0
-    if proposed is None:                              # not visited, only the room type changed
-        return 'uses the per code load', 0
-    over = int(proposed) - int(room['per_code_load'])
-    if over > 0:
-        return f"needs justification, +{over} over per code", over
-    return 'within per code', 0
+        verdict = ('no per code load (excluded room type)' if room['room_type'] == 'excluded'
+                   else 'no per code load (no room type)')
+        colour, over = GREY, 0
+    elif capacity is None:
+        verdict, colour, over = 'not visited: uses the per code load', GREY, 0
+    else:
+        over = int(capacity) - int(room['per_code_load'])
+        if over > 0:
+            verdict, colour = f"needs justification, +{over} over per code", AMBER   # BCBC 2024 3.1.17.1.(1)(c)
+        else:
+            verdict, colour, over = 'within per code', GREEN, 0
+    if not room['in_scope']:
+        colour = NONE                                 # out of scope -> no colour, not counted toward the floor
+    return verdict, colour, over
 
 def check_capacities(rooms, exits, factors, changes, room_types=None):
     # rooms / exits / factors straight from the database; nothing is saved
@@ -307,7 +331,7 @@ def check_capacities(rooms, exits, factors, changes, room_types=None):
             current = None if pd.isna(capacity) else int(capacity)
             # verdict against the per code load of the room type tried (same as now if the type didn't change)
             proposed = changes.get(room_id)
-            verdict, over = room_verdict(a, proposed if proposed is not None else current)
+            verdict, colour, over = judge_room(a, proposed if proposed is not None else current)
             room_rows.append({'room_id': int(room_id), 'property': prop, 'floor': floor, 'space': r['space'],
                               'zone_wing': r['room_wing'] if split else '',
                               'room_type': a['room_type'], 'room_type_before': r['room_type'],
@@ -317,18 +341,12 @@ def check_capacities(rooms, exits, factors, changes, room_types=None):
                               'proposed': proposed, 'per_code_load': int(a['per_code_load']),
                               'per_code_before': int(r['per_code_load']),
                               'in_scope': bool(r['in_scope']), 'verdict': verdict, 'over_per_code': over,
-                              'colour': AMBER if over > 0 else (GREEN if r['in_scope'] else NONE)})
+                              'colour': colour})
         old = before['zones'].set_index('zone_wing')
         changed_wings = {row['zone_wing'] for row in room_rows if row['floor'] == floor and row['property'] == prop}
         for _, z in after['zones'].sort_values('zone_wing').iterrows():
             load_before = int(old.loc[z['zone_wing'], 'total_load']) if z['zone_wing'] in old.index else 0
-            over = int(z['total_load']) - int(z['exit_capacity'])
-            if z['status'] == STATUS_NOT_SURVEYED:
-                verdict = CANT_CHECK
-            elif over > 0:
-                verdict = f"over exit capacity by {over}"
-            else:
-                verdict = 'within exit capacity'
+            verdict = zone_verdict(z)
             other = [f for f in z['flags'].split('; ') if f and f != 'occupant load over exiting capacity']
             zone_rows.append({'property': prop, 'floor': floor, 'zone_wing': z['zone_wing'],
                               'has_checked_room': z['zone_wing'] in changed_wings,

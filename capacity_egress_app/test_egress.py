@@ -146,7 +146,7 @@ def test_check_room_type_changes_per_code():
     check = egress.check_capacities(rooms, exits, f, {}, {1: 'Lab'})
     r = check['rooms'][0]
     assert (r['room_type_before'], r['room_type'], r['per_code_before'], r['per_code_load']) == ('classroom', 'lab', 33, 14)
-    assert r['proposed'] is None and r['type_changed'] and r['verdict'] == 'uses the per code load'
+    assert r['proposed'] is None and r['type_changed'] and r['verdict'] == 'not visited: uses the per code load'
     assert (check['zones'][0]['load_before'], check['zones'][0]['load_after']) == (233, 214)
     # visited -> floor load unchanged, but the count is now judged against the office per code load
     check = egress.check_capacities(rooms, exits, f, {}, {2: 'office'})
@@ -163,3 +163,41 @@ def test_check_room_type_changes_per_code():
     with pytest.raises(ValueError):
         egress.check_capacities(rooms, exits, f, {}, {1: 'gym'})
     assert rooms['room_type_override'].isna().all()          # nothing changed in the tables passed in
+
+# one rule for a room's verdict and colour -> the card, the check table and the summary all agree (README "Colours")
+def test_check_unvisited_room_type_only_is_grey():
+    rooms, exits, f = check_tables([room('301', 60.55)], TWO_DOORS)
+    r = egress.check_capacities(rooms, exits, f, {}, {1: 'lab'})['rooms'][0]
+    assert r['colour'] == egress.GREY and r['verdict'] == 'not visited: uses the per code load'
+
+def test_room_colour_follows_the_same_rule():
+    excluded = dict(room('305', 40, 12, 'site count'), room_type_override='excluded')   # counted, but no per code load
+    rooms = run([excluded, room('306', 60.55, 40, 'site count')], TWO_DOORS)['rooms'].set_index('space')
+    for space in ['305', '306']:
+        r = rooms.loc[space]
+        assert egress.room_colour(r) == egress.judge_room(r, int(r['capacity']))[1]
+    assert egress.room_colour(rooms.loc['305']) == egress.GREY
+
+def test_try_room_with_another_type_or_capacity():
+    # 60.55 m2: classroom 33 (1.85), lab 14 (4.6); nothing saved, same rule as the check
+    rooms = run([room('301', 60.55, 40, 'site count'), room('302', 60.55)], TWO_DOORS)['rooms'].set_index('space')
+    f = factors()
+    t = egress.try_room(rooms.loc['301'], f, room_type='lab')
+    assert (t['room_type'], t['area_per_person_m2'], t['per_code_load'], t['capacity']) == ('lab', 4.6, 14, 40)
+    assert (t['verdict'], t['colour']) == ('needs justification, +26 over per code', egress.AMBER)
+    t = egress.try_room(rooms.loc['301'], f, room_type='lab', capacity=10)
+    assert (t['capacity'], t['verdict'], t['colour']) == (10, 'within per code', egress.GREEN)
+    t = egress.try_room(rooms.loc['302'], f, room_type='lab')
+    assert (t['per_code_load'], t['capacity'], t['colour']) == (14, None, egress.GREY)
+    t = egress.try_room(rooms.loc['301'], f, room_type='excluded')
+    assert (t['per_code_load'], t['verdict'], t['colour']) == (0, 'no per code load (excluded room type)', egress.GREY)
+    t = egress.try_room(rooms.loc['301'], f)                                  # nothing tried -> the room as it is
+    assert (t['room_type'], t['per_code_load'], t['capacity'], t['colour']) == ('classroom', 33, 40, egress.AMBER)
+
+def test_zone_verdict():
+    within = {'status': egress.STATUS_WITHIN, 'total_load': 161, 'exit_capacity': 288}
+    over = {'status': egress.STATUS_REVIEW, 'total_load': 297, 'exit_capacity': 288}
+    unmeasured = {'status': egress.STATUS_NOT_SURVEYED, 'total_load': 93, 'exit_capacity': 0}
+    assert egress.zone_verdict(within) == 'within exit capacity'
+    assert egress.zone_verdict(over) == 'over exit capacity by 9'
+    assert egress.zone_verdict(unmeasured) == egress.CANT_CHECK
