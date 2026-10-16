@@ -9,7 +9,8 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from check_screen import CheckScreen, BuildingBox, open_path, use_theme
+from check_screen import CheckScreen
+from widgets import BuildingBox, open_path, use_theme
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
