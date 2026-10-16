@@ -474,10 +474,10 @@ class App:
             rooms.loc[rooms['room_id'] == room['room_id'], 'room_type_override'] = chosen()
             after = self.floor_result(room['property'], room['floor'], rooms=rooms)
             r = after['rooms'].set_index('room_id').loc[room['room_id']]
+            verdict = egress.judge_room(r, egress.room_capacity(r))[0]
             lines = [f"Preview (not saved): per code load {room['per_code_load']} -> {r['per_code_load']}, "
-                     f"load used {room['load_used']} -> {r['load_used']}"]
-            if pd.notna(room['capacity']) and pd.notna(r['area_per_person_m2']) and room['capacity'] > r['per_code_load']:
-                lines.append(f"  room capacity {current} is over the new per code load: needs justification")
+                     f"load used {room['load_used']} -> {r['load_used']}",
+                     f"  room: {verdict}"]
             for _, z in after['zones'].iterrows():
                 b = before[before['zone_wing'] == z['zone_wing']]
                 was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
