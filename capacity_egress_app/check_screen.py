@@ -8,7 +8,6 @@ from tkinter import ttk, messagebox, filedialog
 import pandas as pd
 import capacity_db as db
 import egress
-from exit_calc import occupant_load
 import exports
 import colours
 
@@ -123,15 +122,12 @@ def find_rooms(rooms, query, prop=None, floor=None):
         rooms = rooms[exact] if exact.any() else rooms[space.str.contains(w, regex=False)]
     return rooms.sort_values(['property', 'floor', 'space'])
 
+# the card's verdict text -> egress.judge_room decides, this only words it for the badge
 def room_status_text(room):
-    colour = egress.room_colour(room)
-    if colour == egress.NONE:
-        return colour, "Out of scope: not counted toward the floor"
-    if colour == egress.GREY:
-        return colour, "Not visited yet: uses the per code load"
-    if colour == egress.AMBER:
-        return colour, "Over the per code load: needs justification"
-    return colour, f"Visited ({room['capacity_source']}): within per code"
+    verdict, colour, _ = egress.judge_room(room, egress.room_capacity(room))
+    if not room['in_scope']:
+        verdict += "  ·  out of scope: not counted toward the floor"
+    return colour, verdict
 
 
 class CheckScreen:
@@ -421,25 +417,24 @@ class CheckScreen:
         type_now = self.room_type_now()
         new_type = self.type_var.get() or type_now
         type_changed = new_type != type_now
-        cap_now = pd.to_numeric(r['capacity'], errors='coerce')
-        cap_now = None if pd.isna(cap_now) else int(cap_now)
+        cap_now = egress.room_capacity(r)
         text = self.new_var.get().strip()
         cap_typed = int(text) if text.isdigit() else None
         self.message_var.set("Type a whole number (0 or more)." if text and cap_typed is None else '')
         cap_changed = cap_typed is not None and cap_typed != cap_now
-        capacity = cap_typed if cap_typed is not None else cap_now
-
-        factor = self.factors['area_factors'].set_index('room_type')['area_per_person_m2'].get(new_type)
-        has_load = new_type != '' and pd.notna(factor) and pd.notna(r['area_m2'])
-        per_code = int(occupant_load(r['area_m2'], factor)) if has_load else 0
-        per_changed = per_code != int(r['per_code_load'])
+        # per code load and verdict -> egress.try_room, the same rule as the check
+        t = egress.try_room(r, self.factors, room_type=new_type if type_changed else None,
+                            capacity=cap_typed if cap_changed else None)
+        has_load = pd.notna(t['area_per_person_m2'])
+        per_changed = t['per_code_load'] != int(r['per_code_load'])
 
         # changed -> the new value in blue; unchanged -> "same" in grey, the Now row above says what it is
         cells = {
             "Room type": (new_type or '-', type_changed),
             "Area": ('', False),
-            "Room capacity": (('not visited' if capacity is None else str(capacity)) + '  (PM change)', cap_changed),
-            "Per code load": (f"{per_code}  ({factor:g} m² per person)" if has_load else 'none', per_changed),
+            "Room capacity": (('not visited' if t['capacity'] is None else str(t['capacity'])) + '  (PM change)', cap_changed),
+            "Per code load": (f"{t['per_code_load']}  ({t['area_per_person_m2']:g} m² per person)" if has_load else 'none',
+                              per_changed),
         }
         for label, (value, changed) in cells.items():
             self.trial_vars[label].set(value if changed else 'same')
@@ -449,21 +444,10 @@ class CheckScreen:
             self.trial_badge.configure(text="With change: pick a room type or type a new capacity in 3 below",
                                        bg=self.badge_bg)
             return
-        # verdict -> same rule and colours as the check result
-        if not r['in_scope']:
-            colour, verdict = egress.NONE, "out of scope: not counted toward the floor"
-        elif not has_load:
-            colour, verdict = egress.GREY, ("excluded room type: no per code load" if new_type == 'excluded'
-                                            else "no room type: no per code load")
-        elif capacity is None:
-            colour = egress.GREY
-            verdict = (f"not visited: the floor carries the per code load, {r['per_code_load']} → {per_code}"
-                       if per_changed else "not visited: the floor carries the per code load")
-        elif capacity > per_code:
-            colour, verdict = egress.AMBER, f"needs justification: {capacity} is {capacity - per_code} over the per code load of {per_code}"
-        else:
-            colour, verdict = egress.GREEN, f"within per code: {capacity} is at or under {per_code}"
-        self.trial_badge.configure(text=f"With change: {verdict}", bg=colours.ROW_BG.get(colour, self.badge_bg))
+        verdict = t['verdict'] + ('' if r['in_scope'] else '  ·  out of scope: not counted toward the floor')
+        if t['capacity'] is None and per_changed and r['in_scope']:
+            verdict += f" ({r['per_code_load']} → {t['per_code_load']} on the floor)"
+        self.trial_badge.configure(text=f"With change: {verdict}", bg=colours.ROW_BG.get(t['colour'], self.badge_bg))
 
     def show_floor_now(self, prop, floor):
         zones = self.result['zones']
@@ -471,12 +455,8 @@ class CheckScreen:
         self.zone_label.set(f"Floor {floor} exits now: occupant load vs exit capacity")
         self.zone_tree.delete(*self.zone_tree.get_children())
         for _, z in zones.iterrows():
-            if z['status'] == egress.STATUS_NOT_SURVEYED:
-                verdict, capacity = egress.CANT_CHECK, '-'
-            else:
-                over = int(z['total_load']) - int(z['exit_capacity'])
-                verdict = f"over exit capacity by {over}" if over > 0 else 'within exit capacity'
-                capacity = z['exit_capacity']
+            verdict = egress.zone_verdict(z)
+            capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
             name = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '')
             self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
 

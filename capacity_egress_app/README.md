@@ -110,7 +110,7 @@ Same meaning on every table. One legend sits on both screens.
 | Green | visited, capacity at or under the per code load | within exit capacity | width OK |
 | Amber | capacity over the per code load: **needs justification** | REVIEW for any other flag (fewer than 2 exits, width review, link traffic both ways, ...) | width needs review |
 | Red | | occupant load **over exit capacity** | width under the minimum |
-| Grey | not visited (uses the per code load) | NOT SURVEYED (no exits measured) | not counted as an exit (open stair, unknown type) |
+| Grey | not visited (uses the per code load), or no per code load (excluded or unknown room type) | NOT SURVEYED (no exits measured) | not counted as an exit (open stair, unknown type) |
 | No colour | out of scope (lounges, non-assignable) | | |
 
 Red only ever means over a hard limit.
