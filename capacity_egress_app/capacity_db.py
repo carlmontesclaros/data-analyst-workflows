@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     sub_category TEXT,
     capacity INTEGER,
     capacity_source TEXT NOT NULL DEFAULT 'per code',
-    visited INTEGER NOT NULL DEFAULT 0,
+    visited INTEGER NOT NULL DEFAULT 0,         -- 1 = counted on a site visit at some point; stays 1 after a PM change
     room_type_override TEXT,
     note TEXT,
     fmis_capacity INTEGER,
