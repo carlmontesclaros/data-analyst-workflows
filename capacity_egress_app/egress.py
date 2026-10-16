@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from exit_calc import occupant_load, exit_persons, capacity_50_rule, people_sent
+import code_factors as cf
 
 STATUS_REVIEW = 'REVIEW'
 STATUS_WITHIN = 'WITHIN CAPACITY - review before acting'
@@ -26,8 +27,8 @@ def read_settings(settings_df):
 # rooms -> room type, per code load, scope, load used
 def prepare_rooms(rooms, factors, settings, warning_rows):
     rooms = rooms.copy()
-    area_factor = dict(zip(factors['area_factors']['room_type'], factors['area_factors']['area_per_person_m2']))
-    category_map = dict(zip(factors['category_map']['space_sub_category'], factors['category_map']['room_type']))
+    area_factor = cf.area_per_person(factors)
+    category_map = cf.default_room_types(factors)
 
     # room type -> override wins, else category default
     override = rooms['room_type_override'].fillna('').astype(str).str.strip().str.lower()
@@ -231,7 +232,7 @@ GREEN, AMBER, RED, GREY, NONE = 'green', 'amber', 'red', 'grey', ''
 
 # one room with a room type and / or capacity tried -> per code load and verdict, nothing saved
 def try_room(room, factors, room_type=None, capacity=None):
-    area_factor = dict(zip(factors['area_factors']['room_type'], factors['area_factors']['area_per_person_m2']))
+    area_factor = cf.area_per_person(factors)
     tried = dict(room)
     if room_type is not None:
         tried['room_type'] = room_type
@@ -298,10 +299,8 @@ def check_capacities(rooms, exits, factors, changes, room_types=None):
     # changes = {room_id: proposed capacity}, room_types = {room_id: room type to try} -> a room can have either or both
     changes = {int(k): int(v) for k, v in changes.items()}
     room_types = {int(k): str(v).strip().lower() for k, v in (room_types or {}).items()}
-    known_types = set(factors['area_factors']['room_type'])
-    for t in room_types.values():
-        if t not in known_types:
-            raise ValueError(f"room type must be one of {sorted(known_types)}")
+    if cf.unknown_room_types(factors, room_types.values()):
+        raise ValueError(f"room type must be one of {cf.room_types(factors)}")
     room_ids = list(dict.fromkeys(list(changes) + list(room_types)))
     picked = rooms[rooms['room_id'].isin(room_ids)]
     if len(picked) != len(room_ids):

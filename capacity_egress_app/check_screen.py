@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox, filedialog
 import pandas as pd
 import capacity_db as db
 import egress
+import code_factors as cf
 import exports
 import colours
 
@@ -163,7 +164,7 @@ class CheckScreen:
             self.result = egress.calculate(self.rooms, self.exits, self.factors)
             self.seen_version = db.data_version(self.conn)
             self.building.set_names(sorted(self.rooms['property'].unique()))
-            self.room_types = sorted(self.factors['area_factors']['room_type'])
+            self.room_types = cf.room_types(self.factors)
             self.type_box['values'] = self.room_types
             self.search()
             if self.room is not None:

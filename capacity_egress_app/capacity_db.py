@@ -4,6 +4,7 @@ import getpass
 import sqlite3
 from contextlib import contextmanager
 import pandas as pd
+import code_factors as cf
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -547,9 +548,9 @@ def change_room_type(conn, room_id, new_type, user_login, user_name, why, expect
         raise ValueError("say why the room type changed")
     with write_transaction(conn):
         require_editor(conn, user_login)
-        known = {r[0] for r in conn.execute("SELECT room_type FROM area_factors")}
-        if new_type is not None and new_type not in known:
-            raise ValueError(f"room type must be one of {sorted(known)}")
+        factors = load_code_factors(conn)
+        if cf.unknown_room_types(factors, [new_type]):
+            raise ValueError(f"room type must be one of {cf.room_types(factors)}")
         old = conn.execute("SELECT room_type_override FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
         if old is None:
             raise ValueError(f"no room with room_id {room_id}")

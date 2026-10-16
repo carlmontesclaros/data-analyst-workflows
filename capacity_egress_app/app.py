@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 import pandas as pd
 import capacity_db as db
 import egress
+import code_factors as cf
 import exports
 import colours
 from check_screen import CheckScreen, BuildingBox, open_path, use_theme
@@ -430,10 +431,9 @@ class App:
         room = self.current_room()
         if room is None:
             return
-        cmap = self.factors['category_map']
-        default = dict(zip(cmap['space_sub_category'], cmap['room_type'])).get(room['sub_category'])
+        default = cf.default_room_types(self.factors).get(room['sub_category'])
         default_choice = f"(sub-category default: {default or 'none'})"
-        types = sorted(self.factors['area_factors']['room_type'])
+        types = cf.room_types(self.factors)
         override = text_or_blank(room['room_type_override']).strip().lower()
 
         win = tk.Toplevel(self.root)
