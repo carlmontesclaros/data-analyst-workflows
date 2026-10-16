@@ -3,12 +3,13 @@ import sqlite3
 import pandas as pd
 import pytest
 import capacity_db as db
+import excel_inputs as xi
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 # fake space report rows -> same columns read_space_report gives back
 def report(rows):
-    cols = db.SPACE_REPORT_COLS
+    cols = xi.SPACE_REPORT_COLS
     df = pd.DataFrame(rows, columns=['Property', 'Floor', 'Space', 'Net Space (sq m)', 'Capacity (Occupants)'])
     for c in cols:
         if c not in df.columns:
@@ -32,7 +33,7 @@ def conn():
     db.create_schema(c)
     db.import_code_factors(c, CONFIG_DIR)
     db.insert_extra_settings(c)
-    db.insert_rooms(c, db.classify_rooms(report(BASE_ROWS)), 'first.xlsx')
+    db.insert_rooms(c, xi.classify_rooms(report(BASE_ROWS)), 'first.xlsx')
     return c
 
 def rooms(c):
@@ -88,10 +89,10 @@ def test_insert_exits_warnings(conn):
         {'Property': 'Fake Hall', 'Floor': '1', 'exit_id': 'S1', 'exit_type': 'ramp', 'clear_width_cm': None},
         {'Property': 'Engineering Office Wing', 'Floor': '1', 'exit_id': None, 'exit_type': 'doorway', 'clear_width_cm': 90},
     ])
-    for c in db.EXIT_COLS:
+    for c in xi.EXIT_COLS:
         if c not in exits.columns:
             exits[c] = None
-    count, warnings = db.insert_exits(conn, exits[db.EXIT_COLS])
+    count, warnings = db.insert_exits(conn, exits[xi.EXIT_COLS])
     assert count == 2
     assert len(warnings) == 4               # skipped, floor unknown, ramp, no width
 

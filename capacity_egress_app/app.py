@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import pandas as pd
 import capacity_db as db
+import excel_inputs as xi
 import egress
 import code_factors as cf
 import exports
@@ -801,7 +802,7 @@ class App:
         if not path:
             return
         try:
-            df = db.read_space_report(path)
+            df = xi.read_space_report(path)
         except ValueError as err:
             messagebox.showerror("Not a space report", str(err))
             return
