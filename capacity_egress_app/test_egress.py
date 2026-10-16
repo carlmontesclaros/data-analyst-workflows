@@ -201,3 +201,17 @@ def test_zone_verdict():
     assert egress.zone_verdict(within) == 'within exit capacity'
     assert egress.zone_verdict(over) == 'over exit capacity by 9'
     assert egress.zone_verdict(unmeasured) == egress.CANT_CHECK
+
+def test_unknown_room_type_is_flagged_not_silent():
+    # 'lounge' isn't a code factor room type -> 0 per code, so it must show up in the warnings
+    lounge = dict(room('327', 20.0), room_type_override='lounge')
+    result = run([lounge, room('301', 60.55)], TWO_DOORS)
+    w = result['warnings']
+    w = w[w['type'] == 'unknown_room_type']
+    assert len(w) == 1 and '327' in w.iloc[0]['detail'] and "'lounge'" in w.iloc[0]['detail']
+    assert result['rooms'].set_index('space').loc['327', 'per_code_load'] == 0
+
+def test_unknown_room_type_verdict_names_the_type():
+    lounge = dict(room('327', 20.0, 2, 'site count'), room_type_override='lounge')
+    r = run([lounge], TWO_DOORS)['rooms'].iloc[0]
+    assert egress.judge_room(r, 2)[:2] == ("no per code load (unknown room type 'lounge')", egress.GREY)
