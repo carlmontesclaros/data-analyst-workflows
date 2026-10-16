@@ -5,6 +5,7 @@ import egress
 # row colours -> same on every table, both screens and the exports (README "Colours")
 ROW_BG = {egress.GREEN: '#C6EFCE', egress.AMBER: '#FFEB9C', egress.RED: '#FFC7CE', egress.GREY: '#E7E6E6'}
 ROW_FG = '#1A1A1A'
+CHANGED_FG = '#005FB8'                                 # a value the check changed (blue, same as the theme accent)
 
 LEGEND = [(egress.GREEN, "Green", "within: visited room at or under per code, floor within exit capacity, exit width OK"),
           (egress.AMBER, "Amber", "needs a look: room over per code (needs justification), floor flagged for review, width review"),
