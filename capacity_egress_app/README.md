@@ -32,6 +32,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 - Search a room (`B303`) or browse building → floor
 - See each zone's occupant load vs exit capacity, and each room's capacity and source
 - **Change capacity**: preview the zone result, then save or cancel
+- **Change room type** (editors): pick a room type or go back to the sub-category default; previews the per code load and the zone, asks why, logged like a capacity change. A new space report never overwrites it
 - Add or edit an exit (same checks as the Excel exits sheet)
 - Edit code factors (m² per person, mm per person, settings), with a required building code clause reference
 - Keep one note per room and per exit
@@ -88,15 +89,15 @@ Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-w
 
 The first screen everyone sees. Built for a quick question like "can DTB A120 go from 250 to 300?" before emailing Mark.
 
-1. **Search** a building, floor or room (`DTB A120`, `Turpin`, `A120`), or pick building → floor → room.
-2. **Room card:** room, type, area, current room capacity and its source, per code load, colour.
-3. **New capacity → Check.** **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
+1. **Search** a building, floor or room (`DTB A120`, `Turpin`, `A120`), or pick building → floor → room. The **Building** box takes typing: the list narrows to matching names (`tur`, `dtb`, `comp sci`; names that start with the text come first), **↓** opens it, **Enter** picks the top match (`match_buildings`, added 2026-10-16).
+2. **Room card:** two rows of big values, column by column: **Now** (room type, area, room capacity and its source, per code load) and **With change** (what's typed in 3: changed values in blue, the rest say "same"). Each row has its coloured verdict, side by side. It updates as you pick a room type or type a number, before Check.
+3. **Room type and/or new capacity → Check.** Picking another room type (supervisor feedback, 2026-10-16) shows that type's per code load next to the box; Check then judges the room against it, and an unvisited room's per code load changes the floor load (a visited room's floor load stays its count). Leave New capacity blank to try only the room type. **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
 4. **Result:**
    - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) allows a higher number when it can be shown (fixed seats, a posted sign), so an editor looks into it.
    - **Each zone on the floor:** occupant load now → with the change, against exit capacity: **within**, **over by N**, or **"Can't check egress: exits on this floor haven't been measured."** An unmeasured floor is never shown as fine.
 5. **Save summary (.docx)**: one page to attach to the email to Mark. It lists, for each room, current capacity and source, proposed number, per code load and verdict; for each zone, occupant load now → after, exit capacity and verdict; the date, who ran it and the code edition. The footer reads "Screening only, not an approval. An editor reviews every change." The request's reason goes in the email. The file is written by the app itself, so nothing extra is installed.
 
-The check screen **never saves**. An editor who wants to apply a change presses **Editor screen**: the check screen is replaced by the editor screen, opened on the room picked (if any), where Change capacity previews the floor and asks why. **← Check screen** on the editor screen switches back, showing anything just saved. One window at a time; closing the editor screen closes the app.
+The check screen **never saves**. An editor who wants to apply a change presses **Editor screen**: the check screen is replaced by the editor screen, opened on the room picked (if any), where Change capacity or Change room type previews the floor and asks why. The editor screen's **Building** box takes typing the same way. **← Check screen** on the editor screen switches back, showing anything just saved. One window at a time; closing the editor screen closes the app.
 
 The look uses the Sun Valley ttk theme (MIT licence). Its files sit in the app folder, so there's nothing to install.
 
@@ -285,6 +286,7 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 | Load = room capacity; FMIS's default 0 is not a count, so unvisited rooms use per code | Carl | 2026-10-02 |
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |
+| Viewers can try a room type on the check screen (not saved); editors change it on the editor screen, logged with why | Supervisor feedback, Carl | 2026-10-16 |
 | Health services (13.1) and day care (19.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
 | Residences (17.x) excluded; they use persons per sleeping room, not area | Pending | |
 

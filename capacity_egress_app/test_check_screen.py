@@ -1,5 +1,5 @@
 import pandas as pd
-from check_screen import find_rooms, initials
+from check_screen import find_rooms, initials, match_buildings
 
 ROOMS = pd.DataFrame([
     {'room_id': 1, 'property': 'David Turpin Building', 'floor': '1', 'space': 'A120'},
@@ -28,3 +28,11 @@ def test_search_with_dropdowns_and_empty():
     assert ids(find_rooms(ROOMS, '', 'David Turpin Building', '3')) == [3]
     assert ids(find_rooms(ROOMS, '')) == []
     assert ids(find_rooms(ROOMS, 'nowhere')) == []
+
+def test_match_buildings():
+    names = ['Clearihue Building', 'David Turpin Building', 'Engineering / Computer Science Building', 'Turpin Annex']
+    assert match_buildings(names, 'tur') == ['Turpin Annex', 'David Turpin Building']   # starts-with first
+    assert match_buildings(names, 'DTB') == ['David Turpin Building']                   # initials
+    assert match_buildings(names, 'comp sci') == ['Engineering / Computer Science Building']
+    assert match_buildings(names, '') == names
+    assert match_buildings(names, 'zzz') == []

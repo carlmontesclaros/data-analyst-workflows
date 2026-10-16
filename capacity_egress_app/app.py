@@ -8,7 +8,7 @@ import capacity_db as db
 import egress
 import exports
 import colours
-from check_screen import CheckScreen, open_path, use_theme
+from check_screen import CheckScreen, BuildingBox, open_path, use_theme
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +55,7 @@ class App:
             self.result = egress.calculate(self.rooms, self.exits, self.factors)
             self.seen_version = db.data_version(self.conn)
             self.properties = sorted(self.rooms['property'].unique())
-            self.building_box['values'] = self.properties
+            self.building.set_names(self.properties)
             self.show()
         finally:
             self.root.config(cursor='')
@@ -106,9 +106,9 @@ class App:
         ttk.Button(top, text="Search", command=self.search).pack(side='left')
         ttk.Label(top, text="   Building:").pack(side='left')
         self.building_var = tk.StringVar()
-        self.building_box = ttk.Combobox(top, textvariable=self.building_var, width=45, state='readonly')
-        self.building_box.pack(side='left', padx=4)
-        self.building_box.bind('<<ComboboxSelected>>', lambda e: self.pick_building())
+        # type to narrow the list, Down arrow opens it, Enter picks the top match
+        self.building = BuildingBox(top, self.building_var, '', self.pick_building, width=45)
+        self.building.box.pack(side='left', padx=4)
         ttk.Label(top, text="Floor:").pack(side='left')
         self.floor_var = tk.StringVar(value=ALL)
         self.floor_box = ttk.Combobox(top, textvariable=self.floor_var, width=14, state='readonly')
@@ -142,7 +142,8 @@ class App:
         room_frame = ttk.LabelFrame(panes, text="Rooms")
         buttons = ttk.Frame(room_frame)
         buttons.pack(fill='x')
-        for text, cmd in [("Change capacity", self.change_capacity), ("Room note", self.room_note),
+        for text, cmd in [("Change capacity", self.change_capacity), ("Change room type", self.change_room_type),
+                          ("Room note", self.room_note),
                           ("Room history", self.room_history), ("Open photos", self.open_photos)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
         self.room_tree = self.make_tree(room_frame, [
@@ -192,7 +193,7 @@ class App:
 
     # browsing
     def pick_building(self):
-        prop = self.building_var.get()
+        prop = self.building.picked()
         floors = sorted(self.rooms.loc[self.rooms['property'] == prop, 'floor'].unique())
         self.floor_box['values'] = [ALL] + floors
         self.floor_var.set(ALL)
@@ -215,7 +216,7 @@ class App:
 
     def selected_rooms(self):
         rooms = self.result['rooms']
-        prop, floor, term = self.building_var.get(), self.floor_var.get(), self.search_var.get().strip().lower()
+        prop, floor, term = self.building.picked(), self.floor_var.get(), self.search_var.get().strip().lower()
         if prop:
             rooms = rooms[rooms['property'] == prop]
             if floor and floor != ALL:
@@ -247,7 +248,7 @@ class App:
 
         self.zone_tree.delete(*self.zone_tree.get_children())
         for i, z in zones.sort_values(['property', 'floor', 'zone_wing']).iterrows():
-            values = [z['floor'] if self.building_var.get() else f"{z['property']} {z['floor']}"] + \
+            values = [z['floor'] if self.building.picked() else f"{z['property']} {z['floor']}"] + \
                      [z[c] for c in ['zone_wing', 'status', 'total_load', 'exit_capacity', 'exit_count',
                                      'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
             self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(egress.zone_colour(z),))
@@ -279,7 +280,7 @@ class App:
 
     def pick_zone(self):
         sel = self.zone_tree.selection()
-        if not sel or not self.building_var.get():
+        if not sel or not self.building.picked():
             return
         floor = self.zone_tree.item(sel[0], 'values')[0]
         if self.floor_var.get() != floor:
@@ -424,6 +425,91 @@ class App:
         ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
         win.bind('<Escape>', lambda e: win.destroy())
 
+    # change room type -> sets the m2 per person, so the per code load changes; preview the zone, then save or cancel
+    def change_room_type(self):
+        room = self.current_room()
+        if room is None:
+            return
+        cmap = self.factors['category_map']
+        default = dict(zip(cmap['space_sub_category'], cmap['room_type'])).get(room['sub_category'])
+        default_choice = f"(sub-category default: {default or 'none'})"
+        types = sorted(self.factors['area_factors']['room_type'])
+        override = text_or_blank(room['room_type_override']).strip().lower()
+
+        win = tk.Toplevel(self.root)
+        win.title(f"Change room type - {room['property']} {room['space']}")
+        win.transient(self.root)
+        win.grab_set()
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill='both', expand=True)
+        current = '' if pd.isna(room['capacity']) else int(room['capacity'])
+        ttk.Label(frame, text=f"{room['property']} floor {room['floor']} room {room['space']}",
+                  font=('TkDefaultFont', 11, 'bold')).grid(row=0, column=0, columnspan=3, sticky='w')
+        ttk.Label(frame, text=f"Room type now: {text_or_blank(room['room_type']) or '-'} ({room['room_type_source']}),  "
+                              f"sub-category: {text_or_blank(room['sub_category']) or '-'}\n"
+                              f"Per code load now: {room['per_code_load']},  room capacity: {current if current != '' else '-'} "
+                              f"({room['capacity_source']})").grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
+
+        ttk.Label(frame, text="New room type:").grid(row=2, column=0, sticky='w')
+        type_var = tk.StringVar(value=override or default_choice)
+        ttk.Combobox(frame, textvariable=type_var, values=[default_choice] + types, state='readonly', width=34).grid(
+            row=2, column=1, sticky='w')
+        ttk.Label(frame, text="Why:").grid(row=3, column=0, sticky='w')
+        why_var = tk.StringVar()
+        why_entry = ttk.Entry(frame, textvariable=why_var, width=50)
+        why_entry.grid(row=3, column=1, columnspan=2, sticky='w')
+        why_entry.focus_set()
+        why_entry.bind('<Control-z>', lambda e: why_var.set(''))
+
+        preview_var = tk.StringVar()
+        ttk.Label(frame, textvariable=preview_var, justify='left', wraplength=560).grid(
+            row=4, column=0, columnspan=3, sticky='w', pady=8)
+        before = self.floor_result(room['property'], room['floor'])['zones']
+
+        def chosen():
+            return None if type_var.get() == default_choice else type_var.get()
+
+        def preview(*_):
+            rooms = self.rooms.copy()
+            rooms.loc[rooms['room_id'] == room['room_id'], 'room_type_override'] = chosen()
+            after = self.floor_result(room['property'], room['floor'], rooms=rooms)
+            r = after['rooms'].set_index('room_id').loc[room['room_id']]
+            lines = [f"Preview (not saved): per code load {room['per_code_load']} -> {r['per_code_load']}, "
+                     f"load used {room['load_used']} -> {r['load_used']}"]
+            if pd.notna(room['capacity']) and pd.notna(r['area_per_person_m2']) and room['capacity'] > r['per_code_load']:
+                lines.append(f"  room capacity {current} is over the new per code load: needs justification")
+            for _, z in after['zones'].iterrows():
+                b = before[before['zone_wing'] == z['zone_wing']]
+                was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
+                lines.append(f"  floor {z['floor']}{' wing ' + z['zone_wing'] if z['zone_wing'] else ''}: "
+                             f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}  [{z['status']}]")
+            preview_var.set('\n'.join(lines))
+
+        type_var.trace_add('write', preview)
+        preview()
+
+        def save():
+            try:
+                changed = db.change_room_type(self.conn, room['room_id'], chosen(), self.user_login, self.user_name,
+                                              why_var.get(), expected=room['room_type_override'])
+            except (ValueError, sqlite3.Error) as err:
+                if isinstance(err, db.StaleDataError):
+                    win.destroy()
+                    self.save_failed(err)
+                else:
+                    self.save_failed(err, parent=win)
+                return
+            win.destroy()
+            if changed:
+                self.after_change(f"saved: {room['property']} {room['space']} room type "
+                                  f"{text_or_blank(room['room_type']) or '-'} -> {chosen() or default or '-'}")
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=5, column=0, columnspan=3, sticky='e')
+        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
+        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        win.bind('<Escape>', lambda e: win.destroy())
+
     # notes -> one per room, one per exit
     def ask_text(self, title, text):
         win = tk.Toplevel(self.root)
@@ -561,7 +647,7 @@ class App:
             return
 
     def add_exit(self):
-        prop, floor = self.building_var.get(), self.floor_var.get()
+        prop, floor = self.building.picked(), self.floor_var.get()
         if not prop or floor in ('', ALL):
             messagebox.showinfo("Pick a floor", "Pick a building and a floor first.")
             return
@@ -738,7 +824,7 @@ class App:
 
     # exports -> whole campus, or the building / floor picked
     def export_scope(self):
-        prop, floor = self.building_var.get(), self.floor_var.get()
+        prop, floor = self.building.picked(), self.floor_var.get()
         props = [prop] if prop else None
         floors = [floor] if prop and floor not in ('', ALL) else None
         tag = '' if not prop else '_' + ''.join(c if c.isalnum() else '-' for c in prop) + (f"_floor_{floor}" if floors else '')

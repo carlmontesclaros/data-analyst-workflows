@@ -259,17 +259,28 @@ CANT_CHECK = "Can't check egress: exits on this floor haven't been measured."
 
 def room_verdict(room, proposed):
     if pd.isna(room['area_per_person_m2']):
+        if room['room_type'] == 'excluded':
+            return 'excluded room type: no per code load', 0
         return 'no per code load (no room type)', 0
+    if proposed is None:                              # not visited, only the room type changed
+        return 'uses the per code load', 0
     over = int(proposed) - int(room['per_code_load'])
     if over > 0:
         return f"needs justification, +{over} over per code", over
     return 'within per code', 0
 
-def check_capacities(rooms, exits, factors, changes):
-    # rooms / exits / factors straight from the database; changes = {room_id: proposed capacity}
+def check_capacities(rooms, exits, factors, changes, room_types=None):
+    # rooms / exits / factors straight from the database; nothing is saved
+    # changes = {room_id: proposed capacity}, room_types = {room_id: room type to try} -> a room can have either or both
     changes = {int(k): int(v) for k, v in changes.items()}
-    picked = rooms[rooms['room_id'].isin(changes)]
-    if len(picked) != len(changes):
+    room_types = {int(k): str(v).strip().lower() for k, v in (room_types or {}).items()}
+    known_types = set(factors['area_factors']['room_type'])
+    for t in room_types.values():
+        if t not in known_types:
+            raise ValueError(f"room type must be one of {sorted(known_types)}")
+    room_ids = list(dict.fromkeys(list(changes) + list(room_types)))
+    picked = rooms[rooms['room_id'].isin(room_ids)]
+    if len(picked) != len(room_ids):
         raise ValueError("a room in the check isn't in the database any more")
     if picked['property'].nunique() > 1:
         raise ValueError("a check holds rooms from one building only")
@@ -280,6 +291,8 @@ def check_capacities(rooms, exits, factors, changes):
         mask = trial['room_id'] == room_id
         trial.loc[mask, 'capacity'] = proposed
         trial.loc[mask, 'capacity_source'] = 'PM change'
+    for room_id, room_type in room_types.items():
+        trial.loc[trial['room_id'] == room_id, 'room_type_override'] = room_type
 
     room_rows, zone_rows = [], []
     for (prop, floor), floor_rooms in picked.groupby(['property', 'floor'], sort=True):
@@ -287,16 +300,22 @@ def check_capacities(rooms, exits, factors, changes):
         after = calculate_floor(trial, exits, factors, prop, floor)
         split = (after['zones']['zone_wing'] != '').any()
         now = before['rooms'].set_index('room_id')
+        then = after['rooms'].set_index('room_id')
         for room_id in floor_rooms['room_id']:
-            r = now.loc[room_id]
-            verdict, over = room_verdict(r, changes[room_id])
+            r, a = now.loc[room_id], then.loc[room_id]
             capacity = pd.to_numeric(r['capacity'], errors='coerce')
+            current = None if pd.isna(capacity) else int(capacity)
+            # verdict against the per code load of the room type tried (same as now if the type didn't change)
+            proposed = changes.get(room_id)
+            verdict, over = room_verdict(a, proposed if proposed is not None else current)
             room_rows.append({'room_id': int(room_id), 'property': prop, 'floor': floor, 'space': r['space'],
                               'zone_wing': r['room_wing'] if split else '',
-                              'room_type': r['room_type'], 'area_m2': r['area_m2'],
-                              'current': None if pd.isna(capacity) else int(capacity),
+                              'room_type': a['room_type'], 'room_type_before': r['room_type'],
+                              'type_changed': room_id in room_types and a['room_type'] != r['room_type'],
+                              'area_m2': r['area_m2'], 'current': current,
                               'current_source': r['capacity_source'] if pd.notna(capacity) else 'per code',
-                              'proposed': changes[room_id], 'per_code_load': int(r['per_code_load']),
+                              'proposed': proposed, 'per_code_load': int(a['per_code_load']),
+                              'per_code_before': int(r['per_code_load']),
                               'in_scope': bool(r['in_scope']), 'verdict': verdict, 'over_per_code': over,
                               'colour': AMBER if over > 0 else (GREEN if r['in_scope'] else NONE)})
         old = before['zones'].set_index('zone_wing')

@@ -138,3 +138,28 @@ def test_check_cant_check_unmeasured_floor_and_one_building_only():
     rooms, exits, f = check_tables([room('301', 60.55), other], [])
     with pytest.raises(ValueError):
         egress.check_capacities(rooms, exits, f, {1: 20, 2: 5})
+
+def test_check_room_type_changes_per_code():
+    # 60.55 m2: classroom 33, lab 14, office 7 per code
+    rooms, exits, f = check_tables([room('301', 60.55), room('302', 60.55, 200, 'site count')], TWO_DOORS)
+    # not visited -> the per code load is what the floor carries, so the zone drops 233 -> 214
+    check = egress.check_capacities(rooms, exits, f, {}, {1: 'Lab'})
+    r = check['rooms'][0]
+    assert (r['room_type_before'], r['room_type'], r['per_code_before'], r['per_code_load']) == ('classroom', 'lab', 33, 14)
+    assert r['proposed'] is None and r['type_changed'] and r['verdict'] == 'uses the per code load'
+    assert (check['zones'][0]['load_before'], check['zones'][0]['load_after']) == (233, 214)
+    # visited -> floor load unchanged, but the count is now judged against the office per code load
+    check = egress.check_capacities(rooms, exits, f, {}, {2: 'office'})
+    r = check['rooms'][0]
+    assert r['verdict'] == 'needs justification, +193 over per code' and r['colour'] == egress.AMBER
+    assert check['zones'][0]['load_after'] == 233
+    # capacity and type together, one room each way
+    check = egress.check_capacities(rooms, exits, f, {1: 20}, {1: 'lab'})
+    r = check['rooms'][0]
+    assert (r['proposed'], r['per_code_load'], r['verdict']) == (20, 14, 'needs justification, +6 over per code')
+    assert check['zones'][0]['load_after'] == 220
+    # excluded -> no per code load
+    assert egress.check_capacities(rooms, exits, f, {}, {1: 'excluded'})['rooms'][0]['per_code_load'] == 0
+    with pytest.raises(ValueError):
+        egress.check_capacities(rooms, exits, f, {}, {1: 'gym'})
+    assert rooms['room_type_override'].isna().all()          # nothing changed in the tables passed in

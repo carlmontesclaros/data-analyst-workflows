@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox, filedialog
 import pandas as pd
 import capacity_db as db
 import egress
+from exit_calc import occupant_load
 import exports
 import colours
 
@@ -38,6 +39,69 @@ def use_theme(root):
 # search -> 'DTB A120', 'Turpin', 'A120'. words with a digit are room numbers, the rest name the building
 def initials(name):
     return ''.join(word[0] for word in re.findall(r'[A-Za-z]+', name) if word[0].isupper()).lower()
+
+# typing in the building box -> 'tur', 'dtb', 'comp sci'. names starting with the text come first
+def match_buildings(names, text):
+    words = text.lower().split()
+    if not words:
+        return list(names)
+    hits = [p for p in names if all(w in p.lower() or w == initials(p) for w in words)]
+    return sorted(hits, key=lambda p: not p.lower().startswith(text.lower().strip()))
+
+NO_MATCH = "(no building matches)"
+
+# building box you can type in -> the list narrows as you type, Down arrow opens it, Enter picks the top match
+# used by the check screen and the editor screen
+class BuildingBox:
+    def __init__(self, parent, var, blank, on_pick, width):
+        self.var, self.blank, self.on_pick = var, blank, on_pick
+        self.names = []
+        self.box = ttk.Combobox(parent, textvariable=var, width=width)
+        self.box.bind('<<ComboboxSelected>>', lambda e: self.pick())
+        self.box.bind('<KeyRelease>', self.narrow)
+        self.box.bind('<Return>', lambda e: self.type_in())
+        self.box.bind('<FocusIn>', lambda e: self.box.select_range(0, 'end'))
+
+    def set_names(self, names):
+        self.names = list(names)
+        self.show_all()
+
+    def show_all(self):
+        self.box['values'] = ([self.blank] if self.blank else []) + self.names
+
+    def narrow(self, event):
+        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab'):
+            return
+        text = self.var.get()
+        if text.strip() in ('', self.blank):
+            self.show_all()
+        else:
+            self.box['values'] = match_buildings(self.names, text) or [NO_MATCH]
+
+    def type_in(self):
+        text = self.var.get().strip()
+        exact = [p for p in self.names if p.lower() == text.lower()]
+        hits = exact or match_buildings(self.names, text)
+        if text in ('', self.blank):
+            self.var.set(self.blank)
+        elif hits:
+            self.var.set(hits[0])
+        else:
+            self.box['values'] = [NO_MATCH]
+            self.box.event_generate('<Down>')         # open the list so the no-match line shows
+            return
+        self.pick()
+
+    def pick(self):
+        if self.var.get() not in self.names:          # half-typed text or the no-match line -> nothing picked
+            self.var.set(self.blank)
+        self.show_all()
+        self.box.icursor('end')
+        self.on_pick()
+
+    # the building picked, or None while the text is half typed
+    def picked(self):
+        return self.var.get() if self.var.get() in self.names else None
 
 def find_rooms(rooms, query, prop=None, floor=None):
     if prop:
@@ -102,7 +166,9 @@ class CheckScreen:
             self.factors = db.load_code_factors(self.conn)
             self.result = egress.calculate(self.rooms, self.exits, self.factors)
             self.seen_version = db.data_version(self.conn)
-            self.building_box['values'] = [ANY] + sorted(self.rooms['property'].unique())
+            self.building.set_names(sorted(self.rooms['property'].unique()))
+            self.room_types = sorted(self.factors['area_factors']['room_type'])
+            self.type_box['values'] = self.room_types
             self.search()
             if self.room is not None:
                 self.show_room(self.room['room_id'])
@@ -165,9 +231,8 @@ class CheckScreen:
         pick.grid(row=2, column=0, sticky='ew', pady=(0, 10))
         ttk.Label(pick, text="Building").grid(row=0, column=0, sticky='w')
         self.building_var = tk.StringVar(value=ANY)
-        self.building_box = ttk.Combobox(pick, textvariable=self.building_var, width=30, state='readonly')
-        self.building_box.grid(row=1, column=0, sticky='ew', pady=(2, 8))
-        self.building_box.bind('<<ComboboxSelected>>', lambda e: self.pick_building())
+        self.building = BuildingBox(pick, self.building_var, ANY, self.pick_building, width=30)
+        self.building.box.grid(row=1, column=0, sticky='ew', pady=(2, 8))
         ttk.Label(pick, text="Floor").grid(row=2, column=0, sticky='w')
         self.floor_var = tk.StringVar(value=ANY)
         self.floor_box = ttk.Combobox(pick, textvariable=self.floor_var, width=12, state='readonly', values=[ANY])
@@ -188,34 +253,52 @@ class CheckScreen:
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
 
+        # room card -> the room now, and right under it the room with the change, column by column
         card = ttk.LabelFrame(right, text=" 2. Room ", padding=(14, 10))
         card.grid(row=0, column=0, sticky='ew')
         card.columnconfigure(5, weight=1)
         self.room_title = tk.StringVar(value="Pick a room on the left")
         ttk.Label(card, textvariable=self.room_title, font=self.fonts['subtitle']).grid(row=0, column=0, columnspan=6, sticky='w')
-        self.card_vars = {}
-        for i, label in enumerate(["Room type", "Area", "Room capacity now", "Per code load"]):
+        ttk.Label(card, text="Now", font=self.fonts['strong']).grid(row=2, column=0, sticky='w', padx=(0, 24))
+        ttk.Label(card, text="With change", font=self.fonts['strong'], foreground=colours.CHANGED_FG).grid(
+            row=3, column=0, sticky='w', padx=(0, 24), pady=(2, 0))
+        self.card_vars, self.trial_vars, self.trial_labels = {}, {}, {}
+        for i, label in enumerate(["Room type", "Area", "Room capacity", "Per code load"], start=1):
             ttk.Label(card, text=label, foreground='#6A6A6A').grid(row=1, column=i, sticky='w', padx=(0, 28), pady=(8, 0))
-            var = tk.StringVar(value='-')
-            ttk.Label(card, textvariable=var, font=self.fonts['large']).grid(row=2, column=i, sticky='w', padx=(0, 28))
-            self.card_vars[label] = var
-        self.badge = tk.Label(card, text="", padx=10, pady=4, anchor='w', fg=colours.ROW_FG)
+            self.card_vars[label] = tk.StringVar(value='-')
+            ttk.Label(card, textvariable=self.card_vars[label], font=self.fonts['large']).grid(row=2, column=i, sticky='w', padx=(0, 28))
+            self.trial_vars[label] = tk.StringVar(value='-')
+            self.trial_labels[label] = ttk.Label(card, textvariable=self.trial_vars[label], font=self.fonts['large'])
+            self.trial_labels[label].grid(row=3, column=i, sticky='w', padx=(0, 28), pady=(2, 0))
+        badges = ttk.Frame(card)
+        badges.grid(row=4, column=0, columnspan=6, sticky='w', pady=(10, 0))
+        self.badge = tk.Label(badges, text="", padx=10, pady=4, anchor='w', fg=colours.ROW_FG)
         self.badge_bg = self.badge.cget('bg')
-        self.badge.grid(row=3, column=0, columnspan=6, sticky='w', pady=(10, 0))
+        self.badge.pack(side='left')
+        self.trial_badge = tk.Label(badges, text="", padx=10, pady=4, anchor='w', fg=colours.ROW_FG)
+        self.trial_badge.pack(side='left', padx=(10, 0))
 
-        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity ", padding=(14, 10))
+        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(14, 10))
         trial.grid(row=1, column=0, sticky='ew', pady=(14, 0))
         line = ttk.Frame(trial)
         line.pack(fill='x')
+        # room type -> changes the m2 per person, so the per code load (and an unvisited room's load) changes
+        ttk.Label(line, text="Room type", font=self.fonts['strong']).pack(side='left')
+        self.type_var = tk.StringVar()
+        self.type_box = ttk.Combobox(line, textvariable=self.type_var, width=11, state='readonly')
+        self.type_box.pack(side='left', padx=(10, 18))
+        self.type_box.bind('<<ComboboxSelected>>', lambda e: self.show_trial())
         ttk.Label(line, text="New capacity", font=self.fonts['strong']).pack(side='left')
         self.new_var = tk.StringVar()
+        self.new_var.trace_add('write', lambda *_: self.show_trial())
         new_entry = ttk.Entry(line, textvariable=self.new_var, width=8)
         new_entry.pack(side='left', padx=10)
         new_entry.bind('<Return>', lambda e: self.add_to_check())
         ttk.Button(line, text="Check", style='Accent.TButton', command=self.add_to_check).pack(side='left')
         ttk.Button(line, text="Remove room", command=self.remove_from_check).pack(side='left', padx=(18, 4))
         ttk.Button(line, text="Start over", command=self.start_over).pack(side='left', padx=4)
-        ttk.Label(trial, text="To check several rooms together, pick another room in the same building and press Check again.",
+        ttk.Label(trial, text="Leave New capacity blank to try only the room type. Check shows the floor exits; "
+                              "pick another room in the same building and press Check again to check several together.",
                   font=self.fonts['caption'], foreground='#6A6A6A').pack(anchor='w', pady=(6, 0))
         self.message_var = tk.StringVar()
         ttk.Label(trial, textvariable=self.message_var, foreground='#B00020').pack(anchor='w')
@@ -225,8 +308,8 @@ class CheckScreen:
         results.columnconfigure(0, weight=1)
         results.rowconfigure(3, weight=1)
         ttk.Label(results, text="Rooms in this check", font=self.fonts['strong']).grid(row=0, column=0, sticky='w')
-        self.check_tree = self.make_tree(results, [('Room', 130), ('Capacity now', 150), ('Proposed', 80),
-                                                   ('Per code load', 100), ('Result', 330)], height=4)
+        self.check_tree = self.make_tree(results, [('Room', 120), ('Room type', 130), ('Capacity now', 140), ('Proposed', 75),
+                                                   ('Per code load', 100), ('Result', 300)], height=3)
         self.check_tree.master.grid(row=1, column=0, sticky='ew', pady=(4, 12))
         colours.colour_tags(self.check_tree)
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
@@ -264,15 +347,16 @@ class CheckScreen:
 
     # finding rooms
     def pick_building(self):
-        prop = self.building_var.get()
-        floors = sorted(self.rooms.loc[self.rooms['property'] == prop, 'floor'].unique()) if prop != ANY else []
+        prop = self.building.picked()
+        floors = sorted(self.rooms.loc[self.rooms['property'] == prop, 'floor'].unique()) if prop else []
         self.floor_box['values'] = [ANY] + floors
         self.floor_var.set(ANY)
         self.search_var.set('')
         self.search()
 
     def search(self):
-        prop = None if self.building_var.get() == ANY else self.building_var.get()
+        # half-typed building text isn't a filter until it's picked
+        prop = self.building.picked()
         floor = None if self.floor_var.get() == ANY else self.floor_var.get()
         found = find_rooms(self.result['rooms'], self.search_var.get(), prop, floor)
         self.found_tree.delete(*self.found_tree.get_children())
@@ -307,14 +391,79 @@ class CheckScreen:
         capacity = pd.to_numeric(r['capacity'], errors='coerce')
         self.card_vars["Room type"].set(f"{r['room_type'] or '-'}" + (f"  ({r['sub_category']})" if pd.notna(r['sub_category']) else ''))
         self.card_vars["Area"].set('-' if pd.isna(r['area_m2']) else f"{r['area_m2']:g} m²")
-        self.card_vars["Room capacity now"].set("not visited" if pd.isna(capacity) else f"{int(capacity)}  ({r['capacity_source']})")
+        self.card_vars["Room capacity"].set("not visited" if pd.isna(capacity) else f"{int(capacity)}  ({r['capacity_source']})")
         self.card_vars["Per code load"].set('-' if pd.isna(r['area_per_person_m2'])
                                             else f"{r['per_code_load']}  ({r['area_per_person_m2']:g} m² per person)")
         colour, text = room_status_text(r)
-        self.badge.configure(text=text, bg=colours.ROW_BG.get(colour, self.badge_bg))
-        self.new_var.set(str(self.changes[room_id]) if room_id in self.changes else '')
+        self.badge.configure(text=f"Now: {text}", bg=colours.ROW_BG.get(colour, self.badge_bg))
+        tried = self.changes.get(room_id, {})
+        self.new_var.set('' if tried.get('capacity') is None else str(tried['capacity']))
+        self.type_var.set(tried.get('room_type') or self.room_type_now())
+        self.show_trial()
         if not self.changes:
             self.show_floor_now(r['property'], r['floor'])
+
+    def room_type_now(self):
+        t = self.room['room_type'] if self.room is not None else None
+        return '' if t is None or pd.isna(t) else t
+
+    # the room with the change -> updates as you pick a type or type a number, before pressing Check
+    def show_trial(self):
+        r = self.room
+        if r is None:
+            for label in self.trial_vars:
+                self.trial_vars[label].set('-')
+                self.trial_labels[label].configure(foreground='')
+            self.trial_badge.configure(text='', bg=self.badge_bg)
+            return
+
+        # what's tried: room type from the box, capacity typed (blank or not a number -> as now)
+        type_now = self.room_type_now()
+        new_type = self.type_var.get() or type_now
+        type_changed = new_type != type_now
+        cap_now = pd.to_numeric(r['capacity'], errors='coerce')
+        cap_now = None if pd.isna(cap_now) else int(cap_now)
+        text = self.new_var.get().strip()
+        cap_typed = int(text) if text.isdigit() else None
+        self.message_var.set("Type a whole number (0 or more)." if text and cap_typed is None else '')
+        cap_changed = cap_typed is not None and cap_typed != cap_now
+        capacity = cap_typed if cap_typed is not None else cap_now
+
+        factor = self.factors['area_factors'].set_index('room_type')['area_per_person_m2'].get(new_type)
+        has_load = new_type != '' and pd.notna(factor) and pd.notna(r['area_m2'])
+        per_code = int(occupant_load(r['area_m2'], factor)) if has_load else 0
+        per_changed = per_code != int(r['per_code_load'])
+
+        # changed -> the new value in blue; unchanged -> "same" in grey, the Now row above says what it is
+        cells = {
+            "Room type": (new_type or '-', type_changed),
+            "Area": ('', False),
+            "Room capacity": (('not visited' if capacity is None else str(capacity)) + '  (PM change)', cap_changed),
+            "Per code load": (f"{per_code}  ({factor:g} m² per person)" if has_load else 'none', per_changed),
+        }
+        for label, (value, changed) in cells.items():
+            self.trial_vars[label].set(value if changed else 'same')
+            self.trial_labels[label].configure(foreground=colours.CHANGED_FG if changed else '#6A6A6A')
+
+        if not (type_changed or cap_changed):
+            self.trial_badge.configure(text="With change: pick a room type or type a new capacity in 3 below",
+                                       bg=self.badge_bg)
+            return
+        # verdict -> same rule and colours as the check result
+        if not r['in_scope']:
+            colour, verdict = egress.NONE, "out of scope: not counted toward the floor"
+        elif not has_load:
+            colour, verdict = egress.GREY, ("excluded room type: no per code load" if new_type == 'excluded'
+                                            else "no room type: no per code load")
+        elif capacity is None:
+            colour = egress.GREY
+            verdict = (f"not visited: the floor carries the per code load, {r['per_code_load']} → {per_code}"
+                       if per_changed else "not visited: the floor carries the per code load")
+        elif capacity > per_code:
+            colour, verdict = egress.AMBER, f"needs justification: {capacity} is {capacity - per_code} over the per code load of {per_code}"
+        else:
+            colour, verdict = egress.GREEN, f"within per code: {capacity} is at or under {per_code}"
+        self.trial_badge.configure(text=f"With change: {verdict}", bg=colours.ROW_BG.get(colour, self.badge_bg))
 
     def show_floor_now(self, prop, floor):
         zones = self.result['zones']
@@ -337,12 +486,18 @@ class CheckScreen:
         if self.room is None:
             self.message_var.set("Pick a room first.")
             return
+        text = self.new_var.get().strip()
         try:
-            new = int(self.new_var.get().strip())
-            if new < 0:
+            new = None if text == '' else int(text)
+            if new is not None and new < 0:
                 raise ValueError
         except ValueError:
             self.message_var.set("Type a whole number (0 or more).")
+            return
+        new_type = self.type_var.get()
+        new_type = new_type if new_type and new_type != self.room_type_now() else None
+        if new is None and new_type is None:
+            self.message_var.set("Type a new capacity, or pick another room type.")
             return
         if self.changes:
             building = self.rooms.loc[self.rooms['room_id'] == next(iter(self.changes)), 'property'].iloc[0]
@@ -352,7 +507,7 @@ class CheckScreen:
                                            f"{self.room['property']}?", parent=self.root):
                     return
                 self.changes = {}
-        self.changes[self.room['room_id']] = new
+        self.changes[self.room['room_id']] = {'capacity': new, 'room_type': new_type}
         self.run_check()
 
     def remove_from_check(self):
@@ -366,6 +521,8 @@ class CheckScreen:
         self.changes = {}
         self.check = None
         self.new_var.set('')
+        self.type_var.set(self.room_type_now())
+        self.show_trial()
         self.message_var.set('')
         self.check_tree.delete(*self.check_tree.get_children())
         if self.room is not None:
@@ -379,7 +536,9 @@ class CheckScreen:
             self.start_over()
             return
         try:
-            self.check = egress.check_capacities(self.rooms, self.exits, self.factors, self.changes)
+            capacities = {k: v['capacity'] for k, v in self.changes.items() if v['capacity'] is not None}
+            room_types = {k: v['room_type'] for k, v in self.changes.items() if v['room_type']}
+            self.check = egress.check_capacities(self.rooms, self.exits, self.factors, capacities, room_types)
         except ValueError as err:
             self.message_var.set(str(err))
             self.changes = {}
@@ -388,8 +547,14 @@ class CheckScreen:
         for r in self.check['rooms']:
             now = 'not visited (per code)' if r['current'] is None else f"{r['current']} ({r['current_source']})"
             verdict = r['verdict'] + ('' if r['in_scope'] else '  (out of scope)')
-            self.check_tree.insert('', 'end', iid=f"r{r['room_id']}", values=[f"Floor {r['floor']}  {r['space']}", now,
-                                   r['proposed'], r['per_code_load'], verdict], tags=(r['colour'],) if r['colour'] else ())
+            if r['type_changed']:
+                room_type = f"{r['room_type_before'] or '-'} → {r['room_type']}"
+                per_code = f"{r['per_code_before']} → {r['per_code_load']}"
+            else:
+                room_type, per_code = r['room_type'] or '-', r['per_code_load']
+            proposed = '-' if r['proposed'] is None else r['proposed']
+            self.check_tree.insert('', 'end', iid=f"r{r['room_id']}", values=[f"Floor {r['floor']}  {r['space']}", room_type,
+                                   now, proposed, per_code, verdict], tags=(r['colour'],) if r['colour'] else ())
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity")
         self.zone_tree.delete(*self.zone_tree.get_children())
         for z in self.check['zones']:
