@@ -1,5 +1,6 @@
 import pandas as pd
-from check_screen import find_rooms, initials, match_buildings
+from check_screen import find_rooms
+from widgets import initials, match_buildings
 
 ROOMS = pd.DataFrame([
     {'room_id': 1, 'property': 'David Turpin Building', 'floor': '1', 'space': 'A120'},
