@@ -124,3 +124,14 @@ def test_results_workbook_zone_colours(tmp_path):
     path = tmp_path / 'results.xlsx'
     exports.write_results_workbook(result(), path)
     assert load_workbook(path)['floor_summary']['A2'].fill.fgColor.rgb.endswith('C6EFCE')
+
+def test_check_summary_shows_room_type_tried(tmp_path):
+    import zipfile
+    rooms = pd.DataFrame([t.room('301', 60.55)])
+    rooms['room_id'] = [7]
+    check = t.egress.check_capacities(rooms, pd.DataFrame(t.TWO_DOORS, columns=t.EXIT_COLUMNS), t.factors(), {}, {7: 'lab'})
+    path = exports.write_check_summary(check, tmp_path / 'c.docx', 'Carl', pd.Timestamp('2026-10-16 10:00'))
+    with zipfile.ZipFile(path) as z:
+        text = ''.join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', z.read('word/document.xml').decode('utf-8')))
+    for expected in ['classroom -&gt; lab', '33 -&gt; 14', 'uses the per code load']:
+        assert expected in text

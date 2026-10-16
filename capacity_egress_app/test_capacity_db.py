@@ -230,3 +230,22 @@ def test_current_login_ignores_username_variable_on_windows(monkeypatch):
         monkeypatch.delenv('USER', raising=False)
         monkeypatch.delenv('LNAME', raising=False)
         assert db.current_login() == 'someone_else'
+
+def test_change_room_type_logs_and_can_go_back_to_default(conn):
+    rid = room_id(conn, 'A201')
+    assert db.change_room_type(conn, rid, 'Lab', 'mark', 'Mark', 'used as a lab now')
+    assert conn.execute("SELECT room_type_override FROM rooms WHERE room_id = ?", (rid,)).fetchone()[0] == 'lab'
+    assert not db.change_room_type(conn, rid, 'lab', 'mark', 'Mark', 'same again')        # no change, no log row
+    assert db.change_room_type(conn, rid, '', 'carl', 'Carl', 'back to classroom')        # blank = sub-category default
+    log = [tuple(x) for x in conn.execute("SELECT field, old_value, new_value, why FROM audit_log")]
+    assert log == [('room_type_override', None, 'lab', 'used as a lab now'),
+                   ('room_type_override', 'lab', None, 'back to classroom')]
+    with pytest.raises(ValueError):
+        db.change_room_type(conn, rid, 'gym', 'carl', 'Carl', 'x')
+    with pytest.raises(ValueError):
+        db.change_room_type(conn, rid, 'lab', 'carl', 'Carl', ' ')
+    with pytest.raises(db.StaleDataError):
+        db.change_room_type(conn, rid, 'office', 'carl', 'Carl', 'x', expected='lab')
+    db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
+    with pytest.raises(db.NotEditorError):
+        db.change_room_type(conn, rid, 'office', 'viewer1', 'Viewer', 'x')

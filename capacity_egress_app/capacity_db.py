@@ -539,6 +539,30 @@ def change_capacity(conn, room_id, new_capacity, source, user_login, user_name, 
         if old[2] != visited:
             log_change(conn, user_login, user_name, 'rooms', room_id, 'visited', old[2], visited, why, changed_at=changed_at)
 
+# room type -> the override that sets the room's m2 per person; blank = back to the sub-category default
+def change_room_type(conn, room_id, new_type, user_login, user_name, why, expected=NO_CHECK):
+    # expected = room_type_override the person saw when they opened the room
+    new_type = str(new_type or '').strip().lower() or None
+    if not str(why or '').strip():
+        raise ValueError("say why the room type changed")
+    with write_transaction(conn):
+        require_editor(conn, user_login)
+        known = {r[0] for r in conn.execute("SELECT room_type FROM area_factors")}
+        if new_type is not None and new_type not in known:
+            raise ValueError(f"room type must be one of {sorted(known)}")
+        old = conn.execute("SELECT room_type_override FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
+        if old is None:
+            raise ValueError(f"no room with room_id {room_id}")
+        if expected is not NO_CHECK and not same_value(old[0], expected):
+            raise StaleDataError(f"This room's type was changed to {old[0] or 'the sub-category default'}"
+                                 f"{last_change(conn, 'rooms', room_id)} after you opened it. "
+                                 f"The screen has been refreshed; check it and try again.")
+        if same_value(old[0], new_type):
+            return False
+        conn.execute("UPDATE rooms SET room_type_override = ? WHERE room_id = ?", (new_type, room_id))
+        log_change(conn, user_login, user_name, 'rooms', room_id, 'room_type_override', old[0], new_type, why)
+    return True
+
 # notes -> one per room, one per exit
 def set_note(conn, table_name, record_id, note, user_login, user_name, expected=NO_CHECK):
     column, key = {'rooms': ('note', 'room_id'), 'exits': ('notes', 'exit_pk')}[table_name]

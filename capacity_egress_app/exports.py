@@ -340,8 +340,12 @@ def write_check_summary(check, path, user_name, when=None):
     for r in check['rooms']:
         current = '-' if r['current'] is None else r['current']
         scope = '' if r['in_scope'] else ' (out of scope: not counted toward the floor)'
-        rows.append([f"Floor {r['floor']}  {r['space']}", r['room_type'] or '-', f"{current} ({r['current_source']})",
-                     r['proposed'], r['per_code_load'], r['verdict'] + scope])
+        # a room type tried -> old -> new type and per code load
+        room_type = f"{r['room_type_before'] or '-'} -> {r['room_type']}" if r.get('type_changed') else (r['room_type'] or '-')
+        per_code = f"{r['per_code_before']} -> {r['per_code_load']}" if r.get('type_changed') else r['per_code_load']
+        proposed = '-' if r['proposed'] is None else r['proposed']
+        rows.append([f"Floor {r['floor']}  {r['space']}", room_type, f"{current} ({r['current_source']})",
+                     proposed, per_code, r['verdict'] + scope])
         fills.append(FILL[r['colour']])
     body.append(table(['Room', 'Type', 'Capacity now', 'Proposed', 'Per code load', 'Result'], rows, fills,
                       [1500, 1100, 1500, 1000, 1100, 3400]))
