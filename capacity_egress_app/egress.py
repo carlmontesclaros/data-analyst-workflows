@@ -39,6 +39,13 @@ def prepare_rooms(rooms, factors, settings, warning_rows):
     rooms.loc[default.notna(), 'room_type_source'] = 'category'
     rooms.loc[override.notna(), 'room_type_source'] = 'override'
 
+    # a room type that isn't a code factor (e.g. 'lounge' typed in the space report) -> 0 per code, so say so
+    unknown = rooms[override.notna() & override.isin(cf.unknown_room_types(factors, override.dropna()))]
+    for _, row in unknown.iterrows():
+        warning_rows.append({'type': 'unknown_room_type', 'property': row['property'], 'floor': row['floor'],
+                             'detail': f"{row['space']}: room type '{row['room_type']}' isn't a code factor room type "
+                                       f"({', '.join(cf.room_types(factors))}) - counted as 0 people"})
+
     no_type = rooms[rooms['room_type'].isna() & (rooms['area_m2'] > 0)]
     for _, row in no_type.iterrows():
         warning_rows.append({'type': 'no_room_type', 'property': row['property'], 'floor': row['floor'],
@@ -279,8 +286,13 @@ def zone_verdict(zone):
 # room = a prepared room row (room_type, area_per_person_m2, per_code_load, in_scope); capacity None = not visited
 def judge_room(room, capacity):
     if pd.isna(room['area_per_person_m2']):
-        verdict = ('no per code load (excluded room type)' if room['room_type'] == 'excluded'
-                   else 'no per code load (no room type)')
+        room_type = room['room_type']
+        if room_type == 'excluded':
+            verdict = 'no per code load (excluded room type)'
+        elif isinstance(room_type, str) and room_type:
+            verdict = f"no per code load (unknown room type '{room_type}')"
+        else:
+            verdict = 'no per code load (no room type)'
         colour, over = GREY, 0
     elif capacity is None:
         verdict, colour, over = 'not visited: uses the per code load', GREY, 0
