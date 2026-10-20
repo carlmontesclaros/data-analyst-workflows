@@ -250,11 +250,12 @@ Enter exits with **Add exit** in the app. One row per exit; a floor with three e
 | wing | Wing letter (A, B...) for a floor split into wings. Fill it on **every** exit of that floor. Blank = the floor is one zone. |
 | exit_id | Space number from the base drawings + what was measured: `S4 - doorway`, `S5 - open stair`. Outside doors aren't numbered on the plans: `E<floor> - outside exit`, plus a letter if there are several (`E2`, `E2A`, `E2B`). |
 | exit_type | `doorway`, `stairs` (rise ≤ 180 mm **and** run ≥ 280 mm) or `stairs_steep` (anything else). |
+| stair_width_cm, stair_type | Only for a door into a stair: the stair's narrowest clear width (cm, round down) and `stairs` / `stairs_steep`. Blank type = `stairs`. Blank width = door only (listed as `stair_not_measured`). |
 | clear_width_cm | Clear width in cm at the **narrowest** point, rounded down. Whole number, 50–500. |
 | into_wing | Only for a door into **another wing**: that wing's letter. |
 | narrowest_point, notes | What was narrowest (`121 cm at handrail`). For stairs, the rise and run. |
 
-Where a stair has a door in front of it, measure the **door**, and write the stair's narrowest width in `notes` (`stair 110 cm`): BCBC 2024 gives doors 6.1 and stairs 8.0 mm/person, so a stair can carry fewer people than its door even when it's wider (88 cm door = 144, 110 cm stair = 137). Using the smaller one is waiting on Mark. Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
+Where a stair has a door in front of it, measure **both**: the door in `clear_width_cm`, the stair in `stair_width_cm`. BCBC 2024 gives doors 6.1 and stairs 8.0 mm/person, so a stair can carry fewer people than its door even when it's wider (88 cm door = 144, 110 cm stair = 137). The exit counts the smaller (Carl, 2026-10-20). Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
 
 ## Method
 
@@ -265,10 +266,10 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (all non-assignable 16.x: circulation, washrooms, mechanical, janitorial) count as 0, `out of scope`. Lounges (14.3, 1.85 m²) and kitchens (7.2, 9.30 m²) count at their Table 3.1.17.1. per code load; they aren't counted on site because their occupancy varies.
 4. **Wing of each room** = the letters at the start of its Space number (`B303` → B).
 5. **Zones.** A floor is one zone unless any exit on it has a wing; then each wing is its own zone. On a split floor, zones with no load and no exits are dropped.
-6. **Open stairs are not exits** while `open_stairs_count` = `no`: BCBC 3.4.4.1.(1) requires exits to be fire separated. They get 0 people and `not an exit - open stair`.
-7. **Persons per exit** = `clear_width_cm × 10 ÷ mm per person`, rounded down: doorway 6.1 (3.4.3.2.(1)(a)), stairs 8.0 ((b)), stairs_steep 9.2 ((c)).
+6. **Open stairs count** (`open_stairs_count` = `yes`, Carl 2026-10-20): they lead down to an exit door, and this tool screens capacity, not fire separation. `no` is the strict reading of BCBC 3.4.4.1.(1) (exits fire separated): open stairs get 0 people and `not an exit - open stair`.
+7. **Persons per exit** = `clear_width_cm × 10 ÷ mm per person`, rounded down: doorway 6.1 (3.4.3.2.(1)(a)), stairs 8.0 ((b)), stairs_steep 9.2 ((c)). With a stair behind the door, the same for the stair, and the exit gets the **smaller** (`limited_by` = door / stair; `narrowest_persons` in `exit_calc.py`).
 8. **50% rule** (3.4.3.2.(7)): exit capacity = the smaller of the total and 2 × (total − largest exit). A single exit gives 0.
-9. **Minimum widths** (Table 3.4.3.2.-A): doorway under 850 mm fails; stairs under 900 mm fail, 900–1099 mm is review (depends on storeys served), 1100 mm and over passes.
+9. **Minimum widths** (Table 3.4.3.2.-A): doorway under 850 mm fails; stairs under 900 mm fail, 900–1099 mm is review (depends on storeys served), 1100 mm and over passes. A stair behind a door is checked too; the worse result wins.
 10. **Stairs are not cumulative across floors** (3.4.3.2.(4)).
 11. **Link doors** (supervisor model; no code clause covers a door between wings of one floor area, 3.4.3.1.(2) is the closest): people sent = the smaller of (sending wing load ÷ its exits) and the door's capacity, added to the receiving wing. One step only; a wing that sends and receives is flagged.
 12. **Occupant load** = load used + people received through link doors, compared with the exit capacity.
@@ -280,7 +281,7 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 |---|---|---|
 | BCBC 2024 governs | Carl | 2026-09-22 |
 | Class labs (2.1, 2.2) count as classroom unless the room type says otherwise | Supervisors | 2026-09 |
-| Where a stair has a door, the door is measured; open stairs are measured directly | Carl | 2026-09-22 |
+| ~~Where a stair has a door, the door is measured; open stairs are measured directly~~ (2026-10-20: measure both) | Carl | 2026-09-22 |
 | Stair factor follows the rise/run test (8.0 or 9.2) | BCBC 3.4.3.2.(1) | 2026-09-23 |
 | Stairs are not cumulative across floors | BCBC 3.4.3.2.(4) | 2026-09-23 |
 | Wings are calculated separately even when connected; connections recorded with `into_wing` | Supervisor | 2026-09-24 |
@@ -288,7 +289,9 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 | A floor splits into wings only if one of its exits has a wing | Carl | 2026-09-28 |
 | ~~All rooms count except lounges (14.3) and non-assignable (16.x)~~ | Carl | 2026-09-29 |
 | All rooms count except non-assignable (16.x); lounges and kitchens use their per code load (Table 3.1.17.1.), not a site count | Carl | 2026-10-20 |
-| Open stairs are not exits until confirmed | BCBC 3.4.4.1.(1), ruling pending | 2026-09-29 |
+| ~~Open stairs are not exits until confirmed~~ | BCBC 3.4.4.1.(1), ruling pending | 2026-09-29 |
+| Open stairs count as exits: they lead down to an exit door; the tool screens capacity, not fire separation | Carl | 2026-10-20 |
+| A door into a stair counts the smaller of door persons and stair persons (3.4.3.2.(1), (8)); the stair's minimum width is checked too | Carl | 2026-10-20 |
 | Load = room capacity; FMIS's default 0 is not a count, so unvisited rooms use per code | Carl | 2026-10-02 |
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |
@@ -302,10 +305,8 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 ## Open questions
 
 
-- **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.
 - **Link doors / firewalls:** with no firewall between two wings they're one floor area (Div A 1.4.1.2.) and the link door isn't an exit; with a firewall it's a horizontal exit (3.4.1.6., 3.4.6.10.: refuge 0.5 m² per person, at most half the exits). Ask Mark about Turpin floor 1 A/B.
-- **Door vs stair:** use the smaller of door persons and stair persons (3.4.3.2.(1), (8))? Ask Mark.
 - **Interconnected floor space** (3.4.3.2.(6)): floors joined by an open stair or atrium need cumulative stair widths. Does any screened floor have one (Turpin S5)?
 - **Ramps:** BCBC 2024 3.4.3.2.(1) gives 6.1 mm/person up to a 1 in 8 slope, 9.2 if steeper; Table 3.4.3.2.-A minimum 1100 mm. Not added as an exit type yet.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).

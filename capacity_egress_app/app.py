@@ -109,7 +109,7 @@ class App:
         ttk.Button(top, text="Search", command=self.search).pack(side='left')
         ttk.Label(top, text="   Building:").pack(side='left')
         self.building_var = tk.StringVar()
-        # type to narrow the list, Down arrow opens it, Enter picks the top match
+        # type to narrow the list, Down arrow opens it; Enter picks the top match
         self.building = BuildingBox(top, self.building_var, '', self.pick_building, width=45)
         self.building.box.pack(side='left', padx=4)
         ttk.Label(top, text="Floor:").pack(side='left')
@@ -166,7 +166,8 @@ class App:
                           ("Exit note", self.exit_note), ("Exit history", self.exit_history)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
         self.exit_tree = self.make_tree(exit_frame, [
-            ('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 100), ('persons', 70),
+            ('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 100),
+            ('stair_width_cm', 100), ('persons', 70), ('limited_by', 80),
             ('counts_as_exit', 100), ('width_check', 220), ('into_wing', 70), ('measured_date', 100),
             ('measured_by', 90), ('notes', 250)], height=5)
         colours.colour_tags(self.exit_tree)
@@ -273,7 +274,8 @@ class App:
         self.exit_tree.delete(*self.exit_tree.get_children())
         for _, e in exits.sort_values(['floor', 'wing', 'exit_id']).iterrows():
             width = '' if pd.isna(e['clear_width_cm']) else int(e['clear_width_cm'])
-            values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, e['persons'],
+            stair = '' if pd.isna(e['stair_width_cm']) else int(e['stair_width_cm'])
+            values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, stair, e['persons'], e['limited_by'],
                       'yes' if e['counts_as_exit'] else 'no', e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
@@ -428,7 +430,7 @@ class App:
         ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
         win.bind('<Escape>', lambda e: win.destroy())
 
-    # change room type -> sets the m2 per person, so the per code load changes; preview the zone, then save or cancel
+    # change room type -> sets the m2 per person, so the per-code load changes; preview the zone, then save or cancel
     def change_room_type(self):
         room = self.current_room()
         if room is None:
@@ -591,7 +593,7 @@ class App:
             return
         open_path(path)
 
-    # exits -> same checks as the excel sheet
+    # exits -> same checks as the Excel sheet
     def exit_form(self, title, values):
         win = tk.Toplevel(self.root)
         win.title(title)
@@ -603,6 +605,8 @@ class App:
         fields = [('property', 'Property', None), ('floor', 'Floor', None), ('wing', 'Wing (A, B... blank = one zone)', None),
                   ('into_wing', 'Into wing (link door only)', None), ('exit_id', 'Exit id (e.g. S4 - doorway)', None),
                   ('exit_type', 'Exit type', types), ('clear_width_cm', 'Clear width (cm, narrowest, round down)', None),
+                  ('stair_width_cm', 'Stair width behind the door (cm, blank = none)', None),
+                  ('stair_type', 'Stair type', [''] + [t for t in types if t.startswith('stairs')]),
                   ('measured_date', 'Measured date (YYYY-MM-DD)', None), ('measured_by', 'Measured by', None),
                   ('narrowest_point', 'Narrowest point', None), ('photo_ref', 'Photo ref', None), ('notes', 'Notes', None)]
         vars_ = {}

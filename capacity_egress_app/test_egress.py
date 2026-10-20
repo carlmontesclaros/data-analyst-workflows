@@ -4,12 +4,13 @@ import pytest
 import egress
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
-EXIT_COLUMNS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm']
+EXIT_COLUMNS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
+                'stair_width_cm', 'stair_type']
 
 def factors(**settings):
     f = {t: pd.read_csv(os.path.join(CONFIG_DIR, f'{t}.csv'))
          for t in ['area_factors', 'width_factors', 'category_map', 'settings']}
-    extra = {'room_exclude': '16', 'open_stairs_count': 'no'}
+    extra = {'room_exclude': '16', 'open_stairs_count': 'yes'}
     extra.update(settings)
     f['settings'] = pd.concat([f['settings'], pd.DataFrame(
         [{'setting': k, 'value': v} for k, v in extra.items()])], ignore_index=True)
@@ -22,9 +23,10 @@ def room(space, area, capacity=None, source='per code', sub=CLASSROOM, floor='3'
             'capacity': capacity, 'capacity_source': source if capacity is not None else 'per code',
             'room_type_override': None}
 
-def exit_row(exit_id, exit_type, cm, wing=None, into_wing=None, floor='3'):
+def exit_row(exit_id, exit_type, cm, wing=None, into_wing=None, floor='3', stair_cm=None, stair_type=None):
     return {'property': 'Fake Hall', 'floor': floor, 'wing': wing, 'into_wing': into_wing,
-            'exit_id': exit_id, 'exit_type': exit_type, 'clear_width_cm': cm}
+            'exit_id': exit_id, 'exit_type': exit_type, 'clear_width_cm': cm,
+            'stair_width_cm': stair_cm, 'stair_type': stair_type}
 
 def run(rooms, exits, **settings):
     return egress.calculate(pd.DataFrame(rooms), pd.DataFrame(exits, columns=EXIT_COLUMNS), factors(**settings))
@@ -52,12 +54,13 @@ def test_out_of_scope_rooms_add_nothing():
     result = run([room('301', 60.55, 30, 'site count'), room('C1', 100, sub='16.2.4 - Circulation Space')], TWO_DOORS)
     assert zone(result)['total_load'] == 30
 
-def test_open_stair_not_an_exit_until_ruled():
+def test_open_stair_counts_unless_switched_off():
     exits = [exit_row('S4 - doorway', 'doorway', 88), exit_row('S5 - open stair', 'stairs', 121),
              exit_row('E3 - outside exit', 'doorway', 88)]
     rooms = [room('301', 60.55, 30, 'site count')]
-    assert zone(run(rooms, exits))['exit_capacity'] == 288
-    assert zone(run(rooms, exits, open_stairs_count='yes'))['exit_capacity'] == 439
+    # Carl 2026-10-20: the open stair leads down to an exit door, so it counts (S4 144 + S5 151 + E3 144)
+    assert zone(run(rooms, exits))['exit_capacity'] == 439
+    assert zone(run(rooms, exits, open_stairs_count='no'))['exit_capacity'] == 288
 
 def test_one_exit_is_review():
     z = zone(run([room('301', 20, 10, 'site count')], [exit_row('S1', 'doorway', 88)]))
@@ -102,7 +105,8 @@ def test_zone_colours_red_only_when_over_exit_capacity():
 
 def test_exit_colours():
     exits = run([room('301', 20)], [exit_row('S1', 'doorway', 88), exit_row('S2', 'doorway', 80),
-                                    exit_row('S3', 'stairs', 95), exit_row('S5 - open stair', 'stairs', 121)])['exits']
+                                    exit_row('S3', 'stairs', 95), exit_row('S5 - open stair', 'stairs', 121)],
+                open_stairs_count='no')['exits']
     assert [egress.exit_colour(e) for _, e in exits.sort_values('exit_id').iterrows()] == \
            [egress.GREEN, egress.RED, egress.AMBER, egress.GREY]
 
@@ -225,3 +229,26 @@ def test_lounges_and_kitchens_use_per_code_circulation_stays_out():
     assert (r.loc['110', 'room_type'], r.loc['110', 'per_code_load'], bool(r.loc['110', 'in_scope'])) == ('lounge', 11, True)
     assert (r.loc['111', 'room_type'], r.loc['111', 'per_code_load'], bool(r.loc['111', 'in_scope'])) == ('kitchen', 2, True)
     assert (bool(r.loc['112', 'in_scope']), r.loc['112', 'load_used']) == (False, 0)
+
+def test_stair_behind_the_door_limits_the_exit():
+    # BCBC 2024 3.4.3.2.(1) -> door 6.1, stair 8.0 mm/person; the exit carries what its smaller part carries
+    exits = run([room('301', 20)], [exit_row('S4 - doorway', 'doorway', 88, stair_cm=110, stair_type='stairs'),
+                                    exit_row('S6 - doorway', 'doorway', 88, stair_cm=121, stair_type='stairs'),
+                                    exit_row('E3 - outside exit', 'doorway', 88)])['exits'].set_index('exit_id')
+    assert (exits.loc['S4 - doorway', 'persons'], exits.loc['S4 - doorway', 'limited_by']) == (137, 'stair')
+    assert (exits.loc['S6 - doorway', 'persons'], exits.loc['S6 - doorway', 'limited_by']) == (144, 'door')
+    assert (exits.loc['E3 - outside exit', 'persons'], exits.loc['E3 - outside exit', 'limited_by']) == (144, 'door')
+
+def test_stair_minimum_width_is_checked_too():
+    # Table 3.4.3.2.-A -> stairs under 900 mm fail even when the door is fine
+    exits = run([room('301', 20)], [exit_row('S4 - doorway', 'doorway', 88, stair_cm=85, stair_type='stairs'),
+                                    exit_row('S6 - doorway', 'doorway', 88, stair_cm=95, stair_type='stairs')])['exits']
+    checks = dict(zip(exits['exit_id'], exits['width_check']))
+    assert checks == {'S4 - doorway': 'fail - below minimum', 'S6 - doorway': 'review - depends on storeys served'}
+
+def test_stair_door_without_a_stair_width_is_listed():
+    # an S exit measured at the door only -> warning so the stair gets measured next visit
+    result = run([room('301', 20)], [exit_row('S4 - doorway', 'doorway', 88), exit_row('E3 - outside exit', 'doorway', 88)])
+    w = result['warnings']
+    w = w[w['type'] == 'stair_not_measured']
+    assert len(w) == 1 and 'S4 - doorway' in w.iloc[0]['detail']

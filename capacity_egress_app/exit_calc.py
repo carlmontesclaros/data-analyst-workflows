@@ -16,6 +16,11 @@ def occupant_load(area, area_per_person):
 def exit_persons(width_cm, mm_per_person):
     return np.floor(np.round(width_cm * 10 / mm_per_person, 6))
 
+# an exit = a door + the stair behind it -> it carries what its smaller part carries (stair not measured -> the door)
+# BCBC 2024 3.4.3.2.(1) gives each part its own mm per person, (8) its own minimum width. Carl 2026-10-20
+def narrowest_persons(door_persons, stair_persons):
+    return np.fmin(door_persons, stair_persons)
+
 # exiting capacity of a zone -> 50% rule, no exit counts for more than half
 # BCBC 2024 3.4.3.2.(7) -> if more than one exit is required, each exit counts for at most half the required width
 def capacity_50_rule(total, largest):
