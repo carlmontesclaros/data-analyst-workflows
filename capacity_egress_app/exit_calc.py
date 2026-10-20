@@ -23,7 +23,7 @@ def capacity_50_rule(total, largest):
     return np.minimum(total, 2 * others)
 
 # people sent through a link door into another wing
-# closest clause BCBC 2024 3.4.3.1.(2) -> exit width is cumulative where exits converge
+# supervisor model, no code clause. closest: BCBC 2024 3.4.3.1.(2) -> exit width is cumulative where exits converge
 # the share method is a supervisor decision, not code text (link_share_method setting)
 # even_split = sending wing load / its exits, half_load = load / 2, never more than the door holds
 def people_sent(load, exit_count, door_persons, method='even_split'):

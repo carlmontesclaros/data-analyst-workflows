@@ -93,7 +93,7 @@ The first screen everyone sees. Built for a quick question like "can DTB A120 go
 2. **Room card:** two rows of big values, column by column: **Now** (room type, area, room capacity and its source, per code load) and **With change** (what's typed in 3: changed values in blue, the rest say "same"). Each row has its coloured verdict, side by side. It updates as you pick a room type or type a number, before Check.
 3. **Room type and/or new capacity → Check.** Picking another room type (supervisor feedback, 2026-10-16) shows that type's per code load next to the box; Check then judges the room against it, and an unvisited room's per code load changes the floor load (a visited room's floor load stays its count). Leave New capacity blank to try only the room type. **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
 4. **Result:**
-   - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) allows a higher number when it can be shown (fixed seats, a posted sign), so an editor looks into it.
+   - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) lets a room be designed for more people than the table, as long as the exits carry them and a sign is posted (3.1.17.1.(2)). Amber is project policy, so an editor looks into it. (It's a count **below** per code that the code says must "be shown".)
    - **Each zone on the floor:** occupant load now → with the change, against exit capacity: **within**, **over by N**, or **"Can't check egress: exits on this floor haven't been measured."** An unmeasured floor is never shown as fine.
 5. **Save summary (.docx)**: one page to attach to the email to Mark. It lists, for each room, current capacity and source, proposed number, per code load and verdict; for each zone, occupant load now → after, exit capacity and verdict; the date, who ran it and the code edition. The footer reads "Screening only, not an approval. An editor reviews every change." The request's reason goes in the email. The file is written by the app itself, so nothing extra is installed.
 
@@ -207,12 +207,12 @@ BCBC comes out about every 6 years (2012, 2018, 2024). Each rule the app uses is
 | Minimum number of exits | 3.4.2.1.(1) | `minimum_exits` setting | Anyone, in **Code factors** |
 | Rooms left out of scope | project decision | `room_exclude` setting | Anyone, in **Code factors** |
 | Open stairs count as exits | 3.4.4.1.(1) | `open_stairs_count` setting | Anyone, in **Code factors** |
-| Link door share | 3.4.3.1.(2) | `link_share_method` setting (even_split / half_load) | Anyone, in **Code factors** |
+| Link door share | supervisor model (closest: 3.4.3.1.(2)) | `link_share_method` setting (even_split / half_load) | Anyone, in **Code factors** |
 | Edition the results say | n/a | `code_edition` setting | Anyone, in **Code factors** |
 | Occupant load formula (area ÷ m², round up) | 3.4.3.1.(1) → 3.1.17.1.(1)(c) | `occupant_load` in `exit_calc.py` | Someone who can edit Python |
 | Persons per exit formula (width ÷ mm, round down) | 3.4.3.2.(1) | `exit_persons` in `exit_calc.py` | Someone who can edit Python |
 | 50% rule | 3.4.3.2.(7) | `capacity_50_rule` in `exit_calc.py` | Someone who can edit Python |
-| Link door formula | 3.4.3.1.(2) | `people_sent` in `exit_calc.py` | Someone who can edit Python |
+| Link door formula | supervisor model (closest: 3.4.3.1.(2)) | `people_sent` in `exit_calc.py` | Someone who can edit Python |
 | Stairs not cumulative across floors | 3.4.3.2.(4) | how `build_zones` in `egress.py` groups rooms | Someone who can edit Python |
 | Status and flags | project decision | end of `build_zones` in `egress.py` | Someone who can edit Python |
 
@@ -254,7 +254,7 @@ Enter exits with **Add exit** in the app. One row per exit; a floor with three e
 | into_wing | Only for a door into **another wing**: that wing's letter. |
 | narrowest_point, notes | What was narrowest (`121 cm at handrail`). For stairs, the rise and run. |
 
-Where a stair has a door in front of it, measure the **door**. Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
+Where a stair has a door in front of it, measure the **door**, and write the stair's narrowest width in `notes` (`stair 110 cm`): BCBC 2024 gives doors 6.1 and stairs 8.0 mm/person, so a stair can carry fewer people than its door even when it's wider (88 cm door = 144, 110 cm stair = 137). Using the smaller one is waiting on Mark. Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
 
 ## Method
 
@@ -268,9 +268,9 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 6. **Open stairs are not exits** while `open_stairs_count` = `no`: BCBC 3.4.4.1.(1) requires exits to be fire separated. They get 0 people and `not an exit - open stair`.
 7. **Persons per exit** = `clear_width_cm × 10 ÷ mm per person`, rounded down: doorway 6.1 (3.4.3.2.(1)(a)), stairs 8.0 ((b)), stairs_steep 9.2 ((c)).
 8. **50% rule** (3.4.3.2.(7)): exit capacity = the smaller of the total and 2 × (total − largest exit). A single exit gives 0.
-9. **Minimum widths** (Table 3.4.3.2.-A): doorway under 800 mm fails; stairs under 900 mm fail, 900–1099 mm is review (depends on storeys served), 1100 mm and over passes.
+9. **Minimum widths** (Table 3.4.3.2.-A): doorway under 850 mm fails; stairs under 900 mm fail, 900–1099 mm is review (depends on storeys served), 1100 mm and over passes.
 10. **Stairs are not cumulative across floors** (3.4.3.2.(4)).
-11. **Link doors** (3.4.3.1.(2)): people sent = the smaller of (sending wing load ÷ its exits) and the door's capacity, added to the receiving wing. One step only; a wing that sends and receives is flagged.
+11. **Link doors** (supervisor model; no code clause covers a door between wings of one floor area, 3.4.3.1.(2) is the closest): people sent = the smaller of (sending wing load ÷ its exits) and the door's capacity, added to the receiving wing. One step only; a wing that sends and receives is flagged.
 12. **Occupant load** = load used + people received through link doors, compared with the exit capacity.
 13. **Status:** `NOT SURVEYED - no exit data` (no exits) / `REVIEW` (any flag) / `WITHIN CAPACITY - review before acting`. Flags: fewer than 2 exits, load over capacity, width fail, width review, width unknown, sends and receives link traffic, load is 0. **Never "approved".**
 
@@ -293,7 +293,9 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 | Occupant load rounded up | Project default, confirm | 2026-09 |
 | Viewers can try a room type on the check screen (not saved); editors change it on the editor screen, logged with why | Supervisor feedback, Carl | 2026-10-16 |
 | Space report export: a visited room's PM change goes into `Capacity (Occupants)` (it's the room capacity FMIS gets; the site count stays in the change log) | Carl | 2026-10-16 |
-| Health services (13.1) and day care (19.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
+| Health services (13.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
+| Day care (19.1) is Group A-2, not care (3.1.2.8.(1)); still excluded until a room type is picked | BCBC 2024 3.1.2.8.(1) | 2026-10-20 |
+| Posted signs (3.1.17.1.(2)) not tracked by the app; some rooms already have them | Carl | 2026-10-20 |
 | Residences (17.x) excluded; they use persons per sleeping room, not area | Pending | |
 
 ## Open questions
@@ -301,14 +303,16 @@ Where a stair has a door in front of it, measure the **door**. Only measure the 
 
 - **Open stairs** (e.g. Turpin S5, curved, not enclosed): do they count as exits? Sets `open_stairs_count`.
 - **27 sub-category mappings** are marked `needs_review` in the category map.
-- **Horizontal exits:** if a link door is in a fire-rated wall, the horizontal exit rules may apply. Not checked.
+- **Link doors / firewalls:** with no firewall between two wings they're one floor area (Div A 1.4.1.2.) and the link door isn't an exit; with a firewall it's a horizontal exit (3.4.1.6., 3.4.6.10.: refuge 0.5 m² per person, at most half the exits). Ask Mark about Turpin floor 1 A/B.
+- **Door vs stair:** use the smaller of door persons and stair persons (3.4.3.2.(1), (8))? Ask Mark.
+- **Interconnected floor space** (3.4.3.2.(6)): floors joined by an open stair or atrium need cumulative stair widths. Does any screened floor have one (Turpin S5)?
+- **Lounges (14.3) and kitchens:** Table 3.1.17.1. gives them 1.85 and 9.30, so leaving them out undercounts a little. Carl's call.
 - **Ramps:** BCBC 2024 3.4.3.2.(1) gives 6.1 mm/person up to a 1 in 8 slope, 9.2 if steeper; Table 3.4.3.2.-A minimum 1100 mm. Not added as an exit type yet.
-- **Posted signs:** BCBC 2024 3.1.17.1.(2) says a floor area designed for a load other than Table 3.1.17.1. needs a permanent sign showing that load. Rooms using a site count below the per code load may need one. Ask Mark.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).
 
 ## Out of scope
 
-Travel distance, dead-end corridors, sprinklers, door swing and hardware, fire separations (other than open stairs), occupancy reclassification and aisle widths inside rooms. These are why results say "review", not "approved".
+Two egress doors for a room over 60 people (3.3.1.5.), washroom counts (3.7.4.), travel distance, dead-end corridors, sprinklers, door swing and hardware, fire separations (other than open stairs), occupancy reclassification and aisle widths inside rooms. These are why results say "review", not "approved".
 
 ## Known data issues (Sept 2026 exports)
 
