@@ -149,7 +149,7 @@ def build_zones(rooms, exits, settings, warning_rows):
     zones = zones.merge(cap[ZONE_KEYS + ['exit_capacity']], on=ZONE_KEYS, how='left')
     zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
-    # link doors -> people sent into another wing (closest clause BCBC 2024 3.4.3.1.(2))
+    # link doors -> people sent into another wing (supervisor model, no code clause; 3.4.3.1.(2) is the closest)
     links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']]
     links = links.merge(zones[ZONE_KEYS + ['load_used', 'exit_count']], on=ZONE_KEYS, how='left')
     if len(links):
@@ -299,7 +299,7 @@ def judge_room(room, capacity):
     else:
         over = int(capacity) - int(room['per_code_load'])
         if over > 0:
-            verdict, colour = f"needs justification, +{over} over per code", AMBER   # BCBC 2024 3.1.17.1.(1)(c)
+            verdict, colour = f"needs justification, +{over} over per code", AMBER   # project policy: 3.1.17.1.(1)(c) allows more, (2) -> posted sign
         else:
             verdict, colour, over = 'within per code', GREEN, 0
     if not room['in_scope']:

@@ -45,7 +45,7 @@ space_sub_category,room_type,needs_review,note
 17.1 - Residence Living Space,excluded,yes,Residences use persons per sleeping room not area - out of scope
 17.2 - Residence Service Space,excluded,yes,Residences - out of scope
 18.1 - Specialized Central Area,office,yes,
-19.1 - Day Care Facility,excluded,yes,Care occupancy - 18.4 mm/person per 3.4.3.2.(2). Out of scope until ruled
+19.1 - Day Care Facility,excluded,yes,Not a care occupancy: BCBC 2024 3.1.2.8.(1) classes day care for children as Group A-2 (normal 6.1/8/9.2). No Table 3.1.17.1. row; pick a room type
 19.3 - Merchandising Facility - Non-University,non-fixed,yes,
 19.4 - Demonstration School - Non-University,classroom,yes,
 19.6 - Non-University Agency Occupying Univ Space,office,yes,

@@ -366,8 +366,8 @@ def write_check_summary(check, path, user_name, when=None):
 
     body.append(para("What the results mean", bold=True, after=40))
     for line in ["Within per code: the proposed number is at or under the building code's area-based number for the room.",
-                 "Needs justification: over the per code load. Allowed only when the higher number can be shown "
-                 "(fixed seats, a posted sign; BCBC 2024 3.1.17.1.(1)(c)), so an editor looks into it.",
+                 "Needs justification: over the per code load. The code allows it when the exits can carry it, with a "
+                 "posted sign (BCBC 2024 3.1.17.1.(1)(c) and (2)), so an editor looks into it.",
                  "Over exit capacity: the floor's measured exits can't carry the occupant load with this change.",
                  egress.CANT_CHECK]:
         body.append(para("- " + line, after=20))
