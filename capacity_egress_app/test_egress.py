@@ -9,7 +9,7 @@ EXIT_COLUMNS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type'
 def factors(**settings):
     f = {t: pd.read_csv(os.path.join(CONFIG_DIR, f'{t}.csv'))
          for t in ['area_factors', 'width_factors', 'category_map', 'settings']}
-    extra = {'room_exclude': '14.3,16', 'open_stairs_count': 'no'}
+    extra = {'room_exclude': '16', 'open_stairs_count': 'no'}
     extra.update(settings)
     f['settings'] = pd.concat([f['settings'], pd.DataFrame(
         [{'setting': k, 'value': v} for k, v in extra.items()])], ignore_index=True)
@@ -203,15 +203,25 @@ def test_zone_verdict():
     assert egress.zone_verdict(unmeasured) == egress.CANT_CHECK
 
 def test_unknown_room_type_is_flagged_not_silent():
-    # 'lounge' isn't a code factor room type -> 0 per code, so it must show up in the warnings
-    lounge = dict(room('327', 20.0), room_type_override='lounge')
-    result = run([lounge, room('301', 60.55)], TWO_DOORS)
+    # 'gym' isn't a code factor room type -> 0 per code, so it must show up in the warnings
+    gym = dict(room('327', 20.0), room_type_override='gym')
+    result = run([gym, room('301', 60.55)], TWO_DOORS)
     w = result['warnings']
     w = w[w['type'] == 'unknown_room_type']
-    assert len(w) == 1 and '327' in w.iloc[0]['detail'] and "'lounge'" in w.iloc[0]['detail']
+    assert len(w) == 1 and '327' in w.iloc[0]['detail'] and "'gym'" in w.iloc[0]['detail']
     assert result['rooms'].set_index('space').loc['327', 'per_code_load'] == 0
 
 def test_unknown_room_type_verdict_names_the_type():
-    lounge = dict(room('327', 20.0, 2, 'site count'), room_type_override='lounge')
-    r = run([lounge], TWO_DOORS)['rooms'].iloc[0]
-    assert egress.judge_room(r, 2)[:2] == ("no per code load (unknown room type 'lounge')", egress.GREY)
+    gym = dict(room('327', 20.0, 2, 'site count'), room_type_override='gym')
+    r = run([gym], TWO_DOORS)['rooms'].iloc[0]
+    assert egress.judge_room(r, 2)[:2] == ("no per code load (unknown room type 'gym')", egress.GREY)
+
+def test_lounges_and_kitchens_use_per_code_circulation_stays_out():
+    # BCBC 2024 Table 3.1.17.1. -> lounges 1.85, kitchens 9.30; non-assignable 16.x has no row
+    lounge = room('110', 20.0, sub='14.3 - Lounge & Service Space')
+    kitchen = room('111', 18.6, sub='7.2 - Food Facility Service')
+    hall = room('112', 40.0, sub='16.2.4 - Circulation Space')
+    r = run([lounge, kitchen, hall], TWO_DOORS)['rooms'].set_index('space')
+    assert (r.loc['110', 'room_type'], r.loc['110', 'per_code_load'], bool(r.loc['110', 'in_scope'])) == ('lounge', 11, True)
+    assert (r.loc['111', 'room_type'], r.loc['111', 'per_code_load'], bool(r.loc['111', 'in_scope'])) == ('kitchen', 2, True)
+    assert (bool(r.loc['112', 'in_scope']), r.loc['112', 'load_used']) == (False, 0)

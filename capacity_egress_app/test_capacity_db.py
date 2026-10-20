@@ -261,3 +261,15 @@ def test_visited_means_ever_counted_source_means_current_number(conn):
     rid = room_id(conn, 'A201')                                   # never counted
     db.change_capacity(conn, rid, 30, 'PM change', 'mark', 'Mark', 'OREM request')
     assert conn.execute("SELECT visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()[0] == 0
+
+def test_add_room_type_needs_clause_and_is_logged(conn):
+    with pytest.raises(ValueError):
+        db.add_room_type(conn, 'dining', 1.2, '', 'carl', 'Carl')
+    db.add_room_type(conn, 'dining', 1.2, 'BCBC 2024 Table 3.1.17.1.', 'carl', 'Carl', why='cafeteria')
+    m2 = conn.execute("SELECT area_per_person_m2 FROM area_factors WHERE room_type = 'dining'").fetchone()[0]
+    log = conn.execute("SELECT table_name, record_key, old_value, new_value, clause_ref FROM audit_log").fetchone()
+    assert m2 == 1.2 and tuple(log) == ('area_factors', 'dining', None, '1.2', 'BCBC 2024 Table 3.1.17.1.')
+    with pytest.raises(ValueError):                  # already there -> change it with change_code_factor instead
+        db.add_room_type(conn, 'dining', 2.0, 'BCBC 2024 Table 3.1.17.1.', 'carl', 'Carl')
+    with pytest.raises(ValueError):
+        db.add_room_type(conn, 'gym', 0, 'BCBC 2024 Table 3.1.17.1.', 'carl', 'Carl')

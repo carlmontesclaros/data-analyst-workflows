@@ -248,7 +248,7 @@ def insert_first_import_audit(conn, user_login, user_name=None):
 
 # extra settings the terminal script kept as constants -> now code factors in the database
 EXTRA_SETTINGS = [
-    ('room_exclude', '14.3,16', 'Sub-category codes left out of the load (16 = all 16.x non-assignable). Carl 2026-09-29'),
+    ('room_exclude', '16', 'Sub-category codes left out of the load (16 = all 16.x non-assignable, no Table 3.1.17.1. row). Lounges 14.3 count since Carl 2026-10-20'),
     ('open_stairs_count', 'no', 'BCBC 3.4.4.1.(1) exits must be fire separated -> open stairs not counted until Mark rules'),
 ]
 
@@ -623,6 +623,24 @@ def change_code_factor(conn, table_name, key_value, field, new_value, clause_ref
                                  f"The screen has been refreshed; check it and try again.")
         conn.execute(f"UPDATE {table_name} SET {field} = ? WHERE {key} = ?", (new_value, key_value))
         log_change(conn, user_login, user_name, table_name, key_value, field, old[0], new_value, why, clause_ref)
+
+# new room type -> a Table 3.1.17.1. row the app didn't have yet; an existing one changes with change_code_factor
+def add_room_type(conn, room_type, area_per_person_m2, clause_ref, user_login, user_name, why=None):
+    room_type = str(room_type or '').strip().lower()
+    if not room_type:
+        raise ValueError("room type can't be blank")
+    if not str(clause_ref or '').strip():
+        raise ValueError("a building code clause reference is required (e.g. BCBC 2024 Table 3.1.17.1.)")
+    if not float(area_per_person_m2) > 0:
+        raise ValueError("m2 per person must be more than 0")
+    with write_transaction(conn):
+        require_editor(conn, user_login)
+        if conn.execute("SELECT 1 FROM area_factors WHERE room_type = ?", (room_type,)).fetchone():
+            raise ValueError(f"room type '{room_type}' already exists; change its m2 per person instead")
+        conn.execute("INSERT INTO area_factors (room_type, area_per_person_m2) VALUES (?,?)",
+                     (room_type, float(area_per_person_m2)))
+        log_change(conn, user_login, user_name, 'area_factors', room_type, 'area_per_person_m2', None,
+                   float(area_per_person_m2), why, clause_ref)
 
 # history for one record, newest first
 def history(conn, table_name, record_key):

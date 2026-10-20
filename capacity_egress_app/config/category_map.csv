@@ -19,7 +19,7 @@ space_sub_category,room_type,needs_review,note
 6.2 - Athletic Seating Area,non-fixed,yes,Fixed seating - should use seat count not area
 6.3 - Athletic Service Space,excluded,yes,
 7.1 - Food Facility,non-fixed,yes,Dining - confirm factor
-7.2 - Food Facility Service,excluded,yes,Kitchen and back of house
+7.2 - Food Facility Service,kitchen,no,Kitchen and back of house - BCBC 2024 Table 3.1.17.1. kitchens 9.30
 8.1 - Bookstore / Merchandising,non-fixed,yes,Retail - confirm factor
 9.1 - Plant Maintenance,excluded,yes,
 10.1 - Office Area,office,no,
@@ -31,7 +31,7 @@ space_sub_category,room_type,needs_review,note
 13.1 - Health Service Facility,excluded,yes,May be care occupancy - 18.4 mm/person per 3.4.3.2.(2). Out of scope until ruled
 14.1 - Student Office & Support Space,office,no,
 14.2 - Recreational Facility & Service,non-fixed,yes,
-14.3 - Lounge & Service Space,non-fixed,no,
+14.3 - Lounge & Service Space,lounge,no,BCBC 2024 Table 3.1.17.1. lounges 1.85
 14.4 - General University Study Space,non-fixed,no,
 15.1 - Assembly Facility,non-fixed,yes,Assembly - if fixed seats use seat count
 15.2 - Exhibition Facility,non-fixed,yes,
