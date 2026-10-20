@@ -273,3 +273,12 @@ def test_shared_stair_doors_smaller_than_the_stair():
              exit_row('S1 - doorway (B)', 'doorway', 88)]
     e = run([room('301', 20)], exits)['exits'].set_index('exit_id')
     assert (e.loc['S1 - doorway (A)', 'persons'], e.loc['S1 - doorway (A)', 'limited_by']) == (288, 'door')
+
+def test_widths_read_as_nullable_ints_work():
+    # read_exits gives Int64 columns with <NA> for blanks -> the door vs stair compare must not choke on them
+    exits = pd.DataFrame([exit_row('S4 - doorway', 'doorway', 88, stair_cm=110, stair_type='stairs'),
+                          exit_row('E3 - outside exit', 'doorway', 88)], columns=EXIT_COLUMNS)
+    for col in ['clear_width_cm', 'stair_width_cm']:
+        exits[col] = exits[col].astype('Int64')
+    e = egress.calculate(pd.DataFrame([room('301', 20)]), exits, factors())['exits'].set_index('exit_id')
+    assert (e.loc['S4 - doorway', 'persons'], e.loc['E3 - outside exit', 'persons']) == (137, 144)

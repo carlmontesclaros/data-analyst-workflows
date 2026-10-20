@@ -86,11 +86,12 @@ def prepare_exits(exits, factors, settings, warning_rows):
     exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
     for col in ['wing', 'into_wing']:
         exits[col] = exits[col].fillna('').astype(str).str.strip().str.upper()
-    exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce')
+    # float, not Int64 -> a blank is NaN (compares False), not <NA> (raises)
+    exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce').astype(float)
     for col in ['stair_width_cm', 'stair_type']:
         if col not in exits.columns:
             exits[col] = None
-    exits['stair_width_cm'] = pd.to_numeric(exits['stair_width_cm'], errors='coerce')
+    exits['stair_width_cm'] = pd.to_numeric(exits['stair_width_cm'], errors='coerce').astype(float)
     exits['stair_type'] = exits['stair_type'].fillna('').astype(str).str.strip().str.lower()
     exits.loc[exits['stair_width_cm'].notna() & (exits['stair_type'] == ''), 'stair_type'] = 'stairs'
 
