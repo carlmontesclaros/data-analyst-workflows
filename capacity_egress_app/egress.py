@@ -123,6 +123,25 @@ def prepare_exits(exits, factors, settings, warning_rows):
         exits.loc[open_stair, 'persons'] = 0
         exits.loc[open_stair, 'width_check'] = 'not an exit - open stair'
 
+    # doors into the same stair (same S number on the floor) -> one exit, the slower of all its doors together and
+    #   the stair (BCBC 2024 3.4.3.1.(2): width adds up where exits converge). counted on the first door, alphabetically
+    exits['stair_group'] = exits['exit_id'].astype(str).str.extract(r'(?i)^(s\d+)\b', expand=False).fillna('').str.upper()
+    exits['shares_stair'] = ''
+    exits['door_persons'] = door_persons.fillna(0)
+    exits['stair_persons'] = stair_persons
+    grouped = exits[(exits['stair_group'] != '') & exits['counts_as_exit'] & (exits['into_wing'] == '')]
+    for _, group in grouped.groupby(['property', 'floor', 'wing', 'stair_group']):
+        if len(group) < 2:
+            continue
+        lead = group.sort_values('exit_id').index[0]
+        doors, stair = group['door_persons'].sum(), group['stair_persons'].min()
+        exits.loc[lead, 'persons'] = int(min(doors, stair)) if pd.notna(stair) else int(doors)
+        exits.loc[lead, 'limited_by'] = 'stair' if pd.notna(stair) and stair < doors else 'door'
+        others = group.index.drop(lead)
+        exits.loc[others, ['persons', 'counts_as_exit', 'shares_stair']] = [0, False, exits.loc[lead, 'exit_id']]
+    group_has_stair = exits.groupby(['property', 'floor', 'wing', 'stair_group'])['stair_width_cm'].transform('count') > 0
+    has_stair = has_stair | ((exits['stair_group'] != '') & group_has_stair)
+
     for _, row in exits[exits['mm_per_person'].isna()].iterrows():
         warning_rows.append({'type': 'unknown_exit_type', 'property': row['property'], 'floor': row['floor'],
                              'detail': f"{row['exit_id']}: exit_type '{row['exit_type']}' has no width factor - counted as 0 people"})

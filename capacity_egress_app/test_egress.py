@@ -252,3 +252,24 @@ def test_stair_door_without_a_stair_width_is_listed():
     w = result['warnings']
     w = w[w['type'] == 'stair_not_measured']
     assert len(w) == 1 and 'S4 - doorway' in w.iloc[0]['detail']
+
+def test_doors_into_the_same_stair_count_once():
+    # Clearihue 2 S2: doors 179 (293) and 103 (168) into one 157 cm stair (196) -> one exit of 196, not 364
+    exits = [exit_row('S2 - doorway (A201b)', 'doorway', 179, stair_cm=157, stair_type='stairs'),
+             exit_row('S2 - doorway (A206)', 'doorway', 103),
+             exit_row('E2 - outside exit', 'doorway', 88)]
+    result = run([room('301', 60.55, 30, 'site count')], exits)
+    e = result['exits'].set_index('exit_id')
+    assert (e.loc['S2 - doorway (A201b)', 'persons'], bool(e.loc['S2 - doorway (A201b)', 'counts_as_exit'])) == (196, True)
+    assert (e.loc['S2 - doorway (A206)', 'persons'], bool(e.loc['S2 - doorway (A206)', 'counts_as_exit'])) == (0, False)
+    assert e.loc['S2 - doorway (A206)', 'shares_stair'] == 'S2 - doorway (A201b)'
+    z = zone(result)
+    assert (z['exit_count'], z['exit_capacity']) == (2, 288)       # 196 + 144, 50% rule -> 2 x 144
+    assert len(result['warnings'].query("type == 'stair_not_measured'")) == 0   # the stair is measured on S2's other door
+
+def test_shared_stair_doors_smaller_than_the_stair():
+    # two 88 doors (144 + 144 = 288) into a 250 cm stair (312) -> the doors are slower, 288
+    exits = [exit_row('S1 - doorway (A)', 'doorway', 88, stair_cm=250, stair_type='stairs'),
+             exit_row('S1 - doorway (B)', 'doorway', 88)]
+    e = run([room('301', 20)], exits)['exits'].set_index('exit_id')
+    assert (e.loc['S1 - doorway (A)', 'persons'], e.loc['S1 - doorway (A)', 'limited_by']) == (288, 'door')

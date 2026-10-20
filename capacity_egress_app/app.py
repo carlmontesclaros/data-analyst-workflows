@@ -168,7 +168,7 @@ class App:
         self.exit_tree = self.make_tree(exit_frame, [
             ('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 100),
             ('stair_width_cm', 100), ('persons', 70), ('limited_by', 80),
-            ('counts_as_exit', 100), ('width_check', 220), ('into_wing', 70), ('measured_date', 100),
+            ('counts_as_exit', 100), ('shares_stair', 150), ('width_check', 220), ('into_wing', 70), ('measured_date', 100),
             ('measured_by', 90), ('notes', 250)], height=5)
         colours.colour_tags(self.exit_tree)
         self.exit_tree.bind('<Double-1>', lambda e: self.edit_exit())
@@ -276,7 +276,7 @@ class App:
             width = '' if pd.isna(e['clear_width_cm']) else int(e['clear_width_cm'])
             stair = '' if pd.isna(e['stair_width_cm']) else int(e['stair_width_cm'])
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, stair, e['persons'], e['limited_by'],
-                      'yes' if e['counts_as_exit'] else 'no', e['width_check'], e['into_wing'],
+                      'yes' if e['counts_as_exit'] else 'no', e['shares_stair'], e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
 

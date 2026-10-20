@@ -21,6 +21,7 @@ SUMMARY_COLS = {'property': 'Property', 'floor': 'Floor', 'zone_wing': 'zone_win
 EXIT_COLS = {'property': 'Property', 'floor': 'Floor', 'wing': 'wing', 'exit_id': 'exit_id',
              'exit_type': 'exit_type', 'clear_width_cm': 'clear_width_cm', 'stair_width_cm': 'stair_width_cm',
              'stair_type': 'stair_type', 'limited_by': 'limited_by', 'counts_as_exit': 'counts_as_exit',
+             'shares_stair': 'shares_stair',
              'persons': 'persons', 'width_check': 'width_check', 'mm_per_person': 'mm_per_person',
              'minimum_mm': 'minimum_mm', 'minimum_mm_low_rise': 'minimum_mm_low_rise', 'into_wing': 'into_wing',
              'measured_date': 'measured_date', 'measured_by': 'measured_by', 'notes': 'notes', 'floor_key': 'floor_key'}
