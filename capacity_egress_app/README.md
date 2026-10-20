@@ -262,7 +262,7 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 
 1. **Room type.** The room's override if set, otherwise the default from the category map. Rooms with area but no sub-category count as excluded and are listed in the warnings.
 2. **Per code load** = net area ÷ m² per person, **rounded up** (3.4.3.1.(1) → Subsection 3.1.17).
-3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (lounges 14.3, all non-assignable 16.x) count as 0, `out of scope`.
+3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (all non-assignable 16.x: circulation, washrooms, mechanical, janitorial) count as 0, `out of scope`. Lounges (14.3, 1.85 m²) and kitchens (7.2, 9.30 m²) count at their Table 3.1.17.1. per code load; they aren't counted on site because their occupancy varies.
 4. **Wing of each room** = the letters at the start of its Space number (`B303` → B).
 5. **Zones.** A floor is one zone unless any exit on it has a wing; then each wing is its own zone. On a split floor, zones with no load and no exits are dropped.
 6. **Open stairs are not exits** while `open_stairs_count` = `no`: BCBC 3.4.4.1.(1) requires exits to be fire separated. They get 0 people and `not an exit - open stair`.
@@ -286,7 +286,8 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 | Wings are calculated separately even when connected; connections recorded with `into_wing` | Supervisor | 2026-09-24 |
 | Link door share = even split across the sending wing's exits | Supervisor | 2026-09-24 |
 | A floor splits into wings only if one of its exits has a wing | Carl | 2026-09-28 |
-| All rooms count except lounges (14.3) and non-assignable (16.x) | Carl | 2026-09-29 |
+| ~~All rooms count except lounges (14.3) and non-assignable (16.x)~~ | Carl | 2026-09-29 |
+| All rooms count except non-assignable (16.x); lounges and kitchens use their per code load (Table 3.1.17.1.), not a site count | Carl | 2026-10-20 |
 | Open stairs are not exits until confirmed | BCBC 3.4.4.1.(1), ruling pending | 2026-09-29 |
 | Load = room capacity; FMIS's default 0 is not a count, so unvisited rooms use per code | Carl | 2026-10-02 |
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
@@ -306,7 +307,6 @@ Where a stair has a door in front of it, measure the **door**, and write the sta
 - **Link doors / firewalls:** with no firewall between two wings they're one floor area (Div A 1.4.1.2.) and the link door isn't an exit; with a firewall it's a horizontal exit (3.4.1.6., 3.4.6.10.: refuge 0.5 m² per person, at most half the exits). Ask Mark about Turpin floor 1 A/B.
 - **Door vs stair:** use the smaller of door persons and stair persons (3.4.3.2.(1), (8))? Ask Mark.
 - **Interconnected floor space** (3.4.3.2.(6)): floors joined by an open stair or atrium need cumulative stair widths. Does any screened floor have one (Turpin S5)?
-- **Lounges (14.3) and kitchens:** Table 3.1.17.1. gives them 1.85 and 9.30, so leaving them out undercounts a little. Carl's call.
 - **Ramps:** BCBC 2024 3.4.3.2.(1) gives 6.1 mm/person up to a 1 in 8 slope, 9.2 if steeper; Table 3.4.3.2.-A minimum 1100 mm. Not added as an exit type yet.
 - **Turpin floor 3 B:** hand count about 149 vs 161 calculated; probably the 16 offices not counted yet (per code).
 

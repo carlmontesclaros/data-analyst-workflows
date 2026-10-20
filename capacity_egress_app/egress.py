@@ -56,7 +56,7 @@ def prepare_rooms(rooms, factors, settings, warning_rows):
     rooms['per_code_load'] = occupant_load(rooms['area_m2'], rooms['area_per_person_m2']).fillna(0).astype(int)
 
     # scope -> every room except the excluded sub-category codes (a code covers its children)
-    # scope is a project decision, not code (Table 3.1.17.1. does give lounges 1.85 m2 per person)
+    # scope is a project decision: 16.x non-assignable has no Table 3.1.17.1. row (lounges and kitchens do, so they count)
     sub_code = rooms['sub_category'].astype(str).str.split(' - ').str[0].str.strip()
     rooms['in_scope'] = True
     for code in settings['room_exclude']:
