@@ -71,8 +71,8 @@ def classify_rooms(df):
 
 # exits
 EXIT_COLS = ['Property', 'Floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
-             'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes']
-OPTIONAL_EXIT_COLS = ['wing', 'into_wing', 'measured_date']
+             'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes', 'stair_width_cm', 'stair_type']
+OPTIONAL_EXIT_COLS = ['wing', 'into_wing', 'measured_date', 'stair_width_cm', 'stair_type']
 MEASURED_COLS = ['exit_id', 'exit_type', 'clear_width_cm']
 
 def read_exits(excel_file):
@@ -94,6 +94,7 @@ def read_exits(excel_file):
     df = df[df[MEASURED_COLS].notna().any(axis=1)].copy()
     for col in ['Property', 'Floor']:
         df[col] = df[col].astype(str).str.strip().str.removesuffix(".0")
-    df['clear_width_cm'] = pd.to_numeric(df['clear_width_cm'], errors='coerce').astype('Int64')
+    for col in ['clear_width_cm', 'stair_width_cm']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
     df['measured_date'] = pd.to_datetime(df['measured_date'], errors='coerce').dt.strftime('%Y-%m-%d')
     return df

@@ -273,3 +273,21 @@ def test_add_room_type_needs_clause_and_is_logged(conn):
         db.add_room_type(conn, 'dining', 2.0, 'BCBC 2024 Table 3.1.17.1.', 'carl', 'Carl')
     with pytest.raises(ValueError):
         db.add_room_type(conn, 'gym', 0, 'BCBC 2024 Table 3.1.17.1.', 'carl', 'Carl')
+
+def test_save_exit_with_stair_width(conn):
+    pk = db.save_exit(conn, good_exit(stair_width_cm='110', stair_type='stairs'), 'carl', 'Carl')
+    row = conn.execute("SELECT stair_width_cm, stair_type FROM exits WHERE exit_pk = ?", (pk,)).fetchone()
+    assert tuple(row) == (110, 'stairs')
+    pk2 = db.save_exit(conn, good_exit(exit_id='S2 - doorway', stair_width_cm='121'), 'carl', 'Carl')
+    assert conn.execute("SELECT stair_type FROM exits WHERE exit_pk = ?", (pk2,)).fetchone()[0] == 'stairs'
+    for bad in [dict(stair_width_cm='40'), dict(stair_width_cm='110', stair_type='doorway'), dict(stair_width_cm='abc')]:
+        with pytest.raises(ValueError):
+            db.save_exit(conn, good_exit(exit_id='S3 - doorway', **bad), 'carl', 'Carl')
+
+def test_old_database_gets_the_stair_columns():
+    c = sqlite3.connect(':memory:')
+    c.execute("CREATE TABLE exits (exit_pk INTEGER PRIMARY KEY, property TEXT NOT NULL, floor TEXT NOT NULL, "
+              "exit_id TEXT NOT NULL, exit_type TEXT NOT NULL, clear_width_cm INTEGER)")
+    db.create_schema(c)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(exits)")]
+    assert 'stair_width_cm' in cols and 'stair_type' in cols

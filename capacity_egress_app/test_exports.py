@@ -18,7 +18,8 @@ def result():
 def test_results_workbook_has_4_formatted_sheets(tmp_path):
     path = tmp_path / 'results.xlsx'
     counts = exports.write_results_workbook(result(), path)
-    assert counts == {'floor_summary': 1, 'exit_detail': 2, 'room_detail': 2, 'warnings': 0}
+    # S1 / S2 doors with no stair width -> 2 stair_not_measured warnings
+    assert counts == {'floor_summary': 1, 'exit_detail': 2, 'room_detail': 2, 'warnings': 2}
     wb = load_workbook(path)
     assert wb.sheetnames == ['floor_summary', 'exit_detail', 'room_detail', 'warnings']
     ws = wb['floor_summary']

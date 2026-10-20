@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS exits (
     exit_id TEXT NOT NULL,
     exit_type TEXT NOT NULL,
     clear_width_cm INTEGER,
+    stair_width_cm INTEGER,
+    stair_type TEXT,
     measured_date TEXT,
     measured_by TEXT,
     narrowest_point TEXT,
@@ -103,6 +105,12 @@ def create_schema(conn):
     if 'is_editor' not in [row[1] for row in conn.execute("PRAGMA table_info(users)")]:
         conn.execute("ALTER TABLE users ADD COLUMN is_editor INTEGER NOT NULL DEFAULT 0")
         conn.commit()
+    # databases built before stair widths were recorded -> add the columns (blank = door only)
+    exit_cols = [row[1] for row in conn.execute("PRAGMA table_info(exits)")]
+    for col, kind in [('stair_width_cm', 'INTEGER'), ('stair_type', 'TEXT')]:
+        if col not in exit_cols:
+            conn.execute(f"ALTER TABLE exits ADD COLUMN {col} {kind}")
+            conn.commit()
 
 # space report col -> rooms table col (reading the workbook is excel_inputs.py)
 ROOM_COLUMN_NAMES = {
@@ -249,7 +257,7 @@ def insert_first_import_audit(conn, user_login, user_name=None):
 # extra settings the terminal script kept as constants -> now code factors in the database
 EXTRA_SETTINGS = [
     ('room_exclude', '16', 'Sub-category codes left out of the load (16 = all 16.x non-assignable, no Table 3.1.17.1. row). Lounges 14.3 count since Carl 2026-10-20'),
-    ('open_stairs_count', 'no', 'BCBC 3.4.4.1.(1) exits must be fire separated -> open stairs not counted until Mark rules'),
+    ('open_stairs_count', 'yes', 'Open stairs count: they lead down to an exit door (Carl 2026-10-20). BCBC 3.4.4.1.(1) wants exits fire separated; no = strict fire-exit reading'),
 ]
 
 def insert_extra_settings(conn):
@@ -491,6 +499,7 @@ def set_note(conn, table_name, record_id, note, user_login, user_name, expected=
 
 # exits -> same checks as the excel exits sheet
 EXIT_EDIT_COLS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
+                  'stair_width_cm', 'stair_type',
                   'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes']
 
 def check_exit(conn, values):
@@ -510,6 +519,17 @@ def check_exit(conn, values):
                 problems.append("clear width must be a whole number of cm between 50 and 500")
         except ValueError:
             problems.append("clear width must be a whole number of cm between 50 and 500")
+    # stair behind the door -> optional, same width rule, and it has to be a stair type
+    stair = values.get('stair_width_cm')
+    if stair is not None and str(stair).strip() != '':
+        try:
+            if not 50 <= int(str(stair).strip()) <= 500:
+                problems.append("stair width must be a whole number of cm between 50 and 500")
+        except ValueError:
+            problems.append("stair width must be a whole number of cm between 50 and 500")
+        stair_types = sorted(t for t in known_types if t.startswith('stairs'))
+        if values.get('stair_type') not in stair_types:
+            problems.append(f"stair type must be one of {stair_types}")
     floor_known = conn.execute("SELECT 1 FROM rooms WHERE property = ? AND floor = ? LIMIT 1",
                                (values.get('property'), values.get('floor'))).fetchone()
     if not floor_known:
@@ -539,11 +559,16 @@ def clean_exit(values):
             out[col] = out[col].upper()
     if out['exit_type']:
         out['exit_type'] = out['exit_type'].lower()
-    if out['clear_width_cm'] is not None:
-        try:
-            out['clear_width_cm'] = int(out['clear_width_cm'])
-        except ValueError:
-            pass
+    if out['stair_type']:
+        out['stair_type'] = out['stair_type'].lower()
+    elif out['stair_width_cm'] is not None:
+        out['stair_type'] = 'stairs'                 # rise <= 180 and run >= 280, what new stairs have to be
+    for col in ['clear_width_cm', 'stair_width_cm']:
+        if out[col] is not None:
+            try:
+                out[col] = int(out[col])
+            except ValueError:
+                pass
     return out
 
 def same_exit(row, expected):

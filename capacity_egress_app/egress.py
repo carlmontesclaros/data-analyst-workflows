@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from exit_calc import occupant_load, exit_persons, capacity_50_rule, people_sent
+from exit_calc import occupant_load, exit_persons, narrowest_persons, capacity_50_rule, people_sent
 import code_factors as cf
 
 STATUS_REVIEW = 'REVIEW'
@@ -86,28 +86,62 @@ def prepare_exits(exits, factors, settings, warning_rows):
     exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
     for col in ['wing', 'into_wing']:
         exits[col] = exits[col].fillna('').astype(str).str.strip().str.upper()
-    exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce')
+    # float, not Int64 -> a blank is NaN (compares False), not <NA> (raises)
+    exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce').astype(float)
+    for col in ['stair_width_cm', 'stair_type']:
+        if col not in exits.columns:
+            exits[col] = None
+    exits['stair_width_cm'] = pd.to_numeric(exits['stair_width_cm'], errors='coerce').astype(float)
+    exits['stair_type'] = exits['stair_type'].fillna('').astype(str).str.strip().str.lower()
+    exits.loc[exits['stair_width_cm'].notna() & (exits['stair_type'] == ''), 'stair_type'] = 'stairs'
 
+    # door (or whatever exit_type is) and the stair behind it -> the smaller one sets the persons
     exits['mm_per_person'] = exits['exit_type'].map(width_df['mm_per_person'])
-    exits['persons'] = exit_persons(exits['clear_width_cm'], exits['mm_per_person']).fillna(0).astype(int)
+    door_persons = exit_persons(exits['clear_width_cm'], exits['mm_per_person'])
+    stair_persons = exit_persons(exits['stair_width_cm'], exits['stair_type'].map(width_df['mm_per_person']))
+    exits['persons'] = narrowest_persons(door_persons, stair_persons).fillna(0).astype(int)
+    exits['limited_by'] = np.where(stair_persons < door_persons, 'stair', 'door')
 
     # minimum width -> BCBC 2024 3.4.3.2.(8) + Table 3.4.3.2.-A: doorways 850, stairs 900 if serving up to
     #   2 storeys above the lowest exit level, else 1100. app doesnt know storeys -> 900 to 1099 = review
+    #   a stair behind the door has its own minimum -> the worse of the two checks wins
     exits['width_mm'] = exits['clear_width_cm'] * 10
     exits['minimum_mm'] = exits['exit_type'].map(width_df['minimum_mm'])
     exits['minimum_mm_low_rise'] = exits['exit_type'].map(width_df['minimum_mm_low_rise'])
-    exits['width_check'] = 'ok'
-    exits.loc[exits['width_mm'] < exits['minimum_mm'], 'width_check'] = 'review - depends on storeys served'
-    exits.loc[exits['width_mm'] < exits['minimum_mm_low_rise'], 'width_check'] = 'fail - below minimum'
-    exits.loc[exits['minimum_mm'].isna() | exits['width_mm'].isna(), 'width_check'] = 'unknown'
+    exits['width_check'] = width_check(exits['width_mm'], exits['minimum_mm'], exits['minimum_mm_low_rise'])
+    stair_check = width_check(exits['stair_width_cm'] * 10, exits['stair_type'].map(width_df['minimum_mm']),
+                              exits['stair_type'].map(width_df['minimum_mm_low_rise']))
+    has_stair = exits['stair_width_cm'].notna()
+    worse = has_stair & (stair_check.map(CHECK_RANK) > exits['width_check'].map(CHECK_RANK))
+    exits.loc[worse, 'width_check'] = stair_check[worse]
 
-    # open stairs -> BCBC 2024 3.4.4.1.(1) every exit is fire separated (45 min or more), so not an exit until Mark rules
+    # open stairs -> count by default: they lead down to an exit door (Carl 2026-10-20). open_stairs_count = no is the
+    #   strict reading, BCBC 2024 3.4.4.1.(1) every exit is fire separated (45 min or more)
     exits['counts_as_exit'] = True
     if not settings['open_stairs_count']:
         open_stair = exits['exit_id'].astype(str).str.lower().str.contains('open stair')
         exits.loc[open_stair, 'counts_as_exit'] = False
         exits.loc[open_stair, 'persons'] = 0
         exits.loc[open_stair, 'width_check'] = 'not an exit - open stair'
+
+    # doors into the same stair (same S number on the floor) -> one exit, the slower of all its doors together and
+    #   the stair (BCBC 2024 3.4.3.1.(2): width adds up where exits converge). counted on the first door, alphabetically
+    exits['stair_group'] = exits['exit_id'].astype(str).str.extract(r'(?i)^(s\d+)\b', expand=False).fillna('').str.upper()
+    exits['shares_stair'] = ''
+    exits['door_persons'] = door_persons.fillna(0)
+    exits['stair_persons'] = stair_persons
+    grouped = exits[(exits['stair_group'] != '') & exits['counts_as_exit'] & (exits['into_wing'] == '')]
+    for _, group in grouped.groupby(['property', 'floor', 'wing', 'stair_group']):
+        if len(group) < 2:
+            continue
+        lead = group.sort_values('exit_id').index[0]
+        doors, stair = group['door_persons'].sum(), group['stair_persons'].min()
+        exits.loc[lead, 'persons'] = int(min(doors, stair)) if pd.notna(stair) else int(doors)
+        exits.loc[lead, 'limited_by'] = 'stair' if pd.notna(stair) and stair < doors else 'door'
+        others = group.index.drop(lead)
+        exits.loc[others, ['persons', 'counts_as_exit', 'shares_stair']] = [0, False, exits.loc[lead, 'exit_id']]
+    group_has_stair = exits.groupby(['property', 'floor', 'wing', 'stair_group'])['stair_width_cm'].transform('count') > 0
+    has_stair = has_stair | ((exits['stair_group'] != '') & group_has_stair)
 
     for _, row in exits[exits['mm_per_person'].isna()].iterrows():
         warning_rows.append({'type': 'unknown_exit_type', 'property': row['property'], 'floor': row['floor'],
@@ -116,9 +150,25 @@ def prepare_exits(exits, factors, settings, warning_rows):
         warning_rows.append({'type': 'missing_width', 'property': row['property'], 'floor': row['floor'],
                              'detail': f"{row['exit_id']}: no clear_width_cm - counted as 0 people"})
 
+    # stair door measured at the door only (S = stair space number) -> measure the stair next visit
+    stair_door = exits['exit_id'].astype(str).str.match(r'(?i)^s\d') & (exits['exit_type'] == 'doorway')
+    for _, row in exits[stair_door & ~has_stair & exits['counts_as_exit']].iterrows():
+        warning_rows.append({'type': 'stair_not_measured', 'property': row['property'], 'floor': row['floor'],
+                             'detail': f"{row['exit_id']}: stair behind the door not measured - door width used"})
+
     exits['floor_key'] = exits['property'] + ' | ' + exits['floor']
     exits['zone_wing'] = exits['wing']
     return exits
+
+# one width check -> ok / review (stairs 900-1099, depends on storeys served) / fail / unknown
+CHECK_RANK = {'ok': 0, 'unknown': 1, 'review - depends on storeys served': 2, 'fail - below minimum': 3}
+
+def width_check(width_mm, minimum_mm, minimum_mm_low_rise):
+    check = pd.Series('ok', index=width_mm.index)
+    check[width_mm < minimum_mm] = 'review - depends on storeys served'
+    check[width_mm < minimum_mm_low_rise] = 'fail - below minimum'
+    check[minimum_mm.isna() | width_mm.isna()] = 'unknown'
+    return check
 
 # zones -> occupant load vs exit capacity, links, status
 def build_zones(rooms, exits, settings, warning_rows):

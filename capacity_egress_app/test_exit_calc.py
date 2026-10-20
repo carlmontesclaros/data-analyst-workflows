@@ -51,3 +51,10 @@ def test_link_half_load():
 def test_link_bad_method():
     with pytest.raises(ValueError):
         people_sent(100, 4, 144, 'typo')
+
+def test_smaller_part_of_the_exit_governs():
+    import numpy as np
+    from exit_calc import narrowest_persons
+    assert narrowest_persons(144, 137) == 137
+    assert narrowest_persons(144, 151) == 144
+    assert narrowest_persons(144, np.nan) == 144        # stair not measured -> the door
