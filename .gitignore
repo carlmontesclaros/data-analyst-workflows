@@ -37,3 +37,6 @@ bcbc_2024_web_version_revision2.pdf
 
 # launch video output (/brag)
 brag-output/
+
+# code map (/graphify), rebuilt locally
+graphify-out/
