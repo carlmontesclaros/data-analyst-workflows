@@ -56,6 +56,10 @@ def format_sheets(writer):
         for cell in ws[1]:
             cell.font = Font(bold=True)
         for col_cells in ws.columns:
+            # the results have no formulas -> a note typed as '=...' is text, never something Excel runs
+            for c in col_cells:
+                if c.data_type == 'f':
+                    c.data_type = 's'
             values = [len(str(c.value)) for c in col_cells if c.value is not None]
             ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max(values, default=8) + 2, 50)
 

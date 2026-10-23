@@ -28,6 +28,16 @@ def test_results_workbook_has_4_formatted_sheets(tmp_path):
     # results say which code edition they were screened under
     assert pd.read_excel(path, sheet_name='floor_summary')['code_edition'].tolist() == ['BCBC 2024']
 
+# a note typed as '=...' stays text -> Excel never runs it as a formula
+def test_results_workbook_writes_formula_like_text_as_text(tmp_path):
+    res = result()
+    res['exits'].loc[res['exits'].index[0], 'notes'] = '=HYPERLINK("http://example.com","x")'
+    path = tmp_path / 'results.xlsx'
+    exports.write_results_workbook(res, path)
+    ws = load_workbook(path)['exit_detail']
+    cells = [c for row in ws.iter_rows() for c in row if c.value == '=HYPERLINK("http://example.com","x")']
+    assert cells and all(c.data_type == 's' for c in cells)
+
 # fake template like carl_space_report: BCBC factor table on top, header row 7, Table1 A-L, Pictures link formula
 TEMPLATE_HEADER = ['Property', 'Floor', 'Space', 'Building Number', 'Net Space (sq m)', 'Space Category',
                    'Space Sub-Category', 'Capacity (Occupants)', 'Capacity (per code)',

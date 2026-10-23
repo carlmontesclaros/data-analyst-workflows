@@ -1,10 +1,12 @@
 import os
+import re
 import sys
 import getpass
 import sqlite3
 from contextlib import contextmanager
 import pandas as pd
 import code_factors as cf
+import egress
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -647,7 +649,22 @@ def change_code_factor(conn, table_name, key_value, field, new_value, clause_ref
                                  f"{last_change(conn, table_name, key_value)} after you opened it. "
                                  f"The screen has been refreshed; check it and try again.")
         conn.execute(f"UPDATE {table_name} SET {field} = ? WHERE {key} = ?", (new_value, key_value))
+        check_code_factors(conn)
         log_change(conn, user_login, user_name, table_name, key_value, field, old[0], new_value, why, clause_ref)
+
+# a factor the calculation can't use (0, negative, a typo in a setting) would stop the app opening for everyone
+# -> ValueError inside the save, so it rolls back
+POSITIVE_FACTORS = {'area_factors': 'area_per_person_m2', 'width_factors': 'mm_per_person'}
+
+def check_code_factors(conn):
+    factors = load_code_factors(conn)
+    for table, col in POSITIVE_FACTORS.items():
+        if (pd.to_numeric(factors[table][col], errors='coerce') <= 0).any():
+            raise ValueError(f"{col} must be more than 0")
+    try:
+        egress.calculate(load_rooms(conn), load_exits(conn), factors)
+    except Exception as err:
+        raise ValueError(f"not saved: the calculation can't run with this value ({err})") from err
 
 # new room type -> a Table 3.1.17.1. row the app didn't have yet; an existing one changes with change_code_factor
 def add_room_type(conn, room_type, area_per_person_m2, clause_ref, user_login, user_name, why=None):
@@ -686,7 +703,8 @@ def backup_database(conn, backup_dir, keep=BACKUP_KEEP):
             conn.backup(dest)
         dest.close()
         made = True
-    backups = sorted(f for f in os.listdir(backup_dir) if f.startswith('capacity_') and f.endswith('.db'))
+    # daily backups only -> hand-made ones (capacity_before_...) are kept and don't use up a slot
+    backups = sorted(f for f in os.listdir(backup_dir) if re.fullmatch(r'capacity_\d{4}-\d{2}-\d{2}\.db', f))
     for old in backups[:-keep]:
         os.remove(os.path.join(backup_dir, old))
     return path if made else None
