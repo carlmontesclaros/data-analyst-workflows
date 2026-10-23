@@ -153,6 +153,22 @@ def test_code_factor_needs_clause(conn):
     log = conn.execute("SELECT old_value, new_value, clause_ref FROM audit_log").fetchone()
     assert tuple(log) == ('6.1', '6.0', 'BCBC 2024 3.4.3.2.(1)')
 
+# a factor of 0 or a mistyped setting would stop the calculation, so nobody could open the app -> not saved
+@pytest.mark.parametrize('table, key, field, value', [
+    ('area_factors', 'classroom', 'area_per_person_m2', 0),
+    ('area_factors', 'classroom', 'area_per_person_m2', -1.85),
+    ('width_factors', 'doorway', 'mm_per_person', 0),
+    ('settings', 'minimum_exits', 'value', 'two'),
+    ('settings', 'link_share_method', 'value', 'evensplit'),
+])
+def test_code_factor_that_breaks_the_calculation_isnt_saved(conn, table, key, field, value):
+    key_col = db.CODE_FACTOR_KEYS[table]
+    before = conn.execute(f"SELECT {field} FROM {table} WHERE {key_col} = ?", (key,)).fetchone()[0]
+    with pytest.raises(ValueError):
+        db.change_code_factor(conn, table, key, field, value, 'BCBC 2024 test', 'carl', 'Carl')
+    assert conn.execute(f"SELECT {field} FROM {table} WHERE {key_col} = ?", (key,)).fetchone()[0] == before
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == 0
+
 def test_notes_and_users(conn):
     rid = room_id(conn, 'A201')
     assert db.set_note(conn, 'rooms', rid, 'tables moved', 'carl', 'Carl')
@@ -167,6 +183,16 @@ def test_backup_once_a_day_keeps_last(conn, tmp_path):
     assert db.backup_database(conn, str(tmp_path), keep=3) is not None
     assert db.backup_database(conn, str(tmp_path), keep=3) is None
     assert len(list(tmp_path.iterdir())) == 3
+
+# hand-made backups (capacity_before_...) are kept and don't use up the 30 daily slots
+def test_backup_keeps_hand_made_backups_out_of_the_count(conn, tmp_path):
+    for day in range(1, 5):
+        (tmp_path / f"capacity_2026-01-0{day}.db").write_text('old')
+    (tmp_path / "capacity_before_rebuild_2026-01-02.db").write_text('manual')
+    db.backup_database(conn, str(tmp_path), keep=3)
+    names = sorted(f.name for f in tmp_path.iterdir())
+    assert "capacity_before_rebuild_2026-01-02.db" in names
+    assert len([n for n in names if not n.startswith('capacity_before')]) == 3
 
 # editors and viewers (ADR 0003)
 def test_first_editor_then_only_editors_change_the_list(conn):
