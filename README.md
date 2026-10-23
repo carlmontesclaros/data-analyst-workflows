@@ -37,12 +37,12 @@ I’m keeping everything modular. Each project or workflow gets its own separate
   7. Exports -> results workbook (4 sheets, same as the old script) and the space report, filled into Carl's own space report (slicers kept); a one-page .docx summary of a capacity check.
   8. Backs up the database every day it's opened (last 30 kept).
   9. Screening only: results say "review", never "approved".
-* **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest (70 tests).
+* **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest (108 tests).
 * **Why it matters:** Answering "can this room go from 32 to 36?" used to mean opening the Excel files and a hand calculation per floor. Now you just find the room, type 36 and see if the floor's exits still cover it, with a record of who changed it and why.
 * **How to run:** from `capacity_egress_app/`, run `build_database.py` once (reads the space report and `floor_exits.xlsx` in `data/input/`), then `app.py` every time after. On Windows use `py` instead of `python3`.
 * **Limitations:**
     1. Built for a handful of editors and a few viewers. Two people saving at once is handled (it waits, and refuses to overwrite a change you haven't seen), but it isn't meant for dozens of people at the same time.
-    2. Open stairs don't count as exits until there's a ruling (BCBC 3.4.4.1.(1) says exits must be fire separated).
+    2. Open stairs count as exits (screening; they lead down to an exit door), and a door into a stair counts the smaller of the door and the stair. Doors into the same stair count as one exit.
     3. Ramps have no exit factor yet, so they can't be entered as exits.
     4. Doesn't check travel distance, dead ends, sprinklers, door hardware or fire separations. That's why results say "review", not "approved".
     5. A newer space report is loaded with Refresh in the app, not by rebuilding. Rooms that disappear are kept and flagged, never deleted.
