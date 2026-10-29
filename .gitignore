@@ -40,3 +40,6 @@ brag-output/
 
 # code map (/graphify), rebuilt locally
 graphify-out/
+
+# Routine capital tracker (confidential UVic financial data)
+routine-capital-excel/
