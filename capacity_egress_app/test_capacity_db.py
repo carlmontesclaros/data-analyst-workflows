@@ -118,6 +118,34 @@ def test_change_capacity_refuses_bad_input(conn, cap, source, why):
         db.change_capacity(conn, room_id(conn, 'A201'), cap, source, 'carl', 'Carl', why)
     assert conn.execute("SELECT count(*) FROM audit_log").fetchone()[0] == 0
 
+# a 0 nobody counted (FMIS default, first import) -> back to not visited, so the room uses per code again
+def test_clear_count_makes_room_not_visited_and_logs_it(conn):
+    rid = room_id(conn, '102')
+    assert tuple(conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()) == (0, 'site count', 1)
+    db.clear_count(conn, rid, 'carl', 'Carl', 'nothing written in the space report')
+    assert tuple(conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (rid,)).fetchone()) == (None, 'per code', 0)
+    log = [tuple(x) for x in conn.execute("SELECT field, old_value, new_value FROM audit_log "
+                                          "WHERE why = 'nothing written in the space report' ORDER BY log_id")]
+    assert log == [('capacity', '0', None), ('capacity_source', 'site count', 'per code'), ('visited', '1', '0')]
+
+def test_clear_count_needs_a_reason_and_a_known_room(conn):
+    before = conn.execute("SELECT count(*) FROM audit_log").fetchone()[0]
+    with pytest.raises(ValueError):
+        db.clear_count(conn, room_id(conn, '102'), 'carl', 'Carl', ' ')
+    with pytest.raises(ValueError):
+        db.clear_count(conn, -1, 'carl', 'Carl', 'x')
+    assert conn.execute("SELECT count(*) FROM audit_log").fetchone()[0] == before
+
+def test_clear_count_refuses_a_stale_screen(conn):
+    rid = room_id(conn, '102')
+    with pytest.raises(db.StaleDataError):
+        db.clear_count(conn, rid, 'carl', 'Carl', 'x', expected=(5, 'site count'))
+
+def test_clear_count_is_editors_only(conn):
+    db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
+    with pytest.raises(db.NotEditorError):
+        db.clear_count(conn, room_id(conn, '102'), 'viewer1', 'Viewer', 'x')
+
 def good_exit(**kw):
     v = {'property': 'Engineering Office Wing', 'floor': '1', 'exit_id': 'S1 - doorway',
          'exit_type': 'doorway', 'clear_width_cm': '88', 'measured_date': '2026-10-05'}
