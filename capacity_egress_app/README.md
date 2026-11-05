@@ -4,7 +4,7 @@ A desktop app for UVic Facilities Management that keeps the record of **room cap
 
 It replaces editing Excel by hand. A project manager who gets an OREM request ("can B303 go from 32 to 36?") opens the app, finds the room, types 36, sees whether the floor is still within its exit capacity, and saves or cancels. Every change is recorded with who made it, when and why.
 
-**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (108 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
+**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (119 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
 
 It's still a **screening tool, not a code determination**. Results say "within capacity, review before acting" or "review", never "approved".
 
@@ -37,7 +37,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 - Edit code factors (m² per person, mm per person, settings), with a required building code clause reference
 - Keep one note per room and per exit
 - Open the room's photo folder
-- Export the space report and the results workbook
+- Export the space report, the results workbook and the FMIS upload
 
 ### Rules the data follows
 - **Room capacity** is the accepted number of people for a room. Its **source** is `site count`, `PM change` or `per code` (not visited yet, so the area-based code number is used).
@@ -139,10 +139,10 @@ capacity_egress_app/
   egress.py                occupant load vs exit capacity, read from the database; the one rule for room and zone verdicts
   code_factors.py          the only place that reads the code factor tables (room types, m2 per person, default type)
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
-  exports.py               results workbook, space report export, capacity check summary (.docx)
+  exports.py               results workbook, space report export, FMIS upload, capacity check summary (.docx)
   theme/sun_valley/        Sun Valley ttk theme files (MIT licence), loaded from the folder, nothing to install
   build_database.py        one-time first import
-  test_*.py                pytest (108 tests)
+  test_*.py                pytest (119 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
@@ -179,6 +179,24 @@ Load a newer space report with **Refresh space report** in the app, not by rebui
 | Pictures | the table's link formula, pointed at each row; Excel works it out when the file opens |
 
 The template is never opened with pandas or openpyxl (that would delete the slicers): the export copies the file and rewrites only the table's rows. Columns are found by header name, so their order doesn't matter. A new template = drop it in `data/template/` (keep only one there); it needs a table with Property, Floor and Space in its header. The old template (`26-09-15 ROOM CAPACITY`) is in `data/old_templates/`.
+
+### Export for FMIS
+
+**Export for FMIS** (editor screen) writes the file the FMIS systems admin uploads: each counted room's capacity against its FMIS space id, floor id and property id. The whole campus, or the building / floor picked. It needs the three admin exports in `data/input/fmis/` (`Properties.xlsx`, `Floors.xlsx`, `Spaces.xlsx`); replace them with newer exports when spaces change.
+
+| Sheet | What it is |
+|---|---|
+| upload | `Id`, `PropertyId`, `FloorId` + the capacity in `OccupantsDay`, `OccupantsNight`, `OccupantsTotal` (same value; keep the one FMIS needs). This is the upload |
+| review | the same rows with FMIS names next to the app's names. Leading-zero matches are amber |
+| not_matched | counted rooms that fit no FMIS space, fit two, or share one with another room. Not in the upload; the app warns if there are any |
+| all_spaces | the three admin files combined, with the floor-belongs-to-property check |
+| readme | what each sheet means |
+
+- Match = building number (or property name if there's no number) + floor + space. If that misses, it tries again ignoring leading zeros (the space report turned `066` into `66`).
+- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today.
+- Matching runs on the whole campus before narrowing to the pick, so a room sharing an FMIS space is held back whichever building is picked.
+
+Still open with the admin: which Occupants field is the real one, whether a blank clears a field (if not, the blanks could go too), and McKinnon floor 0 vs 00.
 
 ## Several people at once
 
@@ -301,6 +319,7 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | Occupant load rounded up | Project default, confirm | 2026-09 |
 | Viewers can try a room type on the check screen (not saved); editors change it on the editor screen, logged with why | Supervisor feedback, Carl | 2026-10-16 |
 | Space report export: a visited room's PM change goes into `Capacity (Occupants)` (it's the room capacity FMIS gets; the site count stays in the change log) | Carl | 2026-10-16 |
+| FMIS upload sends counted rooms only, until the admin confirms what a blank does | Carl | 2026-11-05 |
 | Health services (13.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
 | Day care (19.1) is Group A-2, not care (3.1.2.8.(1)); still excluded until a room type is picked | BCBC 2024 3.1.2.8.(1) | 2026-10-20 |
 | Posted signs (3.1.17.1.(2)) not tracked by the app; some rooms already have them | Carl | 2026-10-20 |

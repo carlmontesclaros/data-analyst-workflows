@@ -159,3 +159,90 @@ def test_space_report_pm_change_on_a_visited_room_goes_into_capacity_occupants(t
     fake_template(template)
     exports.write_space_report(res, path, template)
     assert pd.read_excel(path, header=6).iloc[0]['Capacity (Occupants)'] == 36
+
+# fmis upload -> small copies of the 3 admin files (properties, floors, spaces) in a temp folder
+def fmis_folder(tmp_path, spaces=None):
+    pd.DataFrame({'Id': [1, 2], 'ExternalId': [237, None], 'Name': ['Turpin', 'Bus Loop']}).to_excel(
+        tmp_path / 'Properties.xlsx', sheet_name='properties', index=False)
+    pd.DataFrame({'FloorId': [10, 11, 20], 'PropertyId': [1, 1, 2], 'Description': ['3', '4', '0']}).to_excel(
+        tmp_path / 'Floors.xlsx', sheet_name='floors', index=False)
+    rows = spaces or [(100, 'B303', 1, 10, True), (101, 'B304', 1, 10, True), (102, 'B305', 1, 10, True),
+                      (200, '4A', 1, 11, True), (300, 'Stop', 2, 20, True)]
+    pd.DataFrame(rows, columns=['Id', 'Name', 'PropertyId', 'FloorId', 'ActiveFlag']).to_excel(
+        tmp_path / 'Spaces.xlsx', sheet_name='spaces', index=False)
+    return tmp_path
+
+def fmis_rooms(*rooms):
+    df = pd.DataFrame(rooms, columns=['property', 'floor', 'space', 'capacity'])
+    df['building_number'] = df['property'].map({'Turpin': '237'})
+    df['capacity_source'] = df['capacity'].map(lambda c: 'per code' if pd.isna(c) else 'site count')
+    return {'rooms': df}
+
+def upload_sheets(tmp_path, res, spaces=None, **kwargs):
+    path = tmp_path / 'fmis_upload.xlsx'
+    info = exports.write_fmis_upload(res, path, fmis_folder(tmp_path, spaces), **kwargs)
+    return info, pd.read_excel(path, sheet_name=None, dtype={'Space': str, 'Space (FMIS)': str})
+
+def test_fmis_upload_sends_counted_rooms_only_with_all_3_ids(tmp_path):
+    res = fmis_rooms(('Turpin', '3', 'B303', 33), ('Turpin', '3', 'B304', 0), ('Turpin', '3', 'B305', None))
+    info, sheets = upload_sheets(tmp_path, res)
+    assert list(sheets) == ['upload', 'review', 'not_matched', 'all_spaces', 'readme']
+    up = sheets['upload'].sort_values('Id')
+    assert up.columns.tolist() == ['Id', 'PropertyId', 'FloorId', 'OccupantsDay', 'OccupantsNight', 'OccupantsTotal']
+    # 0 is a count and gets sent; B305 has no count, a blank might clear FMIS -> left out
+    assert up[['Id', 'PropertyId', 'FloorId', 'OccupantsDay']].values.tolist() == [[100, 1, 10, 33], [101, 1, 10, 0]]
+    assert up['OccupantsNight'].tolist() == [33, 0] and up['OccupantsTotal'].tolist() == [33, 0]
+    assert info == {'upload': 2, 'not_matched': 0}
+    assert len(sheets['review']) == 2 and len(sheets['all_spaces']) == 5
+
+def test_fmis_upload_matches_a_property_with_no_building_number_by_name(tmp_path):
+    info, sheets = upload_sheets(tmp_path, fmis_rooms(('Bus  loop', '0', 'Stop', 2)))
+    assert sheets['upload']['Id'].tolist() == [300]
+
+def test_fmis_upload_matches_lost_leading_zeros_and_marks_them(tmp_path):
+    spaces = [(100, '040', 1, 10, True)]
+    info, sheets = upload_sheets(tmp_path, fmis_rooms(('Turpin', '3', '40', 5)), spaces)
+    assert sheets['upload']['Id'].tolist() == [100]
+    assert sheets['review']['Match'].tolist() == ['leading zeros']
+    assert sheets['review']['Space (FMIS)'].tolist() == ['040']
+
+def test_fmis_upload_lists_counted_room_with_no_match_and_skips_blank_ones(tmp_path):
+    res = fmis_rooms(('Turpin', '3', 'Z1', 7), ('Turpin', '3', 'Z2', None))
+    info, sheets = upload_sheets(tmp_path, res)
+    assert info == {'upload': 0, 'not_matched': 1}
+    assert sheets['upload'].empty
+    assert sheets['not_matched'][['Space', 'Match']].values.tolist() == [['Z1', 'no match']]
+
+# two of our rooms on one FMIS space -> can't tell which is right, even if only one has a count
+def test_fmis_upload_holds_back_two_rooms_on_one_fmis_space(tmp_path):
+    spaces = [(100, '01', 1, 10, True)]
+    res = fmis_rooms(('Turpin', '3', '01', 4), ('Turpin', '3', '1', None))
+    info, sheets = upload_sheets(tmp_path, res, spaces)
+    assert info == {'upload': 0, 'not_matched': 1}
+    assert sheets['not_matched']['Match'].tolist() == ['two rooms, one FMIS space']
+
+# one room fits 2 FMIS spaces -> its count must not land on both
+@pytest.mark.parametrize('names, space', [(['B303', 'B303'], 'B303'), (['040', '0040'], '40')])
+def test_fmis_upload_holds_back_a_room_that_fits_two_fmis_spaces(tmp_path, names, space):
+    spaces = [(100, names[0], 1, 10, True), (101, names[1], 1, 10, True)]
+    info, sheets = upload_sheets(tmp_path, fmis_rooms(('Turpin', '3', space, 4)), spaces)
+    assert info == {'upload': 0, 'not_matched': 1}
+    assert sheets['not_matched']['Match'].tolist() == ['ambiguous']
+
+# inactive spaces and a floor that belongs to another property are never upload targets
+@pytest.mark.parametrize('space', [(100, 'B303', 1, 10, False), (100, 'B303', 1, 20, True)])
+def test_fmis_upload_skips_inactive_and_wrong_property_spaces(tmp_path, space):
+    info, sheets = upload_sheets(tmp_path, fmis_rooms(('Turpin', '0', 'B303', 4), ('Turpin', '3', 'B303', 4)), [space])
+    assert info['upload'] == 0
+
+def test_fmis_upload_keeps_to_the_building_and_floor_picked(tmp_path):
+    res = fmis_rooms(('Turpin', '3', 'B303', 33), ('Turpin', '4', '4A', 8), ('Bus Loop', '0', 'Stop', 2),
+                     ('Turpin', '4', 'Z9', 1))
+    info, sheets = upload_sheets(tmp_path, res, properties=['Turpin'], floors=['3'])
+    assert sheets['upload']['Id'].tolist() == [100]
+    assert info == {'upload': 1, 'not_matched': 0}
+
+def test_fmis_upload_says_which_admin_file_is_missing(tmp_path):
+    (fmis_folder(tmp_path) / 'Spaces.xlsx').unlink()
+    with pytest.raises(FileNotFoundError, match='Spaces.xlsx'):
+        exports.write_fmis_upload(fmis_rooms(), tmp_path / 'x.xlsx', tmp_path)

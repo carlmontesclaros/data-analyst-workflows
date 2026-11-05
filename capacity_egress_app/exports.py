@@ -395,3 +395,120 @@ def write_check_summary(check, path, user_name, when=None):
     except PermissionError:
         raise PermissionError(f"can't write {path} - it's probably open in Word. close it and try again")
     return path
+
+# fmis upload -> Tyler's file: each counted room's capacity against its FMIS space id, floor id and property id
+FMIS_DIR = os.path.join(db.DATA_DIR, "input", "fmis")
+FMIS_FILES = {'Properties.xlsx': 'properties', 'Floors.xlsx': 'floors', 'Spaces.xlsx': 'spaces'}
+
+def clean_text(s):
+    return s.astype(str).str.strip().str.removesuffix('.0')
+
+def no_zeros(s):
+    return s.str.lstrip('0').replace('', '0')     # '0014' -> '14', '00' -> '0'
+
+# building key = building number, or the property name when there's no number (landscape, parking...)
+def building_key(number, name):
+    names = name.astype(str).str.split().str.join(' ').str.lower()
+    number = clean_text(number)
+    return number.where(~number.isin(['nan', 'None', '<NA>', '']), 'name: ' + names)
+
+# the 3 admin files -> one row per active space, ids + names
+def read_fmis_spaces(folder=FMIS_DIR):
+    frames = []
+    for name, tab in FMIS_FILES.items():
+        path = os.path.join(folder, name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"{name} is missing from {folder} - put the FMIS admin exports there")
+        # names and floors stay text -> pandas turns a column of '040' into 40 otherwise
+        frames.append(pd.read_excel(path, sheet_name=tab, dtype={'Name': str, 'Description': str}))
+    props, floors, spaces = frames
+    spaces = spaces[spaces['ActiveFlag'] == True]
+    combined = pd.DataFrame({
+        'Property ID': spaces['PropertyId'],
+        'Building Number': clean_text(spaces['PropertyId'].map(props.set_index('Id')['ExternalId'])),
+        'Property': spaces['PropertyId'].map(props.set_index('Id')['Name']),
+        'Floor ID': spaces['FloorId'],
+        'Floor': clean_text(spaces['FloorId'].map(floors.set_index('FloorId')['Description'])),
+        'Space ID': spaces['Id'],
+        'Space': clean_text(spaces['Name']),
+        # admin's check: the space's floor belongs to the same property as the space
+        'Floor matches Property': spaces['FloorId'].map(floors.set_index('FloorId')['PropertyId']) == spaces['PropertyId'],
+    })
+    return combined.sort_values(['Property', 'Floor', 'Space'])
+
+# every room -> the one FMIS space it fits. returns (matched, problems), each room in exactly one of them
+def match_fmis_spaces(rooms, spaces):
+    rooms = rooms.assign(row=range(len(rooms)), bldg=building_key(rooms['building_number'], rooms['property']),
+                         f=clean_text(rooms['floor']), s=clean_text(rooms['space']))
+    targets = spaces[spaces['Floor matches Property']]
+    targets = targets.assign(bldg=building_key(targets['Building Number'], targets['Property']),
+                             f=targets['Floor'], s=targets['Space'])
+    exact = rooms.merge(targets, on=['bldg', 'f', 's'], how='left').assign(Match='exact')
+
+    # leading zeros lost in the space report ('001' became 1) -> try again ignoring them
+    missed = exact[exact['Space ID'].isna()][rooms.columns]
+    loose = missed.assign(f0=no_zeros(missed['f']), s0=no_zeros(missed['s'])).merge(
+        targets.assign(f0=no_zeros(targets['f']), s0=no_zeros(targets['s'])).drop(columns=['f', 's']),
+        on=['bldg', 'f0', 's0'], how='left').assign(Match='leading zeros')
+    tried = pd.concat([exact[exact['Space ID'].notna()], loose])
+
+    # a room with 2 FMIS spaces -> its count must not land on both
+    hits = tried.groupby('row')['Space ID'].transform('count')
+    tried.loc[hits > 1, 'Match'] = 'ambiguous'
+    tried.loc[hits == 0, 'Match'] = 'no match'
+    problems = tried[hits != 1].drop_duplicates('row')
+    matched = tried[hits == 1]
+
+    # same space id twice = two of our rooms point at one FMIS space -> cant tell which is right, upload neither
+    twice = matched['Space ID'].duplicated(keep=False)
+    problems = pd.concat([problems, matched[twice].assign(Match='two rooms, one FMIS space')])
+    return matched[~twice], problems
+
+FMIS_README = [
+    ('upload', 'Id (space id), PropertyId, FloorId + capacity in OccupantsDay / OccupantsNight / OccupantsTotal (same value, '
+               'keep the one FMIS needs), headers as in the Spaces export. Counted rooms only: a room with no count is left out, '
+               'so a blank never clears a number in FMIS. This is the upload.'),
+    ('review', 'Same rows as upload, with the FMIS names next to the space report names so each match can be checked.'),
+    ('not_matched', 'Counted rooms that could not be matched to exactly one FMIS space, or that share one FMIS space with '
+                    'another room. Not in the upload.'),
+    ('all_spaces', 'The three admin files combined: every active space with its property, floor and space id and name. '
+                   '"Floor matches Property" = the floor id belongs to the same property id as the space.'),
+    ('Match column', 'exact = building number + floor + space name all equal. leading zeros = equal once leading zeros are '
+                     'ignored (the space report turns 001 into 1), and only one FMIS space fits.'),
+]
+
+def write_fmis_upload(result, path, fmis_dir=FMIS_DIR, properties=None, floors=None):
+    spaces = read_fmis_spaces(fmis_dir)
+    # match the whole campus, then narrow -> a room sharing an FMIS space stays caught whatever is picked
+    matched, problems = match_fmis_spaces(result['rooms'], spaces)
+    matched = pick(matched[matched['capacity'].notna()], properties, floors).sort_values(['Property', 'Floor', 'Space'])
+    problems = pick(problems[problems['capacity'].notna()], properties, floors)
+
+    capacity = matched['capacity'].astype('Int64')
+    upload = pd.DataFrame({'Id': matched['Space ID'].astype(int), 'PropertyId': matched['Property ID'].astype(int),
+                           'FloorId': matched['Floor ID'].astype(int), 'OccupantsDay': capacity,
+                           'OccupantsNight': capacity, 'OccupantsTotal': capacity})
+    review = pd.DataFrame({
+        'Property ID': matched['Property ID'].astype(int), 'Floor ID': matched['Floor ID'].astype(int),
+        'Space ID': matched['Space ID'].astype(int), 'Capacity': capacity,
+        'Property (FMIS)': matched['Property'], 'Floor (FMIS)': matched['Floor'], 'Space (FMIS)': matched['Space'],
+        'Property (space report)': matched['property'], 'Floor (space report)': matched['floor'],
+        'Space (space report)': matched['space'], 'Building Number': matched['building_number'],
+        'Match': matched['Match'], 'Capacity source': matched['capacity_source']})
+    not_matched = problems[['property', 'floor', 'space', 'building_number', 'capacity', 'Match']].rename(columns={
+        'property': 'Property', 'floor': 'Floor', 'space': 'Space', 'building_number': 'Building Number',
+        'capacity': 'Capacity'})
+    readme = pd.DataFrame(FMIS_README, columns=['Sheet', 'What it is'])
+
+    with pd.ExcelWriter(path, engine='openpyxl') as writer:
+        for name, df in [('upload', upload), ('review', review), ('not_matched', not_matched),
+                         ('all_spaces', spaces), ('readme', readme)]:
+            df.to_excel(writer, sheet_name=name, index=False)
+        format_sheets(writer)
+        # leading-zero matches get a second look
+        match_col = review.columns.get_loc('Match')
+        for row in writer.sheets['review'].iter_rows(min_row=2):
+            if row[match_col].value == 'leading zeros':
+                for c in row:
+                    c.fill = COLOUR_FILLS[egress.AMBER]
+    return {'upload': len(upload), 'not_matched': len(not_matched)}

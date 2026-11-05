@@ -125,6 +125,7 @@ class App:
         for text, cmd in [("Refresh", self.manual_refresh),
                           ("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
                           ("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
+                          ("Export for FMIS", self.export_fmis),
                           ("Editors", lambda: editors_dialog(self.root, self.conn, self.user_login, self.user_name)),
                           ("Change my name", self.change_name)]:
             ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=2)
@@ -866,6 +867,26 @@ class App:
             messagebox.showerror("Not written", str(err))
             return
         self.status_var.set(f"written: {path}  ({info['rooms']} rooms, template {info['template']})")
+
+    def export_fmis(self):
+        props, floors, tag = self.export_scope()
+        path = filedialog.asksaveasfilename(title="Save FMIS upload", defaultextension='.xlsx',
+                                            initialfile=f"fmis_upload{tag}.xlsx")
+        if not path:
+            return
+        self.root.config(cursor='watch')               # reading the FMIS files takes a few seconds
+        self.root.update_idletasks()
+        try:
+            info = exports.write_fmis_upload(self.result, path, properties=props, floors=floors)
+        except (PermissionError, FileNotFoundError) as err:
+            messagebox.showerror("Not written", str(err))
+            return
+        finally:
+            self.root.config(cursor='')
+        self.status_var.set(f"written: {path}  ({info['upload']} counted rooms, {info['not_matched']} not matched)")
+        if info['not_matched']:
+            messagebox.showwarning("Rooms left out", f"{info['not_matched']} counted rooms could not be matched to one FMIS "
+                                                     "space and are not in the upload. See the not_matched sheet.")
 
     def change_name(self):
         name = simpledialog.askstring("Your name", "Name shown in the change log:", initialvalue=self.user_name,
