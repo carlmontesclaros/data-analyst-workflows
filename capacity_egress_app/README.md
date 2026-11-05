@@ -173,7 +173,7 @@ Load a newer space report with **Refresh space report** in the app, not by rebui
 | Column | Comes from |
 |---|---|
 | Property, Floor, Space, Building Number, Net Space (sq m), Space Category, Space Sub-Category | the app |
-| Capacity (Occupants) | the site count, for visited rooms; otherwise whatever the template had |
+| Capacity (Occupants) | the room's real count (site count or PM change); blank for every other room. The template's 0s and FMIS numbers don't carry over |
 | Capacity (per code) | the app's per code load (the report's own column had formula errors) |
 | Room type (per code m^2 used in capacity), Note | the app if set; otherwise the template |
 | Pictures | the table's link formula, pointed at each row; Excel works it out when the file opens |
@@ -193,7 +193,7 @@ The template is never opened with pandas or openpyxl (that would delete the slic
 | readme | what each sheet means |
 
 - Match = building number (or property name if there's no number) + floor + space. If that misses, it tries again ignoring leading zeros (the space report turned `066` into `66`).
-- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today. A 0 is sent only if someone really entered it (442 rooms in the upload, 99 of them 0).
+- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today. A 0 is sent only if someone really entered it (414 rooms in the upload, 71 of them 0).
 - Matching runs on the whole campus before narrowing to the pick, so a room sharing an FMIS space is held back whichever building is picked.
 
 Still open with the admin: which Occupants field is the real one, whether a blank clears a field (if not, the blanks could go too), and McKinnon floor 0 vs 00.
@@ -321,6 +321,7 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | Space report export: a visited room's PM change goes into `Capacity (Occupants)` (it's the room capacity FMIS gets; the site count stays in the change log) | Carl | 2026-10-16 |
 | FMIS upload sends counted rooms only, until the admin confirms what a blank does | Carl | 2026-11-05 |
 | Visited = Carl wrote something for the room (a count, note or room type in the space report, or an entry since). A first-import 0 with nothing written is the FMIS default, not a count: 952 rooms cleared back to per code, logged. Rebuilding with `build_database.py` would bring them back, since `classify_rooms` still takes every 0 in a visited building as a count | Carl | 2026-11-05 |
+| Blank unless visited: a room he only set a room type on, or noted he couldn't get into, has no count. 28 more 0s cleared. A seminar or meeting room he marked 0 stays 0: people meet there but don't work there | Carl | 2026-11-05 |
 | Health services (13.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
 | Day care (19.1) is Group A-2, not care (3.1.2.8.(1)); still excluded until a room type is picked | BCBC 2024 3.1.2.8.(1) | 2026-10-20 |
 | Posted signs (3.1.17.1.(2)) not tracked by the app; some rooms already have them | Carl | 2026-10-20 |

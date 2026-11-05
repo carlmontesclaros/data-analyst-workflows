@@ -214,10 +214,11 @@ def write_space_report(result, path, template_path=None, properties=None, floors
             for name, field in APP_COLS.items():
                 if name in col:
                     values[col[name]] = getattr(room, field)
-            # visited rooms -> their current room capacity, a site count or a PM change made after the visit
-            # (Carl, 2026-10-16: it's the number FMIS gets); the per code load the app works out (the report's column is broken)
-            if COUNT_COL in col and room.visited == 1 and not blank(room.capacity):
-                values[col[COUNT_COL]] = int(room.capacity)
+            # the room's real count (site count or PM change: it's the number FMIS gets), otherwise blank
+            # (Carl, 2026-11-05: blank unless visited; the template's 0s and FMIS numbers don't carry over)
+            if COUNT_COL in col:
+                values[col[COUNT_COL]] = None if blank(room.capacity) else int(room.capacity)
+            # the per code load the app works out (the report's column is broken)
             if PER_CODE_COL in col:
                 values[col[PER_CODE_COL]] = int(room.per_code_load)
             if ROOM_TYPE_COL in col and not blank(room.room_type_override):
