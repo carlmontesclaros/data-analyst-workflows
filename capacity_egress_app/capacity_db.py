@@ -457,6 +457,26 @@ def change_capacity(conn, room_id, new_capacity, source, user_login, user_name, 
         if old[2] != visited:
             log_change(conn, user_login, user_name, 'rooms', room_id, 'visited', old[2], visited, why, changed_at=changed_at)
 
+# clear a count nobody made (an FMIS 0 taken as a site count) -> not visited, the room uses per code again
+def clear_count(conn, room_id, user_login, user_name, why, expected=NO_CHECK):
+    # expected = (capacity, capacity_source) the person saw when they opened the room
+    if not str(why or '').strip():
+        raise ValueError("say why the count is being cleared")
+    with write_transaction(conn):
+        require_editor(conn, user_login)
+        old = conn.execute("SELECT capacity, capacity_source, visited FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
+        if old is None:
+            raise ValueError(f"no room with room_id {room_id}")
+        if expected is not NO_CHECK and not (same_value(old[0], expected[0]) and old[1] == expected[1]):
+            shown = '-' if old[0] is None else old[0]
+            raise StaleDataError(f"This room was changed to {shown} ({old[1]}){last_change(conn, 'rooms', room_id)} "
+                                 f"after you opened it. The screen has been refreshed; check it and try again.")
+        changed_at = now()
+        conn.execute("UPDATE rooms SET capacity = NULL, capacity_source = 'per code', visited = 0 WHERE room_id = ?", (room_id,))
+        for field, before, after in [('capacity', old[0], None), ('capacity_source', old[1], 'per code'), ('visited', old[2], 0)]:
+            if before != after:
+                log_change(conn, user_login, user_name, 'rooms', room_id, field, before, after, why, changed_at=changed_at)
+
 # room type -> the override that sets the room's m2 per person; blank = back to the sub-category default
 def change_room_type(conn, room_id, new_type, user_login, user_name, why, expected=NO_CHECK):
     # expected = room_type_override the person saw when they opened the room
