@@ -243,5 +243,6 @@ def test_fmis_upload_keeps_to_the_building_and_floor_picked(tmp_path):
     assert info == {'upload': 1, 'not_matched': 0}
 
 def test_fmis_upload_says_which_admin_file_is_missing(tmp_path):
+    (fmis_folder(tmp_path) / 'Spaces.xlsx').unlink()
     with pytest.raises(FileNotFoundError, match='Spaces.xlsx'):
         exports.write_fmis_upload(fmis_rooms(), tmp_path / 'x.xlsx', tmp_path)
