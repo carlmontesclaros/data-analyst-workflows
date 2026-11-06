@@ -112,7 +112,7 @@ class App:
 
     # layout
     def build_widgets(self):
-        top = ttk.Frame(self.root, padding=6)
+        top = ttk.Frame(self.root, padding=8)
         top.pack(fill='x')
         ttk.Label(top, text="Search room / building:").pack(side='left')
         self.search_var = tk.StringVar()
@@ -131,7 +131,7 @@ class App:
         self.floor_box.pack(side='left', padx=4)
         self.floor_box.bind('<<ComboboxSelected>>', lambda e: self.show())
 
-        menu = ttk.Frame(self.root, padding=(6, 0))
+        menu = ttk.Frame(self.root, padding=(8, 0, 8, 8))
         menu.pack(fill='x')
         if self.on_back:
             ttk.Button(menu, text="← Check screen", command=self.on_back).pack(side='left', padx=(2, 0))
@@ -148,11 +148,11 @@ class App:
 
         # packed before the tables, so they can't push the export feedback off the window
         self.status_var = tk.StringVar()
-        ttk.Label(self.root, textvariable=self.status_var, padding=4, relief='sunken').pack(fill='x', side='bottom')
+        ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4), foreground=colours.MUTED_FG).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
         panes = ttk.PanedWindow(self.root, orient='vertical')
-        panes.pack(fill='both', expand=True, padx=6, pady=6)
+        panes.pack(fill='both', expand=True, padx=8, pady=(0, 4))
 
         # zones
         zone_frame = ttk.LabelFrame(panes, text="Zones: occupant load vs exit capacity")

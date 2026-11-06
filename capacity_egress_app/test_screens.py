@@ -177,7 +177,8 @@ def test_buttons_and_fields_share_one_height(root):
 
 def test_dropdown_arrow_sits_inside_its_field(root):
     field = ttk.Style(root).layout('TCombobox')[0]
-    assert field[0] == 'Combobox.field'
+    assert field[0] == 'Entry.field'          # all 4 edges
+    assert 'border' not in field[1]           # a border here hides the arrow (seen on screen, 2026-11-06)
     assert any('downarrow' in child[0] for child in field[1]['children'])
 
 def test_dropdown_arrow_can_still_be_clicked(root):

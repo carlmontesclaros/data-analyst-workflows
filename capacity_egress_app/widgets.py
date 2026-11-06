@@ -18,16 +18,18 @@ def open_path(path):
     else:
         subprocess.run(['xdg-open', path])
 
+BUTTON_PADDING, BUTTON_PRESSED, FIELD_PADDING = (12, 4, 12, 4), (12, 5, 12, 3), (6, 4)
+
 # flat look built on Tk's clam theme: fills and lines, no images. image-based themes (we tried Sun Valley)
 # redraw far too slowly: 167 ms per keystroke on a Mac, against 17 ms here. sizes in pixels (negative), same on every screen
 def use_theme(root):
     family = root.tk.call('font', 'actual', 'TkDefaultFont', '-family')
     for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'TkMenuFont']:
         root.tk.call('font', 'configure', name, '-family', family, '-size', -14)
-    for name, size, weight in [('AppTitleFont', -28, 'bold'), ('AppSubtitleFont', -20, 'bold'), ('AppStrongFont', -14, 'bold'),
-                               ('AppLargeFont', -18, 'normal'), ('AppCaptionFont', -12, 'normal')]:
+    for name, size, weight in [('AppTitleFont', -24, 'bold'), ('AppSubtitleFont', -18, 'bold'), ('AppStrongFont', -14, 'bold'),
+                               ('AppLargeFont', -16, 'normal'), ('AppCaptionFont', -12, 'normal')]:
         root.tk.call('font', 'create', name, '-family', family, '-size', size, '-weight', weight)
-    row_height = int(root.tk.call('font', 'metrics', 'TkDefaultFont', '-linespace')) + 4
+    row_height = int(root.tk.call('font', 'metrics', 'TkDefaultFont', '-linespace')) + 6
 
     style = ttk.Style(root)
     style.theme_use('clam')
@@ -38,36 +40,60 @@ def use_theme(root):
     root.option_add('*TCombobox*Listbox.foreground', c.TEXT_FG)
     root.option_add('*TCombobox*Listbox.selectBackground', c.SELECTED)
     root.option_add('*TCombobox*Listbox.selectForeground', c.TEXT_FG)
+    root.option_add('*TCombobox*Listbox.font', 'TkDefaultFont')
+    root.option_add('*TCombobox*Listbox.relief', 'flat')
 
     style.configure('.', background=c.BG, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.BG, darkcolor=c.BG,
                     troughcolor=c.BG, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
                     fieldbackground=c.SURFACE, insertcolor=c.TEXT_FG, font='TkDefaultFont')
-    style.configure('TLabelframe.Label', foreground=c.MUTED_FG)
+    style.configure('TLabelframe.Label', font='AppStrongFont')
+
+    # buttons -> one height with the fields. pressed: the label moves down 1 px. no dashed box, focus is a blue border
+    style.layout('TButton', [('Button.border', {'sticky': 'nswe', 'border': '1', 'children': [
+        ('Button.padding', {'sticky': 'nswe', 'children': [('Button.label', {'sticky': 'nswe'})]})]})])
     style.configure('TButton', background=c.SURFACE, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE,
-                    padding=(10, 3), width=-1, focusthickness=1, focuscolor=c.CONTROL_BORDER)
-    style.map('TButton', background=[('pressed', c.PRESSED), ('active', c.HOVER)],
-              lightcolor=[('pressed', c.PRESSED), ('active', c.HOVER)], darkcolor=[('pressed', c.PRESSED), ('active', c.HOVER)])
+                    padding=BUTTON_PADDING, width=-1)
+    style.map('TButton', background=[('pressed', c.PRESSED), ('active', c.HOVER)], bordercolor=[('focus', c.ACCENT)],
+              lightcolor=[('pressed', c.PRESSED), ('active', c.HOVER)], darkcolor=[('pressed', c.PRESSED), ('active', c.HOVER)],
+              padding=[('pressed', BUTTON_PRESSED)])
     style.configure('Accent.TButton', background=c.ACCENT, foreground=c.SURFACE, bordercolor=c.ACCENT, lightcolor=c.ACCENT,
-                    darkcolor=c.ACCENT, focuscolor=c.SURFACE)
+                    darkcolor=c.ACCENT)
     style.map('Accent.TButton', background=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)],
-              lightcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)],
-              darkcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)])
+              bordercolor=[('focus', c.ACCENT_PRESSED)], lightcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)],
+              darkcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)], padding=[('pressed', BUTTON_PRESSED)])
+
+    # fields -> a focused one gets a 2 px blue ring. the dropdown arrow sits inside the field, not in its own box
+    if 'Flat.downarrow' not in style.element_names():
+        style.element_create('Flat.downarrow', 'from', 'default', 'downarrow')
+    # (Entry.field draws all 4 edges, clam's Combobox.field leaves the right one open. a 'border' here hides the arrow)
+    style.layout('TCombobox', [('Entry.field', {'sticky': 'nswe', 'children': [
+        ('Flat.downarrow', {'side': 'right', 'sticky': 'ns'}),
+        ('Combobox.padding', {'sticky': 'nswe', 'children': [('Combobox.textarea', {'sticky': 'nswe'})]})]})])
     for field in ['TEntry', 'TCombobox']:
-        style.configure(field, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE, padding=(6, 2),
-                        arrowcolor=c.MUTED_FG, background=c.SURFACE)
-        style.map(field, bordercolor=[('focus', c.ACCENT)], lightcolor=[('focus', c.ACCENT)],
+        style.configure(field, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE, padding=FIELD_PADDING,
+                        arrowcolor=c.MUTED_FG, arrowsize=14, background=c.SURFACE, relief='flat', borderwidth=0)
+        style.map(field, bordercolor=[('focus', c.ACCENT)], lightcolor=[('focus', c.ACCENT)], darkcolor=[('focus', c.ACCENT)],
                   fieldbackground=[('readonly', c.SURFACE)], selectbackground=[('readonly', c.SURFACE)],
-                  selectforeground=[('readonly', c.TEXT_FG)], background=[('active', c.HOVER), ('readonly', c.SURFACE)])
-    style.configure('Treeview', background=c.SURFACE, fieldbackground=c.SURFACE, rowheight=row_height, bordercolor=c.BORDER)
+                  selectforeground=[('readonly', c.TEXT_FG)], background=[('readonly', c.SURFACE)],
+                  arrowcolor=[('active', c.TEXT_FG)])
+
+    # tables -> quiet headings, no lines between rows, the picked row in pale blue
+    style.configure('Treeview', background=c.SURFACE, fieldbackground=c.SURFACE, rowheight=row_height, bordercolor=c.BORDER,
+                    lightcolor=c.SURFACE, darkcolor=c.SURFACE)
     style.map('Treeview', background=[('selected', c.SELECTED)], foreground=[('selected', c.TEXT_FG)])
-    style.configure('Treeview.Heading', background=c.BG, foreground=c.MUTED_FG, relief='flat', padding=(4, 2),
-                    lightcolor=c.BG, darkcolor=c.BG, bordercolor=c.BORDER)
-    style.map('Treeview.Heading', background=[('active', c.HOVER)])
-    for bar in ['Vertical.TScrollbar', 'Horizontal.TScrollbar']:
+    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED_FG, relief='flat', padding=(4, 3),
+                    lightcolor=c.SURFACE, darkcolor=c.SURFACE, bordercolor=c.SURFACE)
+    style.map('Treeview.Heading', background=[('active', c.HOVER)], lightcolor=[('active', c.HOVER)], darkcolor=[('active', c.HOVER)])
+
+    # scrollbars -> just the thumb
+    for bar, name, stick in [('Vertical.TScrollbar', 'Vertical', 'ns'), ('Horizontal.TScrollbar', 'Horizontal', 'we')]:
+        style.layout(bar, [(f'{name}.Scrollbar.trough', {'sticky': stick, 'children': [
+            (f'{name}.Scrollbar.thumb', {'expand': '1', 'sticky': 'nswe'})]})])
         style.configure(bar, background=c.PRESSED, troughcolor=c.BG, bordercolor=c.BG, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
-                        arrowcolor=c.MUTED_FG)
-        style.map(bar, background=[('active', c.CONTROL_BORDER)])
-    style.configure('Sash', sashthickness=6)
+                        arrowsize=10, gripcount=0)
+        style.map(bar, background=[('active', c.CONTROL_BORDER)], lightcolor=[('active', c.CONTROL_BORDER)],
+                  darkcolor=[('active', c.CONTROL_BORDER)])
+    style.configure('Sash', sashthickness=6, gripcount=0)
 
 # search -> 'DTB A120', 'Turpin', 'A120'. words with a digit are room numbers, the rest name the building
 def initials(name):

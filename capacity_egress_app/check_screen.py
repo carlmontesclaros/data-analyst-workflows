@@ -42,6 +42,9 @@ def room_status_text(room):
     return colour, verdict
 
 
+TRIAL_HELP = ("Leave New capacity blank to try only the room type. "
+              "To check several rooms, pick another in the same building and press Check again.")
+
 def rooms_found_text(count, shown):
     text = f"{count} room" + ('' if count == 1 else 's')
     return text + (f" (first {shown} shown)" if count > shown else '')
@@ -124,12 +127,12 @@ class CheckScreen:
 
         # left: find a room
         left = ttk.LabelFrame(outer, text=" 1. Find a room ", padding=12)
-        left.grid(row=1, column=0, sticky='nsw', padx=(0, 18))
+        left.grid(row=1, column=0, sticky='nsw', padx=(0, 16))
         left.rowconfigure(5, weight=1)
         row = ttk.Frame(left)
         row.grid(row=0, column=0, sticky='ew')
         self.search_var = tk.StringVar()
-        entry = ttk.Entry(row, textvariable=self.search_var, width=26)
+        entry = ttk.Entry(row, textvariable=self.search_var, width=24)
         entry.pack(side='left', fill='x', expand=True)
         entry.bind('<Return>', lambda e: self.search())
         entry.focus_set()
@@ -152,7 +155,7 @@ class CheckScreen:
         self.found_var = tk.StringVar()
         ttk.Label(left, textvariable=self.found_var, font=self.fonts['caption'], foreground=colours.MUTED_FG).grid(
             row=4, column=0, sticky='w')
-        self.found_tree = self.make_tree(left, [('Room', 65), ('Floor', 50), ('Building', 190)], height=12)
+        self.found_tree = self.make_tree(left, [('Room', 65), ('Floor', 50), ('Building', 165)], height=12)
         self.found_tree.master.grid(row=5, column=0, sticky='nsew', pady=(4, 0))
         self.found_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_found())
         colours.colour_tags(self.found_tree)
@@ -164,7 +167,7 @@ class CheckScreen:
         right.rowconfigure(2, weight=1)
 
         # room card -> the room now, and right under it the room with the change, column by column
-        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(14, 8))
+        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(16, 8))
         card.grid(row=0, column=0, sticky='ew')
         card.columnconfigure(5, weight=1)
         self.room_title = tk.StringVar(value="Pick a room on the left")
@@ -192,7 +195,7 @@ class CheckScreen:
         self.trial_badge = tk.Label(badges, text="", padx=10, pady=4, anchor='w', fg=colours.ROW_FG)
         self.trial_badge.pack(side='left', padx=(10, 0))
 
-        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(14, 8))
+        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(16, 8))
         trial.grid(row=1, column=0, sticky='ew', pady=(10, 0))
         line = ttk.Frame(trial)
         line.pack(fill='x')
@@ -211,13 +214,13 @@ class CheckScreen:
         ttk.Button(line, text="Check", style='Accent.TButton', command=self.add_to_check).pack(side='left')
         ttk.Button(line, text="Remove room", command=self.remove_from_check).pack(side='left', padx=(18, 4))
         ttk.Button(line, text="Start over", command=self.start_over).pack(side='left', padx=4)
-        ttk.Label(trial, text="Leave New capacity blank to try only the room type. "
-                              "To check several rooms, pick another in the same building and press Check again.",
-                  font=self.fonts['caption'], foreground=colours.MUTED_FG).pack(anchor='w', pady=(6, 0))
+        # one line: the help, or what's wrong with the number
+        self.hint = ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED_FG)
+        self.hint.pack(anchor='w', pady=(6, 0))
         self.message_var = tk.StringVar()
-        ttk.Label(trial, textvariable=self.message_var, foreground=colours.ERROR_FG).pack(anchor='w')
+        self.message_var.trace_add('write', lambda *_: self.show_hint())
 
-        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(14, 8))
+        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(16, 8))
         results.grid(row=2, column=0, sticky='nsew', pady=(10, 0))
         results.columnconfigure(0, weight=1)
         results.rowconfigure(3, weight=1)
@@ -228,7 +231,7 @@ class CheckScreen:
         colours.colour_tags(self.check_tree)
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
-        self.zone_tree = self.make_tree(results, [('Zone', 120), ('Occupant load → with change', 200),
+        self.zone_tree = self.make_tree(results, [('Zone', 120), ('Occupant load → with change', 215),
                                                   ('Exit capacity', 105), ('Result', 340)], height=4)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
         colours.colour_tags(self.zone_tree)
@@ -244,6 +247,10 @@ class CheckScreen:
         colours.legend(foot).pack(anchor='w')
         ttk.Label(foot, text="Screening only, not an approval. Nothing on this screen is saved; an editor reviews every change.",
                   font=self.fonts['caption'], foreground=colours.MUTED_FG).pack(anchor='w', pady=(4, 0))
+
+    def show_hint(self):
+        message = self.message_var.get()
+        self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED_FG)
 
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
