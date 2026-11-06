@@ -4,7 +4,7 @@ A desktop app for UVic Facilities Management that keeps the record of **room cap
 
 It replaces editing Excel by hand. A project manager who gets an OREM request ("can B303 go from 32 to 36?") opens the app, finds the room, types 36, sees whether the floor is still within its exit capacity, and saves or cancels. Every change is recorded with who made it, when and why.
 
-**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (123 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
+**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (157 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
 
 It's still a **screening tool, not a code determination**. Results say "within capacity, review before acting" or "review", never "approved".
 
@@ -103,7 +103,7 @@ The look uses the Sun Valley ttk theme (MIT licence). Its files sit in the app f
 
 ## Colours
 
-Same meaning on every table. One legend sits on both screens.
+Same meaning on every table. One short legend sits on both screens; this table is the full meaning.
 
 | Colour | Rooms | Zones | Exits |
 |---|---|---|---|
@@ -142,7 +142,7 @@ capacity_egress_app/
   exports.py               results workbook, space report export, FMIS upload, capacity check summary (.docx)
   theme/sun_valley/        Sun Valley ttk theme files (MIT licence), loaded from the folder, nothing to install
   build_database.py        one-time first import
-  test_*.py                pytest (123 tests)
+  test_*.py                pytest (157 tests)
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
@@ -322,6 +322,7 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | FMIS upload sends counted rooms only, until the admin confirms what a blank does | Carl | 2026-11-05 |
 | Visited = Carl wrote something for the room (a count, note or room type in the space report, or an entry since). A first-import 0 with nothing written is the FMIS default, not a count: 952 rooms cleared back to per code, logged. Rebuilding with `build_database.py` would bring them back, since `classify_rooms` still takes every 0 in a visited building as a count | Carl | 2026-11-05 |
 | Blank unless visited: a room he only set a room type on, or noted he couldn't get into, has no count. 28 more 0s cleared. A seminar or meeting room he marked 0 stays 0: people meet there but don't work there | Carl | 2026-11-05 |
+| UI pass: table headings use the glossary's words, numbers line up on the right, one blue button (Check), a zone with no exits shows - not 0. Colours live in `colours.py`; row colours unchanged | Carl | 2026-11-06 |
 | Health services (13.1) excluded pending a ruling; care occupancies use 18.4 mm/person (3.4.3.2.(2)) | Pending | |
 | Day care (19.1) is Group A-2, not care (3.1.2.8.(1)); still excluded until a room type is picked | BCBC 2024 3.1.2.8.(1) | 2026-10-20 |
 | Posted signs (3.1.17.1.(2)) not tracked by the app; some rooms already have them | Carl | 2026-10-20 |

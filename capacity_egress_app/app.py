@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import CheckScreen
-from widgets import BuildingBox, open_path, use_theme
+from widgets import BuildingBox, anchor_for, heading_text, open_path, use_theme
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +29,19 @@ def sanitize(name):
     for c in BAD_CHARS:
         name = name.replace(c, '-')
     return name.strip()
+
+ZONE_COLUMNS = [('floor', 70), ('zone_wing', 50), ('status', 300), ('total_load', 100), ('exit_capacity', 95), ('exit_count', 50),
+                ('rooms_counted', 100), ('rooms_in_scope', 105), ('link_inflow', 105), ('flags', 420)]
+ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 75), ('room_type', 85),
+                ('per_code_load', 100), ('capacity', 100), ('capacity_source', 110), ('load_used', 75), ('in_scope', 65),
+                ('flag', 180), ('note', 250)]
+EXIT_COLUMNS = [('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 75), ('stair_width_cm', 75),
+                ('persons', 65), ('limited_by', 80), ('counts_as_exit', 105), ('shares_stair', 150), ('width_check', 220),
+                ('into_wing', 70), ('measured_date', 100), ('measured_by', 90), ('notes', 250)]
+
+# no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
+def exit_capacity_text(zone):
+    return '-' if zone['exit_count'] == 0 else zone['exit_capacity']
 
 def text_or_blank(v):
     return '' if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
@@ -110,7 +123,7 @@ class App:
         ttk.Label(top, text="   Building:").pack(side='left')
         self.building_var = tk.StringVar()
         # type to narrow the list, Down arrow opens it; Enter picks the top match
-        self.building = BuildingBox(top, self.building_var, '', self.pick_building, width=45)
+        self.building = BuildingBox(top, self.building_var, '', self.pick_building, width=36)
         self.building.box.pack(side='left', padx=4)
         ttk.Label(top, text="Floor:").pack(side='left')
         self.floor_var = tk.StringVar(value=ALL)
@@ -121,23 +134,29 @@ class App:
         menu = ttk.Frame(self.root, padding=(6, 0))
         menu.pack(fill='x')
         if self.on_back:
-            ttk.Button(menu, text="← Check screen", style='Accent.TButton', command=self.on_back).pack(side='left', padx=(2, 12))
-        for text, cmd in [("Refresh", self.manual_refresh),
-                          ("Code factors", self.edit_code_factors), ("Refresh space report", self.refresh_report),
-                          ("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
-                          ("Export for FMIS", self.export_fmis),
-                          ("Editors", lambda: editors_dialog(self.root, self.conn, self.user_login, self.user_name)),
-                          ("Change my name", self.change_name)]:
-            ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=2)
+            ttk.Button(menu, text="← Check screen", command=self.on_back).pack(side='left', padx=(2, 0))
+        # grouped by job, with a gap between groups: data, exports, people
+        groups = [[("Refresh", self.manual_refresh), ("Code factors", self.edit_code_factors),
+                   ("Refresh space report", self.refresh_report)],
+                  [("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
+                   ("Export for FMIS", self.export_fmis)],
+                  [("Editors", lambda: editors_dialog(self.root, self.conn, self.user_login, self.user_name)),
+                   ("Change my name", self.change_name)]]
+        for group in groups:
+            for i, (text, cmd) in enumerate(group):
+                ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=(16 if i == 0 else 2, 2))
+
+        # packed before the tables, so they can't push the export feedback off the window
+        self.status_var = tk.StringVar()
+        ttk.Label(self.root, textvariable=self.status_var, padding=4, relief='sunken').pack(fill='x', side='bottom')
+        colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
         panes = ttk.PanedWindow(self.root, orient='vertical')
         panes.pack(fill='both', expand=True, padx=6, pady=6)
 
         # zones
         zone_frame = ttk.LabelFrame(panes, text="Zones: occupant load vs exit capacity")
-        self.zone_tree = self.make_tree(zone_frame, [
-            ('floor', 70), ('zone_wing', 60), ('status', 260), ('total_load', 90), ('exit_capacity', 100),
-            ('exit_count', 70), ('rooms_counted', 100), ('rooms_in_scope', 100), ('link_inflow', 80), ('flags', 420)], height=7)
+        self.zone_tree = self.make_tree(zone_frame, ZONE_COLUMNS, height=7)
         colours.colour_tags(self.zone_tree)
         self.zone_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_zone())
         panes.add(zone_frame, weight=2)
@@ -150,12 +169,9 @@ class App:
                           ("Room note", self.room_note),
                           ("Room history", self.room_history), ("Open photos", self.open_photos)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
-        self.room_tree = self.make_tree(room_frame, [
-            ('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 70), ('room_type', 80),
-            ('per_code_load', 90), ('capacity', 70), ('capacity_source', 90), ('load_used', 75), ('in_scope', 65),
-            ('flag', 180), ('note', 250)], height=12)
+        self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12)
         colours.colour_tags(self.room_tree)
-        self.room_tree.tag_configure('missing', foreground='#A00000')     # after the colours, so red text wins
+        self.room_tree.tag_configure('missing', foreground=colours.ERROR_FG)     # after the colours, so red text wins
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
         panes.add(room_frame, weight=4)
 
@@ -166,26 +182,18 @@ class App:
         for text, cmd in [("Add exit", self.add_exit), ("Edit exit", self.edit_exit), ("Delete exit", self.delete_exit),
                           ("Exit note", self.exit_note), ("Exit history", self.exit_history)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
-        self.exit_tree = self.make_tree(exit_frame, [
-            ('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 100),
-            ('stair_width_cm', 100), ('persons', 70), ('limited_by', 80),
-            ('counts_as_exit', 100), ('shares_stair', 150), ('width_check', 220), ('into_wing', 70), ('measured_date', 100),
-            ('measured_by', 90), ('notes', 250)], height=5)
+        self.exit_tree = self.make_tree(exit_frame, EXIT_COLUMNS, height=5)
         colours.colour_tags(self.exit_tree)
         self.exit_tree.bind('<Double-1>', lambda e: self.edit_exit())
         panes.add(exit_frame, weight=2)
-
-        self.status_var = tk.StringVar()
-        ttk.Label(self.root, textvariable=self.status_var, padding=4, relief='sunken').pack(fill='x', side='bottom')
-        colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
         frame.pack(fill='both', expand=True)
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height)
         for col, width in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=width, anchor='w', stretch=False)
+            tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
+            tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
         tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -247,15 +255,15 @@ class App:
         rooms = self.selected_rooms()
         keys = set(zip(rooms['property'], rooms['floor']))
         zones = self.result['zones']
-        zones = zones[[k in keys for k in zip(zones['property'], zones['floor'])]]
+        zones = zones.loc[[k in keys for k in zip(zones['property'], zones['floor'])]]    # .loc: an empty list must not wipe the columns
         exits = self.result['exits']
-        exits = exits[[k in keys for k in zip(exits['property'], exits['floor'])]]
+        exits = exits.loc[[k in keys for k in zip(exits['property'], exits['floor'])]]
 
         self.zone_tree.delete(*self.zone_tree.get_children())
         for i, z in zones.sort_values(['property', 'floor', 'zone_wing']).iterrows():
             values = [z['floor'] if self.building.picked() else f"{z['property']} {z['floor']}"] + \
-                     [z[c] for c in ['zone_wing', 'status', 'total_load', 'exit_capacity', 'exit_count',
-                                     'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
+                     [z['zone_wing'], z['status'], z['total_load'], exit_capacity_text(z)] + \
+                     [z[c] for c in ['exit_count', 'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
             self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(egress.zone_colour(z),))
 
         self.room_tree.delete(*self.room_tree.get_children())
@@ -911,14 +919,14 @@ def editors_dialog(parent, conn, user_login, user_name):
     ttk.Label(frame, text="Editors change room capacities, exits and code factors. Everyone else is a viewer.",
               wraplength=520).pack(anchor='w')
     ttk.Label(frame, text="Only tick a person's own UVic login, never a shared or generic account.",
-              foreground='#B00020', wraplength=520).pack(anchor='w', pady=(4, 8))
+              foreground=colours.ERROR_FG, wraplength=520).pack(anchor='w', pady=(4, 8))
     tree = ttk.Treeview(frame, columns=['name', 'login', 'editor'], show='headings', height=12, selectmode='browse')
     for col, text, width in [('name', 'Name', 200), ('login', 'Windows login', 180), ('editor', 'Editor', 80)]:
         tree.heading(col, text=text, anchor='w')
         tree.column(col, width=width, anchor='w')
     tree.pack(fill='both', expand=True)
     ttk.Label(frame, text="Not in the list? They open the app once, or use Add by login.",
-              foreground='#6A6A6A').pack(anchor='w', pady=(6, 0))
+              foreground=colours.MUTED_FG).pack(anchor='w', pady=(6, 0))
 
     def fill():
         tree.delete(*tree.get_children())
