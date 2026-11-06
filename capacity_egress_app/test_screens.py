@@ -50,7 +50,7 @@ def is_inside_window(w, window):
             and w.winfo_rooty() + w.winfo_height() <= window.winfo_rooty() + window.winfo_height())
 
 def check_screen(root, conn):
-    screen = CheckScreen(root, conn, 'carl', True, open_editor=lambda r=None: None, open_editors=lambda: None)
+    screen = CheckScreen(root, conn, 'carl', open_editor=lambda r=None: None, open_editors=lambda: None)
     screen.search_var.set('A120')
     screen.search()
     root.update()
@@ -159,4 +159,11 @@ def test_typing_stays_quick(root, conn):
 
 # Sun Valley drew every widget from images: 167 ms per keystroke on a Mac, against 17 ms without
 def test_theme_draws_without_images(root):
-    assert root.image_names() == ()
+    # Tk always loads its own 4 dialog icons
+    assert [i for i in root.image_names() if not i.startswith('::tk::icons')] == []
+
+@pytest.mark.parametrize('columns', [app.ZONE_COLUMNS, app.ROOM_COLUMNS, app.EXIT_COLUMNS])
+def test_every_heading_fits_its_column(root, columns):
+    too_narrow = [key for key, width in columns
+                  if root.tk.call('font', 'measure', 'TkDefaultFont', widgets.heading_text(key)) + 8 > width]
+    assert too_narrow == []
