@@ -37,6 +37,7 @@ def legend(parent):
     for colour, name, meaning in LEGEND:
         item = ttk.Frame(frame)
         item.pack(side='left', padx=(0, 18), pady=2)
-        tk.Label(item, bg=ROW_BG[colour], width=2, relief='solid', borderwidth=1).pack(side='left', padx=(0, 6))
+        tk.Label(item, bg=ROW_BG[colour], width=2, height=1, highlightthickness=1, highlightbackground=CONTROL_BORDER,
+                 font=('TkDefaultFont', 4)).pack(side='left', padx=(0, 6))
         ttk.Label(item, text=f"{name}: {meaning}").pack(side='left')
     return frame

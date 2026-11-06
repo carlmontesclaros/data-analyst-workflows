@@ -167,3 +167,61 @@ def test_every_heading_fits_its_column(root, columns):
     too_narrow = [key for key, width in columns
                   if root.tk.call('font', 'measure', 'TkDefaultFont', widgets.heading_text(key)) + 8 > width]
     assert too_narrow == []
+
+
+# polish: details you only notice when they're wrong
+def test_buttons_and_fields_share_one_height(root):
+    heights = {type(w).__name__: w.winfo_reqheight() for w in
+               [ttk.Button(root, text="Check"), ttk.Entry(root), ttk.Combobox(root)]}
+    assert max(heights.values()) - min(heights.values()) <= 1, heights
+
+def test_dropdown_arrow_sits_inside_its_field(root):
+    field = ttk.Style(root).layout('TCombobox')[0]
+    assert field[0] == 'Entry.field'          # all 4 edges
+    assert 'border' not in field[1]           # a border here hides the arrow (seen on screen, 2026-11-06)
+    assert any('downarrow' in child[0] for child in field[1]['children'])
+
+def test_dropdown_arrow_can_still_be_clicked(root):
+    box = ttk.Combobox(root, width=20)
+    box.pack()
+    root.update()
+    assert 'downarrow' in box.identify(box.winfo_width() - 6, box.winfo_height() // 2)
+
+@pytest.mark.parametrize('bar', ['Vertical.TScrollbar', 'Horizontal.TScrollbar'])
+def test_scrollbars_are_a_plain_thumb(root, bar):
+    style = ttk.Style(root)
+    assert 'arrow' not in str(style.layout(bar))
+    assert style.lookup(bar, 'gripcount') == 0
+
+@pytest.mark.parametrize('widget', ['TEntry', 'TCombobox', 'TButton'])
+def test_focus_shows_in_blue(root, widget):
+    assert ttk.Style(root).lookup(widget, 'bordercolor', ['focus']) == colours.ACCENT
+
+# no dashed box inside a button; the blue border says it has focus
+def test_buttons_have_no_dashed_focus_box(root):
+    assert 'Button.focus' not in str(ttk.Style(root).layout('TButton'))
+
+# the label moves 1 px when pressed, so the button feels like it heard you
+def test_button_gives_way_when_pressed(root):
+    style = ttk.Style(root)
+    assert str(style.lookup('TButton', 'padding', ['pressed'])) != str(style.lookup('TButton', 'padding'))
+
+def test_legend_swatches_have_no_heavy_black_box(root):
+    frame = colours.legend(root)
+    assert [w for w in all_widgets(frame) if isinstance(w, tk.Label) and w.cget('relief') == 'solid'] == []
+
+def test_status_line_is_flat(root, conn):
+    screen = editor_screen(root, conn)
+    status = [w for w in all_widgets(root) if isinstance(w, ttk.Label) and str(w.cget('textvariable')) == str(screen.status_var)]
+    assert str(status[0].cget('relief')) != 'sunken'
+
+# one line under the fields: the help, or what's wrong. no empty row saved for an error that isn't there
+def test_error_takes_the_place_of_the_help_line(root, conn):
+    screen = check_screen(root, conn)
+    help_text = screen.hint.cget('text')
+    screen.new_var.set('abc')
+    assert screen.hint.cget('text') == "Type a whole number (0 or more)."
+    assert str(screen.hint.cget('foreground')) == colours.ERROR_FG
+    screen.new_var.set('30')
+    assert screen.hint.cget('text') == help_text
+    assert str(screen.hint.cget('foreground')) == colours.MUTED_FG
