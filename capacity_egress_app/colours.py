@@ -8,6 +8,17 @@ ROW_FG = '#1A1A1A'
 CHANGED_FG = '#005FB8'                                 # a value the check changed (blue, same as the theme accent)
 
 MUTED_FG = '#6A6A6A'                                   # secondary text, 4.5:1 or better on the theme's background
+BG = '#FAFAFA'                                         # window background
+SURFACE = '#FFFFFF'                                    # tables, fields, buttons
+TEXT_FG = '#1A1A1A'
+BORDER = '#E3E3E3'                                     # panels and tables
+CONTROL_BORDER = '#BDBDBD'                             # buttons and fields, one step stronger
+HOVER = '#EFEFEF'
+PRESSED = '#E2E2E2'
+ACCENT = CHANGED_FG
+ACCENT_HOVER = '#004C94'
+ACCENT_PRESSED = '#003F7A'
+SELECTED = '#CFE2F5'                                   # picked row: pale blue, the text stays readable
 ERROR_FG = '#B00020'                                   # a message that says something went wrong, a missing room
 
 # short on purpose: the full meaning of each colour is in the README ("Colours")

@@ -1,5 +1,7 @@
 import re
 import sqlite3
+import statistics
+import time
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
@@ -48,7 +50,7 @@ def is_inside_window(w, window):
             and w.winfo_rooty() + w.winfo_height() <= window.winfo_rooty() + window.winfo_height())
 
 def check_screen(root, conn):
-    screen = CheckScreen(root, conn, 'carl', True, open_editor=lambda r=None: None, open_editors=lambda: None)
+    screen = CheckScreen(root, conn, 'carl', open_editor=lambda r=None: None, open_editors=lambda: None)
     screen.search_var.set('A120')
     screen.search()
     root.update()
@@ -143,3 +145,25 @@ def test_check_screen_says_what_the_star_means(root, conn):
     screen.new_var.set('30')
     screen.add_to_check()
     assert '★' in screen.zone_label.get()
+
+# typing has to feel instant: a redraw of the whole screen, theme included, stays well under what you can notice
+def test_typing_stays_quick(root, conn):
+    screen = check_screen(root, conn)
+    times = []
+    for i in range(9):
+        start = time.perf_counter()
+        screen.search_var.set('x' * (i + 1))
+        root.update()
+        times.append((time.perf_counter() - start) * 1000)
+    assert statistics.median(times) < 60
+
+# Sun Valley drew every widget from images: 167 ms per keystroke on a Mac, against 17 ms without
+def test_theme_draws_without_images(root):
+    # Tk always loads its own 4 dialog icons
+    assert [i for i in root.image_names() if not i.startswith('::tk::icons')] == []
+
+@pytest.mark.parametrize('columns', [app.ZONE_COLUMNS, app.ROOM_COLUMNS, app.EXIT_COLUMNS])
+def test_every_heading_fits_its_column(root, columns):
+    too_narrow = [key for key, width in columns
+                  if root.tk.call('font', 'measure', 'TkDefaultFont', widgets.heading_text(key)) + 8 > width]
+    assert too_narrow == []

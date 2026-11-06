@@ -4,10 +4,11 @@ import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk
+import colours as c
 
 # widgets and helpers shared by the check screen and the editor screen
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-THEME_FILE = os.path.join(BASE_DIR, "theme", "sun_valley", "sv.tcl")   # Sun Valley ttk theme (MIT), no install
+FONTS = {'title': 'AppTitleFont', 'subtitle': 'AppSubtitleFont', 'strong': 'AppStrongFont',
+         'large': 'AppLargeFont', 'caption': 'AppCaptionFont'}
 
 def open_path(path):
     if sys.platform == 'win32':
@@ -17,14 +18,56 @@ def open_path(path):
     else:
         subprocess.run(['xdg-open', path])
 
+# flat look built on Tk's clam theme: fills and lines, no images. image-based themes (we tried Sun Valley)
+# redraw far too slowly: 167 ms per keystroke on a Mac, against 17 ms here. sizes in pixels (negative), same on every screen
 def use_theme(root):
-    # theme files missing or broken -> plain look, everything still works
-    try:
-        root.tk.call('source', THEME_FILE)
-        ttk.Style(root).theme_use('sun-valley-light')
-        return True
-    except tk.TclError:
-        return False
+    family = root.tk.call('font', 'actual', 'TkDefaultFont', '-family')
+    for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'TkMenuFont']:
+        root.tk.call('font', 'configure', name, '-family', family, '-size', -14)
+    for name, size, weight in [('AppTitleFont', -28, 'bold'), ('AppSubtitleFont', -20, 'bold'), ('AppStrongFont', -14, 'bold'),
+                               ('AppLargeFont', -18, 'normal'), ('AppCaptionFont', -12, 'normal')]:
+        root.tk.call('font', 'create', name, '-family', family, '-size', size, '-weight', weight)
+    row_height = int(root.tk.call('font', 'metrics', 'TkDefaultFont', '-linespace')) + 4
+
+    style = ttk.Style(root)
+    style.theme_use('clam')
+    root.configure(background=c.BG)
+    root.option_add('*Toplevel.background', c.BG)
+    root.option_add('*Label.background', c.BG)
+    root.option_add('*TCombobox*Listbox.background', c.SURFACE)
+    root.option_add('*TCombobox*Listbox.foreground', c.TEXT_FG)
+    root.option_add('*TCombobox*Listbox.selectBackground', c.SELECTED)
+    root.option_add('*TCombobox*Listbox.selectForeground', c.TEXT_FG)
+
+    style.configure('.', background=c.BG, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.BG, darkcolor=c.BG,
+                    troughcolor=c.BG, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
+                    fieldbackground=c.SURFACE, insertcolor=c.TEXT_FG, font='TkDefaultFont')
+    style.configure('TLabelframe.Label', foreground=c.MUTED_FG)
+    style.configure('TButton', background=c.SURFACE, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE,
+                    padding=(10, 3), width=-1, focusthickness=1, focuscolor=c.CONTROL_BORDER)
+    style.map('TButton', background=[('pressed', c.PRESSED), ('active', c.HOVER)],
+              lightcolor=[('pressed', c.PRESSED), ('active', c.HOVER)], darkcolor=[('pressed', c.PRESSED), ('active', c.HOVER)])
+    style.configure('Accent.TButton', background=c.ACCENT, foreground=c.SURFACE, bordercolor=c.ACCENT, lightcolor=c.ACCENT,
+                    darkcolor=c.ACCENT, focuscolor=c.SURFACE)
+    style.map('Accent.TButton', background=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)],
+              lightcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)],
+              darkcolor=[('pressed', c.ACCENT_PRESSED), ('active', c.ACCENT_HOVER)])
+    for field in ['TEntry', 'TCombobox']:
+        style.configure(field, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE, padding=(6, 2),
+                        arrowcolor=c.MUTED_FG, background=c.SURFACE)
+        style.map(field, bordercolor=[('focus', c.ACCENT)], lightcolor=[('focus', c.ACCENT)],
+                  fieldbackground=[('readonly', c.SURFACE)], selectbackground=[('readonly', c.SURFACE)],
+                  selectforeground=[('readonly', c.TEXT_FG)], background=[('active', c.HOVER), ('readonly', c.SURFACE)])
+    style.configure('Treeview', background=c.SURFACE, fieldbackground=c.SURFACE, rowheight=row_height, bordercolor=c.BORDER)
+    style.map('Treeview', background=[('selected', c.SELECTED)], foreground=[('selected', c.TEXT_FG)])
+    style.configure('Treeview.Heading', background=c.BG, foreground=c.MUTED_FG, relief='flat', padding=(4, 2),
+                    lightcolor=c.BG, darkcolor=c.BG, bordercolor=c.BORDER)
+    style.map('Treeview.Heading', background=[('active', c.HOVER)])
+    for bar in ['Vertical.TScrollbar', 'Horizontal.TScrollbar']:
+        style.configure(bar, background=c.PRESSED, troughcolor=c.BG, bordercolor=c.BG, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
+                        arrowcolor=c.MUTED_FG)
+        style.map(bar, background=[('active', c.CONTROL_BORDER)])
+    style.configure('Sash', sashthickness=6)
 
 # search -> 'DTB A120', 'Turpin', 'A120'. words with a digit are room numbers, the rest name the building
 def initials(name):
