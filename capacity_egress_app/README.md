@@ -193,7 +193,7 @@ The template is never opened with pandas or openpyxl (that would delete the slic
 | readme | what each sheet means |
 
 - Match = building number (or property name if there's no number) + floor + space. If that misses, it tries again ignoring leading zeros (the space report turned `066` into `66`).
-- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today. A 0 is sent only if someone really entered it (414 rooms in the upload, 71 of them 0).
+- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today. A 0 is sent only if someone really entered it (400 rooms in the upload, 71 of them 0).
 - Matching runs on the whole campus before narrowing to the pick, so a room sharing an FMIS space is held back whichever building is picked.
 
 Still open with the admin: which Occupants field is the real one, whether a blank clears a field (if not, the blanks could go too), and McKinnon floor 0 vs 00.
