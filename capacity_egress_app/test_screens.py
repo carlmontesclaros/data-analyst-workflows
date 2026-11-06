@@ -1,5 +1,7 @@
 import re
 import sqlite3
+import statistics
+import time
 import tkinter as tk
 from tkinter import ttk
 import pandas as pd
@@ -143,3 +145,18 @@ def test_check_screen_says_what_the_star_means(root, conn):
     screen.new_var.set('30')
     screen.add_to_check()
     assert '★' in screen.zone_label.get()
+
+# typing has to feel instant: a redraw of the whole screen, theme included, stays well under what you can notice
+def test_typing_stays_quick(root, conn):
+    screen = check_screen(root, conn)
+    times = []
+    for i in range(9):
+        start = time.perf_counter()
+        screen.search_var.set('x' * (i + 1))
+        root.update()
+        times.append((time.perf_counter() - start) * 1000)
+    assert statistics.median(times) < 60
+
+# Sun Valley drew every widget from images: 167 ms per keystroke on a Mac, against 17 ms without
+def test_theme_draws_without_images(root):
+    assert root.image_names() == ()
