@@ -80,8 +80,8 @@ def test_space_report_fills_the_template(tmp_path):
     df = pd.read_excel(path, header=6)
     assert list(df.columns) == TEMPLATE_HEADER and len(df) == 2
     r301, r302 = df.iloc[0], df.iloc[1]
-    # site count for visited rooms; a room not visited keeps the template's count
-    assert r301['Capacity (Occupants)'] == 30 and r302['Capacity (Occupants)'] == 12
+    # Carl, 2026-11-05: blank unless the room has a real count -> the template's 12 is not carried over
+    assert r301['Capacity (Occupants)'] == 30 and pd.isna(r302['Capacity (Occupants)'])
     # per code = the app's load (60.55 m2 classroom -> 33), not the template's broken 2230
     assert r301['Capacity (per code)'] == 33 and r302['Capacity (per code)'] == 33
     # what the app doesn't store comes from the template's row
