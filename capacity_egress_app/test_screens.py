@@ -131,3 +131,15 @@ def test_screens_take_colours_from_colours_py(name):
 
 def test_legend_fits_on_one_line_each():
     assert all(len(meaning) <= 20 for _, _, meaning in colours.LEGEND)
+
+# a right-aligned heading needs room before the next column, or they read as one word
+def test_number_headings_keep_clear_of_the_next_column():
+    assert widgets.heading_text('total_load') == 'Occupant load  '
+    assert widgets.heading_text('floor') == 'Floor'
+    assert widgets.heading_text('Exit capacity') == 'Exit capacity  '
+
+def test_check_screen_says_what_the_star_means(root, conn):
+    screen = check_screen(root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    assert '★' in screen.zone_label.get()

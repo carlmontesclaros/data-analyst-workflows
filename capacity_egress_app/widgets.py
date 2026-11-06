@@ -40,6 +40,31 @@ def match_buildings(names, text):
 
 NO_MATCH = "(no building matches)"
 
+# table headings -> the words in GLOSSARY.md, never the database's column names
+HEADINGS = {'floor': 'Floor', 'zone_wing': 'Wing', 'status': 'Status', 'total_load': 'Occupant load',
+            'exit_capacity': 'Exit capacity', 'exit_count': 'Exits', 'rooms_counted': 'Rooms counted',
+            'rooms_in_scope': 'Rooms in scope', 'link_inflow': 'From link door', 'flags': 'Flags',
+            'property': 'Building', 'space': 'Room', 'sub_category': 'Sub-category', 'area_m2': 'Area (m²)',
+            'room_type': 'Room type', 'per_code_load': 'Per code load', 'capacity': 'Room capacity',
+            'capacity_source': 'Capacity source', 'load_used': 'Load used', 'in_scope': 'In scope', 'flag': 'Flag',
+            'note': 'Note', 'wing': 'Wing', 'exit_id': 'Exit', 'exit_type': 'Type', 'clear_width_cm': 'Door (cm)',
+            'stair_width_cm': 'Stair (cm)', 'persons': 'Persons', 'limited_by': 'Limited by',
+            'counts_as_exit': 'Counts as exit', 'shares_stair': 'Shares stair', 'width_check': 'Width check',
+            'into_wing': 'Into wing', 'measured_date': 'Measured', 'measured_by': 'Measured by', 'notes': 'Notes'}
+# numbers line up on the right, so they can be compared down the column; headings sit over their values
+NUMBER_COLUMNS = {'total_load', 'exit_capacity', 'exit_count', 'rooms_counted', 'rooms_in_scope', 'link_inflow', 'area_m2',
+                  'per_code_load', 'capacity', 'load_used', 'clear_width_cm', 'stair_width_cm', 'persons',
+                  'Proposed', 'Per code load', 'Exit capacity'}
+
+def heading_for(key):
+    return HEADINGS.get(key, key)
+
+def heading_text(key):
+    return heading_for(key) + ('  ' if key in NUMBER_COLUMNS else '')
+
+def anchor_for(key):
+    return 'e' if key in NUMBER_COLUMNS else 'w'
+
 # building box you can type in -> the list narrows as you type, Down arrow opens it, Enter picks the top match
 # used by the check screen and the editor screen
 class BuildingBox:
