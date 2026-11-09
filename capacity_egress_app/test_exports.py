@@ -66,7 +66,7 @@ def fake_template(path):
     table.autoFilter = AutoFilter(ref='A7:L10')
     table.autoFilter.filterColumn.append(FilterColumn(colId=0, filters=Filters(filter=['Somewhere Else'])))
     table._initialise_columns()
-    for column, name in zip(table.tableColumns, TEMPLATE_HEADER):
+    for column, name in zip(table.tableColumns, TEMPLATE_HEADER, strict=False):
         column.name = name
     table.tableColumns[11].calculatedColumnFormula = TableFormula(attr_text=PICTURES.format(r=8))
     ws.add_table(table)
