@@ -718,17 +718,23 @@ BACKUP_KEEP = 30
 class BackupError(OSError):
     pass
 
-# SQLite's own check of every page -> None when the file is fine, else what's wrong
-def check_database(path):
+# SQLite's own check of every page -> None when the file is fine, else what's wrong.
+# locked or a passing disk error (OperationalError) -> raised as is, it says nothing about damage
+def quick_check(conn):
     try:
-        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        try:
-            result = c.execute("PRAGMA quick_check").fetchone()[0]
-        finally:
-            c.close()
+        result = conn.execute("PRAGMA quick_check").fetchone()[0]
+    except sqlite3.OperationalError:
+        raise
     except sqlite3.DatabaseError as err:
         return str(err)
     return None if result == 'ok' else result
+
+def check_database(path):
+    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return quick_check(c)
+    finally:
+        c.close()
 
 # copy -> written to a .part file, checked, then renamed. The rename is all or nothing, so a copy
 # cut off half way (app closed, S: drive dropped) never sits there looking like a good backup
@@ -748,18 +754,16 @@ def copy_database(conn, path):
     os.replace(part, path)
 
 def backup_database(conn, backup_dir, keep=BACKUP_KEEP):
-    # damaged database -> no copy: after 30 opens it would have replaced every good backup
-    try:
-        problem = conn.execute("PRAGMA quick_check").fetchone()[0]
-    except sqlite3.DatabaseError as err:
-        problem = str(err)
-    if problem != 'ok':
-        raise BackupError(f"the database failed its check ({problem}). No backup was made, so the good "
-                          f"ones are kept. Restore the latest good backup (README: Restoring a backup)")
     os.makedirs(backup_dir, exist_ok=True)
     path = os.path.join(backup_dir, f"capacity_{pd.Timestamp.now().strftime('%Y-%m-%d')}.db")
     made = False
     if not os.path.exists(path):
+        # damaged database -> no copy: after 30 opens it would have replaced every good backup.
+        # checked only when a copy is made -> the whole file isn't read over the S: drive at every open
+        problem = quick_check(conn)
+        if problem:
+            raise BackupError(f"the database failed its check ({problem}). No backup was made, so the good "
+                              f"ones are kept. Restore the latest good backup (README: Restoring a backup)")
         copy_database(conn, path)
         made = True
     # daily backups only -> hand-made ones (capacity_before_...) are kept and don't use up a slot
@@ -769,7 +773,8 @@ def backup_database(conn, backup_dir, keep=BACKUP_KEEP):
     return path if made else None
 
 # restore -> everyone closes the app first. The database as it is now is kept (byte for byte, so even a
-# damaged one can be looked at) as backups/capacity_before_restore_<when>.db, outside the 30 daily slots
+# damaged one can be looked at) as backups/capacity_before_restore_<when>.db, outside the 30 daily slots.
+# database file lost -> nothing to keep, the backup is just put back (returns None)
 def restore_database(backup_path, db_path=DB_PATH, user_login=None):
     problem = check_database(backup_path)
     if problem:
@@ -777,7 +782,11 @@ def restore_database(backup_path, db_path=DB_PATH, user_login=None):
     backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'backups')
     os.makedirs(backup_dir, exist_ok=True)
     kept = os.path.join(backup_dir, f"capacity_before_restore_{pd.Timestamp.now():%Y-%m-%d_%H%M%S}.db")
-    shutil.copy2(db_path, kept)
+    had_db = os.path.exists(db_path)
+    if had_db:
+        shutil.copy2(db_path, kept)
+    why = f"restored; the database before is {os.path.basename(kept)}" if had_db else \
+        "restored; the database file was missing"
     # a journal left by a save that was cut off would be played back into the restored copy -> moved aside
     if os.path.exists(db_path + '-journal'):
         os.replace(db_path + '-journal', kept + '-journal')
@@ -797,8 +806,8 @@ def restore_database(backup_path, db_path=DB_PATH, user_login=None):
     try:
         login = user_login or current_login()
         log_change(conn, login, get_user_name(conn, login), 'database', os.path.basename(db_path), 'restored',
-                   None, os.path.basename(backup_path), why=f"restored; the database before is {os.path.basename(kept)}")
+                   None, os.path.basename(backup_path), why=why)
         conn.commit()
     finally:
         conn.close()
-    return kept
+    return kept if had_db else None

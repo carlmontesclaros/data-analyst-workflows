@@ -270,6 +270,34 @@ def test_damaged_database_is_not_backed_up(tmp_path):
     c.close()
     assert len(list(backups.iterdir())) == 4                  # the good ones are all still there
 
+# busy, not damaged: a database locked by someone saving is not called damaged (no "restore" advice)
+def test_locked_database_is_not_called_damaged(conn, tmp_path):
+    live = tmp_path / 'capacity.db'
+    disk = sqlite3.connect(live)
+    conn.backup(disk)
+    disk.close()
+    saver = sqlite3.connect(live)
+    saver.execute("BEGIN EXCLUSIVE")
+    c = sqlite3.connect(live, timeout=0)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match='locked'):
+            db.backup_database(c, str(tmp_path / 'backups'))
+    finally:
+        c.close()
+        saver.rollback()
+        saver.close()
+    assert not any((tmp_path / 'backups').iterdir())
+
+# today's backup already made -> the database isn't read again (whole file over the S: drive at every open)
+def test_later_opens_dont_check_the_database_again(tmp_path):
+    live, backups = tmp_path / 'capacity.db', tmp_path / 'backups'
+    damaged_database(live)
+    backups.mkdir()
+    (backups / f"capacity_{pd.Timestamp.now():%Y-%m-%d}.db").write_text('made earlier today')
+    c = sqlite3.connect(live)
+    assert db.backup_database(c, str(backups)) is None
+    c.close()
+
 # restore drill: back up, lose a change, put the backup back
 def test_restore_puts_the_backup_back(conn, tmp_path):
     live = tmp_path / 'capacity.db'
@@ -291,6 +319,18 @@ def test_restore_puts_the_backup_back(conn, tmp_path):
     old = sqlite3.connect(kept)
     assert old.execute("SELECT capacity FROM rooms WHERE space = 'A201'").fetchone()[0] == 99
     old.close()
+
+# database file lost -> the backup is still put back
+def test_restore_when_the_database_file_is_gone(conn, tmp_path):
+    live, backup = tmp_path / 'capacity.db', tmp_path / 'capacity_2026-01-01.db'
+    disk = sqlite3.connect(backup)
+    conn.backup(disk)
+    disk.close()
+    assert db.restore_database(str(backup), str(live), 'carl') is None
+    c = db.connect(str(live))
+    assert c.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == len(BASE_ROWS)
+    assert c.execute("SELECT new_value FROM audit_log WHERE field = 'restored'").fetchone()[0] == backup.name
+    c.close()
 
 def test_restore_refuses_a_damaged_backup(conn, tmp_path):
     live, bad = tmp_path / 'capacity.db', tmp_path / 'capacity_2026-01-01.db'
