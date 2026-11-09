@@ -1,0 +1,20 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2] [cursor=pointer]
+  - button "Toggle edit mode"
+  - status
+  - main [ref=e4]:
+    - region "Title" [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Fall term update · 17 Nov 2026
+        - heading "Room capacity and exiting on campus" [level=1] [ref=e8]
+        - paragraph [ref=e9]: Site counts, exit measurements, and a desktop app that checks them against the BC Building Code 2024.
+      - generic [ref=e10]:
+        - text: Carl Cuyno-Montesclaros
+        - generic [ref=e11]: Campus Space & Data Analyst (co-op), Facilities Management
+      - img [aria-hidden] [ref=e12]:
+        - generic [ref=e16]: "88"
+        - generic [ref=e17]: EXIT · 88 cm
+        - generic [ref=e18]: ROOM · 20
+        - generic [ref=e19]: ROOM · 3
+        - generic [ref=e20]: STAIR
+        - generic [ref=e21]: CORRIDOR

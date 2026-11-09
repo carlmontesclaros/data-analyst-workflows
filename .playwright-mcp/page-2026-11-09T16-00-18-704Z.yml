@@ -1,0 +1,27 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2] [cursor=pointer]
+  - button "Toggle edit mode"
+  - status
+  - main [ref=e4]:
+    - region "What's next" [ref=e23]:
+      - generic [ref=e24]:
+        - generic [ref=e25]:
+          - generic [ref=e26]: What's next
+          - generic [ref=e27]: 5 / 6
+        - heading "Rest of the term" [level=2] [ref=e28]
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - 'heading "Engineering Lab Wing: the remaining floors" [level=3] [ref=e31]'
+          - generic [ref=e32]: fieldwork
+        - generic [ref=e33]:
+          - heading "Send the FMIS upload file to Tyler" [level=3] [ref=e34]
+          - generic [ref=e35]: file ready, waiting on his answers
+        - generic [ref=e36]:
+          - heading "Install the app for Mark and Carolyn" [level=3] [ref=e37]
+          - generic [ref=e38]: waiting on IT (asked Oct 20)
+        - generic [ref=e39]:
+          - heading "Routine capital tracker rollover" [level=3] [ref=e40]
+          - generic [ref=e41]: with Mark
+        - generic [ref=e42]:
+          - heading "Restricted Cunningham labs" [level=3] [ref=e43]
+          - generic [ref=e44]: waiting on 3 PIs

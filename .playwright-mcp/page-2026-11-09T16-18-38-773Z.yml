@@ -1,0 +1,12 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2] [cursor=pointer]
+  - button "Toggle edit mode"
+  - status
+  - main [ref=f3e4]:
+    - region "Thanks" [ref=f3e21]:
+      - generic [ref=f3e22]:
+        - generic [ref=f3e23]:
+          - generic [ref=f3e24]: Questions
+          - generic [ref=f3e25]: 6 / 6
+        - heading "Thank you." [level=2] [ref=f3e26]
+        - paragraph [ref=f3e27]: Carl Cuyno-Montesclaros · carlmontesclaros@uvic.ca

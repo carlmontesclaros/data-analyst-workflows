@@ -1,0 +1,62 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2] [cursor=pointer]
+  - button "Toggle edit mode"
+  - status
+  - main [ref=f1e4]:
+    - region "Results by floor" [ref=f1e5]:
+      - generic [ref=f1e6]:
+        - generic [ref=f1e7]:
+          - generic [ref=f1e8]: Results by floor
+          - generic [ref=f1e9]: 3 / 6
+        - heading "Eleven floors checked. None over exit capacity." [level=2] [ref=f1e10]
+      - generic [ref=f1e11]:
+        - generic [ref=f1e12]:
+          - generic [ref=f1e13]: Floor
+          - generic [ref=f1e14]: Load as a share of exit capacity
+          - generic [ref=f1e15]: Load / capacity
+          - generic [ref=f1e16]: Status
+        - generic [ref=f1e17]:
+          - generic [ref=f1e18]: Turpin 1 wing A
+          - generic [ref=f1e21]: 700 / 1,002
+          - generic [ref=f1e22]: Review · stair width
+        - generic [ref=f1e23]:
+          - generic [ref=f1e24]: Turpin 1 wing B
+          - generic [ref=f1e27]: 118 / 1,239
+          - generic [ref=f1e28]: Review · stair width
+        - generic [ref=f1e29]:
+          - generic [ref=f1e30]: Turpin 2 wing B
+          - generic [ref=f1e33]: 99 / 1,157
+          - generic [ref=f1e34]: Within
+        - generic [ref=f1e35]:
+          - generic [ref=f1e36]: Turpin 3 wing B
+          - generic [ref=f1e39]: 169 / 432
+          - generic [ref=f1e40]: Within
+        - generic [ref=f1e41]:
+          - generic [ref=f1e42]: Clearihue 1
+          - generic [ref=f1e45]: 920 / 4,793
+          - generic [ref=f1e46]: Review · narrow exit
+        - generic [ref=f1e47]:
+          - generic [ref=f1e48]: Clearihue 2
+          - generic [ref=f1e51]: 612 / 1,469
+          - generic [ref=f1e52]: Within
+        - generic [ref=f1e53]:
+          - generic [ref=f1e54]: Clearihue 3
+          - generic [ref=f1e57]: 543 / 1,295
+          - generic [ref=f1e58]: Within
+        - generic [ref=f1e59]:
+          - generic [ref=f1e60]: Cunningham 0
+          - generic [ref=f1e63]: 259 / 890
+          - generic [ref=f1e64]: Within
+        - generic [ref=f1e65]:
+          - generic [ref=f1e66]: Cunningham 1
+          - generic [ref=f1e69]: 240 / 1,419
+          - generic [ref=f1e70]: Within
+        - generic [ref=f1e71]:
+          - generic [ref=f1e72]: Cunningham 2
+          - generic [ref=f1e75]: 221 / 686
+          - generic [ref=f1e76]: Within
+        - generic [ref=f1e77]:
+          - generic [ref=f1e78]: Engineering Office Wing 1
+          - generic [ref=f1e81]: 65 / 288
+          - generic [ref=f1e82]: Within
+      - paragraph [ref=f1e83]: 400 rooms counted in 6 buildings, 87 exits measured. Review = load is fine, a width needs a second look. Screening, not approval.

@@ -1,0 +1,22 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2] [cursor=pointer]
+  - button "Toggle edit mode"
+  - status
+  - main [ref=f3e4]:
+    - region "App demo" [ref=f3e5]:
+      - generic [ref=f3e6]:
+        - generic [ref=f3e7]:
+          - generic [ref=f3e8]: The app
+          - generic [ref=f3e9]: 4 / 6
+        - heading "One-minute demo" [level=2] [ref=f3e10]
+      - generic "Capacity and Egress app demo, one minute, music only" [ref=f3e12]
+      - generic [ref=f3e13]:
+        - paragraph [ref=f3e14]:
+          - generic [ref=f3e15]: Pick a room
+          - text: Turpin B303, a classroom counted at 24.
+        - paragraph [ref=f3e16]:
+          - generic [ref=f3e17]: Try a new capacity
+          - text: Type a number and press Check.
+        - paragraph [ref=f3e18]:
+          - generic [ref=f3e19]: Read the verdict
+          - text: The room against per code, and the floor's load against its exits. Nothing is saved.
