@@ -270,6 +270,27 @@ def test_damaged_database_is_not_backed_up(tmp_path):
     c.close()
     assert len(list(backups.iterdir())) == 4                  # the good ones are all still there
 
+# one scribbled page -> SQLite reports every bad cell; the editor's warning box shows the first few, not 40+ lines
+def test_damage_report_stays_short_enough_for_the_warning(tmp_path):
+    live = tmp_path / 'capacity.db'
+    c = sqlite3.connect(live)
+    c.execute("CREATE TABLE t (x TEXT)")
+    c.executemany("INSERT INTO t VALUES (?)", [('row %d' % i,) for i in range(2000)])
+    c.commit()
+    c.close()
+    data = bytearray(live.read_bytes())
+    page = len(data) // 4096 // 2 * 4096                       # a leaf page in the middle of t
+    data[page + 8:page + 3000] = b'\xff' * 2992                 # its cell pointers now point off the page
+    live.write_bytes(bytes(data))
+    c = sqlite3.connect(live)
+    assert len(c.execute("PRAGMA quick_check").fetchone()[0].splitlines()) > 10     # what SQLite itself says
+    with pytest.raises(db.BackupError, match='failed its check') as err:
+        db.backup_database(c, str(tmp_path / 'backups'))
+    c.close()
+    problem = str(err.value)
+    assert len(problem.splitlines()) == 4                      # three of SQLite's lines + "... and N more"
+    assert '... and ' in problem.splitlines()[-1]
+
 # busy, not damaged: a database locked by someone saving is not called damaged (no "restore" advice)
 def test_locked_database_is_not_called_damaged(conn, tmp_path):
     live = tmp_path / 'capacity.db'

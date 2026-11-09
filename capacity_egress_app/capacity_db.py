@@ -718,6 +718,9 @@ BACKUP_KEEP = 30
 class BackupError(OSError):
     pass
 
+# damage report -> first few lines only, so the start-up warning fits on screen
+QUICK_CHECK_LINES = 3
+
 # SQLite's own check of every page -> None when the file is fine, else what's wrong.
 # locked or a passing disk error (OperationalError) -> raised as is, it says nothing about damage
 def quick_check(conn):
@@ -727,7 +730,13 @@ def quick_check(conn):
         raise
     except sqlite3.DatabaseError as err:
         return str(err)
-    return None if result == 'ok' else result
+    if result == 'ok':
+        return None
+    # one damaged page -> SQLite lists every bad cell (a hundred lines), more than a warning box can show
+    lines = [line for line in result.splitlines() if line.strip()]
+    if len(lines) > QUICK_CHECK_LINES:
+        lines = lines[:QUICK_CHECK_LINES] + [f"... and {len(lines) - QUICK_CHECK_LINES} more"]
+    return '\n'.join(lines)
 
 def check_database(path):
     c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
