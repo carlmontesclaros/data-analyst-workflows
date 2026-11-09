@@ -253,11 +253,11 @@ class App:
 
     def fill_lists(self):
         rooms = self.selected_rooms()
-        keys = set(zip(rooms['property'], rooms['floor']))
+        keys = set(zip(rooms['property'], rooms['floor'], strict=False))
         zones = self.result['zones']
-        zones = zones.loc[[k in keys for k in zip(zones['property'], zones['floor'])]]    # .loc: an empty list must not wipe the columns
+        zones = zones.loc[[k in keys for k in zip(zones['property'], zones['floor'], strict=False)]]    # .loc: an empty list must not wipe the columns
         exits = self.result['exits']
-        exits = exits.loc[[k in keys for k in zip(exits['property'], exits['floor'])]]
+        exits = exits.loc[[k in keys for k in zip(exits['property'], exits['floor'], strict=False)]]
 
         self.zone_tree.delete(*self.zone_tree.get_children())
         for i, z in zones.sort_values(['property', 'floor', 'zone_wing']).iterrows():
