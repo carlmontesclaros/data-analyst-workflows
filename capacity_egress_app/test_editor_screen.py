@@ -94,6 +94,13 @@ def when_open(screen, title, *actions):
     actions, problems = list(actions), []
     def look(tries=0):
         win = dialog(screen, title)
+        if not actions:                          # all done -> a form still open or back again would wait forever
+            if win is not None:
+                problems.append(f"{title} still open after the last action")
+                win.destroy()
+            elif tries < 25:
+                screen.root.after(20, look, tries + 1)
+            return
         if win is None:
             if tries > 100:
                 problems.append(f"{title} never opened")
@@ -106,8 +113,7 @@ def when_open(screen, title, *actions):
             problems.append(err)
             win.destroy()
             return
-        if actions:
-            screen.root.after(20, look)
+        screen.root.after(20, look)
     screen.root.after(20, look)
     return problems
 
