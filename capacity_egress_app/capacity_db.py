@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS users (
     user_name TEXT NOT NULL,
     is_editor INTEGER NOT NULL DEFAULT 0
 );
+
+-- one record's history ("changed by Mark at 2:14", Room history) without reading the whole log,
+-- which is kept forever. Existing databases get it the next time an editor opens the app
+CREATE INDEX IF NOT EXISTS audit_log_record ON audit_log (table_name, record_key);
 """
 
 def create_schema(conn):
