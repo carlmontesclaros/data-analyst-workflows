@@ -222,6 +222,86 @@ def test_backup_keeps_hand_made_backups_out_of_the_count(conn, tmp_path):
     assert "capacity_before_rebuild_2026-01-02.db" in names
     assert len([n for n in names if not n.startswith('capacity_before')]) == 3
 
+# disaster recovery: a backup only counts once it's complete and passes SQLite's own check
+def test_backup_is_a_working_copy(conn, tmp_path):
+    path = db.backup_database(conn, str(tmp_path))
+    copy = sqlite3.connect(path)
+    assert copy.execute("PRAGMA quick_check").fetchone()[0] == 'ok'
+    assert copy.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == len(BASE_ROWS)
+    copy.close()
+    assert [f.name for f in tmp_path.iterdir()] == [os.path.basename(path)]      # no half-written file left behind
+
+# app closed or the S: drive dropped half way -> the next open still makes today's backup
+def test_backup_after_a_copy_that_was_cut_off(conn, tmp_path):
+    today = f"capacity_{pd.Timestamp.now():%Y-%m-%d}.db"
+    (tmp_path / (today + '.part')).write_bytes(b'SQLite format 3\x00' + b'\x00' * 100)
+    path = db.backup_database(conn, str(tmp_path))
+    assert os.path.basename(path) == today
+    assert db.check_database(path) is None
+    assert not (tmp_path / (today + '.part')).exists()
+
+# a copy that fails its check never becomes today's backup
+def test_bad_copy_is_not_kept_as_a_backup(conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'check_database', lambda path: 'database disk image is malformed')
+    with pytest.raises(db.BackupError, match='malformed'):
+        db.backup_database(conn, str(tmp_path))
+    assert list(tmp_path.iterdir()) == []
+
+def damaged_database(path):
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE t (x TEXT)")
+    c.executemany("INSERT INTO t VALUES (?)", [('x' * 500,)] * 200)
+    c.commit()
+    c.close()
+    data = bytearray(path.read_bytes())
+    data[4096 + 8:4096 + 2000] = b'\xff' * 1992        # scribble over page 2
+    path.write_bytes(bytes(data))
+
+# a damaged database is never copied: 30 days of opens would replace every good backup with a broken one
+def test_damaged_database_is_not_backed_up(tmp_path):
+    live, backups = tmp_path / 'capacity.db', tmp_path / 'backups'
+    damaged_database(live)
+    backups.mkdir()
+    for day in range(1, 5):
+        (backups / f"capacity_2026-01-0{day}.db").write_text('good')
+    c = sqlite3.connect(live)
+    with pytest.raises(db.BackupError, match='failed its check'):
+        db.backup_database(c, str(backups), keep=3)
+    c.close()
+    assert len(list(backups.iterdir())) == 4                  # the good ones are all still there
+
+# restore drill: back up, lose a change, put the backup back
+def test_restore_puts_the_backup_back(conn, tmp_path):
+    live = tmp_path / 'capacity.db'
+    disk = sqlite3.connect(live)
+    conn.backup(disk)
+    disk.close()
+    c = db.connect(str(live))
+    backup = db.backup_database(c, str(tmp_path / 'backups'))
+    db.change_capacity(c, room_id(c, 'A201'), 99, 'PM change', 'carl', 'Carl', 'oops')
+    c.close()
+
+    kept = db.restore_database(backup, str(live), 'carl')
+    c = db.connect(str(live))
+    assert c.execute("SELECT capacity FROM rooms WHERE space = 'A201'").fetchone()[0] is None
+    assert c.execute("SELECT new_value FROM audit_log WHERE field = 'restored'").fetchone()[0] == os.path.basename(backup)
+    c.close()
+    # the database as it was before the restore is kept, outside the 30 daily slots
+    assert os.path.basename(kept).startswith('capacity_before_restore_')
+    old = sqlite3.connect(kept)
+    assert old.execute("SELECT capacity FROM rooms WHERE space = 'A201'").fetchone()[0] == 99
+    old.close()
+
+def test_restore_refuses_a_damaged_backup(conn, tmp_path):
+    live, bad = tmp_path / 'capacity.db', tmp_path / 'capacity_2026-01-01.db'
+    disk = sqlite3.connect(live)
+    conn.backup(disk)
+    disk.close()
+    damaged_database(bad)
+    with pytest.raises(db.BackupError, match='failed its check'):
+        db.restore_database(str(bad), str(live), 'carl')
+    assert db.check_database(str(live)) is None
+
 # editors and viewers (ADR 0003)
 def test_first_editor_then_only_editors_change_the_list(conn):
     db.register_user(conn, 'mark')

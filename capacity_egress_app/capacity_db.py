@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import shutil
 import getpass
 import sqlite3
 from contextlib import contextmanager
@@ -713,18 +714,91 @@ def history(conn, table_name, record_key):
 # backup -> one copy per day the app opens, last 30 kept
 BACKUP_KEEP = 30
 
+# a backup that can't be made or trusted -> OSError, so the app's start-up warning shows it to editors
+class BackupError(OSError):
+    pass
+
+# SQLite's own check of every page -> None when the file is fine, else what's wrong
+def check_database(path):
+    try:
+        c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            result = c.execute("PRAGMA quick_check").fetchone()[0]
+        finally:
+            c.close()
+    except sqlite3.DatabaseError as err:
+        return str(err)
+    return None if result == 'ok' else result
+
+# copy -> written to a .part file, checked, then renamed. The rename is all or nothing, so a copy
+# cut off half way (app closed, S: drive dropped) never sits there looking like a good backup
+def copy_database(conn, path):
+    part = path + '.part'
+    if os.path.exists(part):
+        os.remove(part)                              # left over from a copy that was cut off
+    dest = sqlite3.connect(part)
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()
+    problem = check_database(part)
+    if problem:
+        os.remove(part)
+        raise BackupError(f"the copy failed its check ({problem}), so it wasn't kept")
+    os.replace(part, path)
+
 def backup_database(conn, backup_dir, keep=BACKUP_KEEP):
+    # damaged database -> no copy: after 30 opens it would have replaced every good backup
+    try:
+        problem = conn.execute("PRAGMA quick_check").fetchone()[0]
+    except sqlite3.DatabaseError as err:
+        problem = str(err)
+    if problem != 'ok':
+        raise BackupError(f"the database failed its check ({problem}). No backup was made, so the good "
+                          f"ones are kept. Restore the latest good backup (README: Restoring a backup)")
     os.makedirs(backup_dir, exist_ok=True)
     path = os.path.join(backup_dir, f"capacity_{pd.Timestamp.now().strftime('%Y-%m-%d')}.db")
     made = False
     if not os.path.exists(path):
-        dest = sqlite3.connect(path)
-        with dest:
-            conn.backup(dest)
-        dest.close()
+        copy_database(conn, path)
         made = True
     # daily backups only -> hand-made ones (capacity_before_...) are kept and don't use up a slot
     backups = sorted(f for f in os.listdir(backup_dir) if re.fullmatch(r'capacity_\d{4}-\d{2}-\d{2}\.db', f))
     for old in backups[:-keep]:
         os.remove(os.path.join(backup_dir, old))
     return path if made else None
+
+# restore -> everyone closes the app first. The database as it is now is kept (byte for byte, so even a
+# damaged one can be looked at) as backups/capacity_before_restore_<when>.db, outside the 30 daily slots
+def restore_database(backup_path, db_path=DB_PATH, user_login=None):
+    problem = check_database(backup_path)
+    if problem:
+        raise BackupError(f"{os.path.basename(backup_path)} failed its check ({problem}); pick an older backup")
+    backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    kept = os.path.join(backup_dir, f"capacity_before_restore_{pd.Timestamp.now():%Y-%m-%d_%H%M%S}.db")
+    shutil.copy2(db_path, kept)
+    # a journal left by a save that was cut off would be played back into the restored copy -> moved aside
+    if os.path.exists(db_path + '-journal'):
+        os.replace(db_path + '-journal', kept + '-journal')
+
+    src = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
+    try:
+        copy_database(src, db_path + '.restore')
+    finally:
+        src.close()
+    try:
+        os.replace(db_path + '.restore', db_path)
+    except PermissionError as err:              # windows: someone still has the app open
+        os.remove(db_path + '.restore')
+        raise BackupError("the database is still open somewhere; everyone has to close the app first") from err
+
+    conn = connect(db_path)
+    try:
+        login = user_login or current_login()
+        log_change(conn, login, get_user_name(conn, login), 'database', os.path.basename(db_path), 'restored',
+                   None, os.path.basename(backup_path), why=f"restored; the database before is {os.path.basename(kept)}")
+        conn.commit()
+    finally:
+        conn.close()
+    return kept

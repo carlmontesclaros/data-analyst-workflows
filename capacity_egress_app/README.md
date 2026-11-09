@@ -145,7 +145,7 @@ capacity_egress_app/
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
-    backups/               daily copies, last 30
+    backups/               daily copies, last 30 (see Backups)
     input/                 space report + floor_exits.xlsx for the first import
     old_inputs/            earlier space reports and exits workbooks
     template/              the space report template the export fills (any .xlsx name)
@@ -207,6 +207,27 @@ The database is one file on the S: drive that several people use. Built for a ha
 - The database uses SQLite's standard journal mode, not WAL, because WAL doesn't work on network drives.
 
 If many more people ever need to edit at once, the next step is UVic's SQL Server (ADR 0001).
+
+## Backups
+
+The first time anyone opens the app each day, it copies the database to `backups/capacity_<date>.db`, and the last 30 are kept. Copies made by hand (`capacity_before_...`) are kept forever and don't count toward the 30.
+
+- **A backup only counts when it's complete.** The copy is written to a `.part` file, checked with SQLite's own page check, and only then renamed. A copy that gets cut off (app closed, S: drive dropped) never looks like a good backup, and the next open makes it again.
+- **A damaged database is never backed up.** Otherwise, after 30 opens it would have replaced every good backup. Editors get a "No backup today" warning that says the database failed its check.
+
+### Restoring a backup
+
+Only when the database is damaged or a bad change can't be fixed by changing it again (a normal mistake is fixed in the app, and the change log keeps both).
+
+1. Everyone closes the app.
+2. In the app folder, run (pick the newest backup from before the problem):
+   ```
+   py -c "import capacity_db as db; db.restore_database(r'S:\...\backups\capacity_2026-11-05.db', r'S:\...\capacity.db')"
+   ```
+3. It checks the backup first and refuses a damaged one (try the day before). The database as it was is kept as `backups/capacity_before_restore_<date_time>.db`, and the change log gets a "restored" row naming the backup.
+4. Changes made after that backup are gone. Look at the kept file's change log to redo them.
+
+Tested by `test_restore_puts_the_backup_back`. To practise on a copy, point both paths at a copy of the folder.
 
 ## Settings that used to be constants
 
