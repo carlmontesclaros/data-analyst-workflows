@@ -1,11 +1,12 @@
-import pandas as pd
-import os
 import glob
+import os
+
+import pandas as pd
 
 # config
 DRY_RUN = True
-bad_chars = '/\\:*?"<>|'
-OUTPUT_DIR = "buildings"
+BAD_CHARS = '/\\:*?"<>|'
+COLUMNS_SELECTED = ['Property', 'Floor', 'Space']
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "buildings")
 
@@ -17,7 +18,7 @@ planned_paths = set()
 all_frames = []
 
 # sanitize name function
-def sanitize(name):
+def sanitize(name, bad_chars=BAD_CHARS):
     for c in bad_chars:
         name = name.replace(c, '-')
     return name.strip()
@@ -56,13 +57,12 @@ for excel_file in glob_list:
     df = pd.read_excel(excel_file, header=header_row)
 
     # selecting columns
-    columns_selected = ['Property', 'Floor', 'Space']
-    df_clean = df[columns_selected].copy()
+    df_clean = df[COLUMNS_SELECTED].copy()
 
     # cleanup
-    df_clean = df_clean.dropna(subset=columns_selected)
+    df_clean = df_clean.dropna(subset=COLUMNS_SELECTED)
 
-    for col in columns_selected:
+    for col in COLUMNS_SELECTED:
         df_clean[col] = df_clean[col].astype(str).str.strip().str.removesuffix('.0').apply(sanitize)
 
     all_frames.append(df_clean)
@@ -107,9 +107,9 @@ while True:
 combined = combined[combined['Property'].isin(matches)]
 
 # bad chars check
-for col in columns_selected:
+for col in COLUMNS_SELECTED:
     for value in combined[col].unique():
-        if any(c in value for c in bad_chars):
+        if any(c in value for c in BAD_CHARS):
             print("suspect:", col, repr(value))
 
 # row loop
@@ -138,9 +138,7 @@ print(f"Already existed: {folders_existing}")
     #print(max(len(os.path.abspath(p)) for p in planned_paths))
 
 if DRY_RUN:
-    print("DRY RUN — nothing was actually created")
+    print("DRY RUN - nothing was actually created")
 
 input("\nDone. Press Enter to close...")
-
-
 
