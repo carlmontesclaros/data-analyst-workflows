@@ -37,7 +37,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
   7. Exports -> results workbook (4 sheets, same as the old script) and the space report, filled into Carl's own space report (slicers kept); a one-page .docx summary of a capacity check.
   8. Backs up the database every day it's opened (last 30 kept).
   9. Screening only: results say "review", never "approved".
-* **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest (108 tests).
+* **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest.
 * **Why it matters:** Answering "can this room go from 32 to 36?" used to mean opening the Excel files and a hand calculation per floor. Now you just find the room, type 36 and see if the floor's exits still cover it, with a record of who changed it and why.
 * **How to run:** from `capacity_egress_app/`, run `build_database.py` once (reads the space report and `floor_exits.xlsx` in `data/input/`), then `app.py` every time after. On Windows use `py` instead of `python3`.
 * **Limitations:**

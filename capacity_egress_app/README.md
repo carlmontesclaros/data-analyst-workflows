@@ -4,7 +4,7 @@ A desktop app for UVic Facilities Management that keeps the record of **room cap
 
 It replaces editing Excel by hand. A project manager who gets an OREM request ("can B303 go from 32 to 36?") opens the app, finds the room, types 36, sees whether the floor is still within its exit capacity, and saves or cancels. Every change is recorded with who made it, when and why.
 
-**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (175 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
+**Status: built and in use on the dev copy.** Build steps 1–6 are done and tested (189 pytest tests). Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
 
 It's still a **screening tool, not a code determination**. Results say "within capacity, review before acting" or "review", never "approved".
 
@@ -141,7 +141,7 @@ capacity_egress_app/
   exit_calc.py             the four core formulas (occupant load, exit persons, 50% rule, link share)
   exports.py               results workbook, space report export, FMIS upload, capacity check summary (.docx)
   build_database.py        one-time first import
-  test_*.py                pytest (175 tests)
+  test_*.py                pytest tests
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
