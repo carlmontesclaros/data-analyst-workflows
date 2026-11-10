@@ -1,4 +1,4 @@
-# every push and pull request -> lint once, then the whole test suite on Windows (where the app is installed)
+# every push to main and every pull request -> lint once, then the whole test suite on Windows (where the app is installed)
 # and on the Mac (where it's written). A red X on the PR = don't merge yet.
 name: tests
 

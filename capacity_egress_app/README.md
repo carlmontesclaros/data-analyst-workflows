@@ -162,7 +162,7 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 1. **Once:** `python3 build_database.py`. Reads the space report and `floor_exits.xlsx` from `data/input/` and the CSVs from `config/`, and writes `data/capacity.db`. It refuses to run if the database already exists.
 2. `python3 app.py`. The first time on a computer, it asks for the name to show in the change log.
 3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` and `python3 -m ruff check .` (lint).
-   GitHub runs both on every push and pull request, on Windows and on the Mac (`.github/workflows/tests.yml`). A red X on a PR means something broke: don't merge until it's green.
+   GitHub runs them on every push to `main` and on every pull request (`.github/workflows/tests.yml`): lint once, then the tests on Windows and on the Mac. A red X on a PR means something broke: don't merge until it's green.
 
 Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities.
 
