@@ -189,6 +189,17 @@ def test_save_exit_refuses_a_wing_in_two_groups(conn):
     other_floor = good_exit(property='Clearihue Building', floor='2', exit_id='S2 - doorway', wing='C')
     db.save_exit(conn, other_floor, 'carl', 'Carl')                       # each floor has its own groups
 
+def test_save_exit_refuses_a_link_door_into_its_own_group(conn):
+    with pytest.raises(ValueError, match=r"into_wing C is in this exit's own wing A\+C\+D"):
+        db.save_exit(conn, good_exit(wing='A+C+D', into_wing='c'), 'carl', 'Carl')
+
+def test_save_exit_refuses_a_link_door_into_part_of_a_group(conn):
+    db.save_exit(conn, good_exit(wing='A+C+D'), 'carl', 'Carl')
+    with pytest.raises(ValueError, match=r"into_wing A\+C isn't a group on this floor \(A\+C\+D\)"):
+        db.save_exit(conn, good_exit(exit_id='S2 - doorway', wing='B', into_wing='A+C'), 'carl', 'Carl')
+    db.save_exit(conn, good_exit(exit_id='S2 - doorway', wing='B', into_wing='A+C+D'), 'carl', 'Carl')
+    db.save_exit(conn, good_exit(exit_id='S3 - doorway', wing='B', into_wing='C'), 'carl', 'Carl')
+
 def test_editing_the_only_exit_of_a_group_can_change_the_group(conn):
     pk = db.save_exit(conn, good_exit(wing='A+C+D'), 'carl', 'Carl')
     db.save_exit(conn, good_exit(wing='A+C'), 'carl', 'Carl', exit_pk=pk)

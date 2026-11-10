@@ -291,7 +291,7 @@ Enter exits with **Add exit** in the app. One row per exit; a floor with three e
 | exit_type | `doorway`, `stairs` (rise ≤ 180 mm **and** run ≥ 280 mm) or `stairs_steep` (anything else). |
 | stair_width_cm, stair_type | Only for a door into a stair: the stair's narrowest clear width (cm, round down) and `stairs` / `stairs_steep`. Blank type = `stairs`. Blank width = door only (listed as `stair_not_measured`). |
 | clear_width_cm | Clear width in cm at the **narrowest** point, rounded down. Whole number, 50–500. |
-| into_wing | Only for a door into **another zone**: a wing's letter (`A`, counted in whichever group holds A) or the whole group (`A+C+D`). |
+| into_wing | Only for a door into **another zone**: a wing's letter (`A`, counted in whichever group holds A) or the whole group (`A+C+D`). The editor refuses a wing in the exit's own group and a part of a group (`A+C` when the group is `A+C+D`); an imported door into its own zone is listed (`link_within_zone`) and adds no people. |
 | narrowest_point, notes | What was narrowest (`121 cm at handrail`). For stairs, the rise and run. |
 
 ### Wing groups

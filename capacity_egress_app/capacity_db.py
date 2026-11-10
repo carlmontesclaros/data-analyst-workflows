@@ -600,13 +600,22 @@ def check_exit(conn, values, exit_pk=None):
             problems.append(f"{col}: {err}")
     # a wing is in one group per floor -> B and A+C+D can share a floor, A+C and C+D can't
     wing = values.get('wing')
-    if wing and readable_wing(wing):
-        mine = set(egress.wing_letters(egress.wing_group(wing)))
-        for group, exit_id in floor_groups(conn, values.get('property'), values.get('floor'), exit_pk).items():
-            shared = sorted(mine & set(egress.wing_letters(group)))
-            if group != egress.wing_group(wing) and shared:
-                problems.append(f"{'wings ' + ', '.join(shared) + ' are' if len(shared) > 1 else 'wing ' + shared[0] + ' is'} "
-                                f"already in {group} ({exit_id}) on this floor - a wing can be in one group per floor")
+    groups = floor_groups(conn, values.get('property'), values.get('floor'), exit_pk)
+    mine = set(egress.wing_letters(egress.wing_group(wing))) if readable_wing(wing) else set()
+    for group, exit_id in groups.items():
+        shared = sorted(mine & set(egress.wing_letters(group)))
+        if shared and group != egress.wing_group(wing):
+            problems.append(f"{'wings ' + ', '.join(shared) + ' are' if len(shared) > 1 else 'wing ' + shared[0] + ' is'} "
+                            f"already in {group} ({exit_id}) on this floor - a wing can be in one group per floor")
+    into = values.get('into_wing')
+    if into and readable_wing(into):
+        into_group = egress.wing_group(into)
+        if mine & set(egress.wing_letters(into_group)):
+            problems.append(f"into_wing {into_group} is in this exit's own wing {egress.wing_group(wing)} - "
+                            f"a link door leads into another zone")
+        elif egress.WING_JOIN in into_group and into_group not in groups:
+            problems.append(f"into_wing {into_group} isn't a group on this floor "
+                            f"({', '.join(sorted(groups)) or 'none yet'}) - use one wing or a whole group")
     if values.get('into_wing') and not values.get('wing'):
         problems.append("a link door (into_wing) needs the wing it leaves from")
     date = values.get('measured_date')

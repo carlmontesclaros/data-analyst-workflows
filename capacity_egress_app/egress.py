@@ -256,10 +256,8 @@ def build_zones(rooms, exits, settings, warning_rows):
     for col in ['area_based_load', 'load_used', 'counted_capacity', 'rooms_in_scope', 'rooms_counted', 'exit_count']:
         zones[col] = zones[col].fillna(0).astype(int)
 
-    # pseudo zones -> split floor, 0 load, no exits (stairs, lifts). people counted in a room with no per code
-    #   load still keep their zone
-    pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['load_used'] == 0) \
-        & (zones['exit_count'] == 0)
+    # pseudo zones -> split floor, 0 load, no exits
+    pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['exit_count'] == 0)
     zones = zones[~pseudo].copy()
 
     # exit capacity -> 50% rule (BCBC 2024 3.4.3.2.(7))
@@ -273,6 +271,12 @@ def build_zones(rooms, exits, settings, warning_rows):
     links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']].copy()
     links['into_zone'] = [into if (fk, into) in floor_groups else group_of.get((fk, into), into)
                           for fk, into in zip(links['floor_key'], links['into_wing'], strict=True)]
+    within = links['into_zone'] == links['zone_wing']
+    for _, row in links[within].iterrows():
+        warning_rows.append({'type': 'link_within_zone', 'property': row['property'], 'floor': row['floor'],
+                             'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' is in its own zone "
+                                       f"({row['zone_wing']}) - no people added"})
+    links = links[~within]
     links = links.merge(zones[ZONE_KEYS + ['load_used', 'exit_count']], on=ZONE_KEYS, how='left')
     if len(links):
         links['people_sent'] = people_sent(links['load_used'], links['exit_count'], links['persons'],

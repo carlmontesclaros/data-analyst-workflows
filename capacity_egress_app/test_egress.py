@@ -332,13 +332,15 @@ def test_wing_in_no_group_is_its_own_zone_and_flagged():
     assert "no wing letter: 1 room, load 4" in w.iloc[1]['detail']
     assert set(w['floor']) == {'3'}
 
-def test_counted_room_with_no_per_code_load_is_not_dropped():
-    # an excluded room type counted on site -> per code 0 but people in it, so its zone stays
-    rooms, exits = clearihue_1()
-    rooms.append(dict(room('G101', 20, 6, 'site count'), room_type_override='excluded'))
+def test_link_door_into_its_own_group_adds_no_people():
+    # A->C link door kept after the floor is regrouped A+C+D -> C is the same zone, 10 + 5 + 8 = 23 stays 23
+    rooms, exits = clearihue_1(b_exits=False)
+    exits.append(exit_row('E2 - link into C', 'doorway', 88, 'A+C+D', into_wing='C'))
     result = run(rooms, exits)
-    assert zone(result, 'G')['total_load'] == 6
-    assert len(result['warnings'].query("type == 'wing_not_in_a_group'")) == 1
+    z = zone(result, 'A+C+D')
+    assert (z['link_inflow'], z['total_load'], z['link_sends']) == (0, 23, False)
+    w = result['warnings'].query("type == 'link_within_zone'")
+    assert len(w) == 1 and 'E2 - link into C' in w.iloc[0]['detail'] and 'A+C+D' in w.iloc[0]['detail']
 
 def test_wing_in_two_groups_on_one_floor_is_flagged():
     rooms = [room('A101', 20, 10, 'site count'), room('C101', 20, 5, 'site count'), room('D101', 20, 8, 'site count')]
