@@ -115,12 +115,13 @@ def rows_shown(tree):
     row = int(ttk.Style(tree).lookup('Treeview', 'rowheight'))
     return (tree.winfo_height() - row) // row        # less the heading, about a row tall
 
-def test_both_screens_have_one_smallest_size_a_laptop_can_show():
-    assert MIN_WINDOW <= (1366, 768) and MIN_WINDOW[1] <= 768
+# the smallest size must still fit on a common 1366x768 laptop screen
+def fits_a_laptop(size):
+    return size[0] <= 1366 and size[1] <= 768
 
 def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
     check_screen(root, conn)
-    assert root.minsize() == MIN_WINDOW
+    assert root.minsize() == MIN_WINDOW and fits_a_laptop(root.minsize())
 
 def test_check_screen_fits_its_smallest_window(root, conn):
     screen = check_screen(root, conn)
@@ -161,7 +162,7 @@ def test_check_screen_tables_still_show_rows_at_the_smallest_size(root, conn):
 
 def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
     editor_screen(root, conn)
-    assert root.minsize() == MIN_WINDOW
+    assert root.minsize() == MIN_WINDOW and fits_a_laptop(root.minsize())
 
 def test_editor_screen_fits_its_smallest_window(root, conn):
     screen = editor_screen(root, conn)
