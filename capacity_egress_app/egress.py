@@ -9,6 +9,41 @@ STATUS_NOT_SURVEYED = 'NOT SURVEYED - no exit data'
 STATUS_ORDER = {STATUS_REVIEW: 0, STATUS_WITHIN: 1, STATUS_NOT_SURVEYED: 2}
 ZONE_KEYS = ['property', 'floor', 'floor_key', 'zone_wing']
 
+# wing groups -> an exit's wing names the zone it serves: one wing (B) or several joined with + (A+C+D).
+#   which wings are open to each other is decided per floor on site (Carl 2026-11-10: Clearihue 1 B is its own
+#   zone, A+C+D one zone; Clearihue 2 and 3 are whole floors)
+WING_JOIN = '+'
+
+def wing_group(text):
+    # 'd + a+c' -> 'A+C+D' (each group written one way), blank -> '' (the floor is one zone)
+    text = '' if text is None or (not isinstance(text, str) and pd.isna(text)) else str(text).strip()
+    if not text:
+        return ''
+    wings = [w.strip().upper() for w in text.split(WING_JOIN)]
+    if not all(w.isascii() and w.isalpha() for w in wings):
+        raise ValueError(f"wing '{text}' must be a wing's letters (B), or several wings joined with + (A+C+D)")
+    return WING_JOIN.join(sorted(set(wings)))
+
+def wing_letters(group):
+    return group.split(WING_JOIN) if group else []
+
+# groups on one floor -> {wing: the groups holding it}, only for a wing in more than one
+def wing_clashes(groups):
+    holders = {}
+    for group in sorted(set(groups)):
+        for wing in wing_letters(group):
+            holders.setdefault(wing, []).append(group)
+    return {wing: held for wing, held in holders.items() if len(held) > 1}
+
+# 'B' -> 'wing B', 'A+C+D' -> 'wings A+C+D', '' (whole floor) -> ''
+def wing_label(zone_wing):
+    if not zone_wing:
+        return ''
+    return ('wings ' if WING_JOIN in zone_wing else 'wing ') + zone_wing
+
+def zone_name(floor, zone_wing):
+    return ' '.join(part for part in [f"Floor {floor}", wing_label(zone_wing)] if part)
+
 # settings table -> values the calculation needs
 def read_settings(settings_df):
     s = dict(zip(settings_df['setting'], settings_df['value']))
@@ -85,7 +120,7 @@ def prepare_exits(exits, factors, settings, warning_rows):
     width_df = factors['width_factors'].set_index('exit_type')
     exits['exit_type'] = exits['exit_type'].fillna('').astype(str).str.strip().str.lower()
     for col in ['wing', 'into_wing']:
-        exits[col] = exits[col].fillna('').astype(str).str.strip().str.upper()
+        exits[col] = readable_wings(exits, col, warning_rows)
     # float, not Int64 -> a blank is NaN (compares False), not <NA> (raises)
     exits['clear_width_cm'] = pd.to_numeric(exits['clear_width_cm'], errors='coerce').astype(float)
     for col in ['stair_width_cm', 'stair_type']:
@@ -160,6 +195,22 @@ def prepare_exits(exits, factors, settings, warning_rows):
     exits['zone_wing'] = exits['wing']
     return exits
 
+# wing / into_wing -> one way of writing each group. the editor refuses anything else; an imported exits sheet
+#   can still hold it -> used as typed (its own zone) and listed
+def readable_wings(exits, col, warning_rows):
+    typed = exits[col].fillna('').astype(str).str.strip()
+    groups = {}
+    for text in typed.unique():
+        try:
+            groups[text] = wing_group(text)
+        except ValueError:
+            groups[text] = text.upper()
+            for _, row in exits[typed == text].iterrows():
+                warning_rows.append({'type': 'bad_wing', 'property': row['property'], 'floor': row['floor'],
+                                     'detail': f"{row['exit_id']}: {col} '{text}' isn't a wing (B) or wings joined "
+                                               f"with + (A+C+D) - used as typed"})
+    return typed.map(groups).astype(typed.dtype)
+
 # one width check -> ok / review (stairs 900-1099, depends on storeys served) / fail / unknown
 CHECK_RANK = {'ok': 0, 'unknown': 1, 'review - depends on storeys served': 2, 'fail - below minimum': 3}
 
@@ -174,9 +225,25 @@ def width_check(width_mm, minimum_mm, minimum_mm_low_rise):
 def build_zones(rooms, exits, settings, warning_rows):
     # zone = the floor. BCBC 2024 counts exits per floor area (3.4.2.1.(1), 3.4.3.2.(1)), and a floor area is a
     #   storey between exterior walls and firewalls (Div A 1.4.1.2.). wings split only where an exit has a wing
-    #   (supervisor decision, for blocks that aren't open to each other)
+    #   (supervisor decision, for blocks that aren't open to each other); a zone is one wing or a group (A+C+D)
     split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
-    rooms['zone_wing'] = rooms['room_wing'].where(rooms['floor_key'].isin(split_floors), '')
+    group_of, floor_groups = wing_groups(exits, warning_rows)
+
+    # room -> the group holding its wing. a wing no exit names stays its own zone (no exits -> not surveyed),
+    #   so its people are never dropped; with people in it, it's listed
+    on_split = rooms['floor_key'].isin(split_floors)
+    grouped = pd.Series([group_of.get(k) for k in zip(rooms['floor_key'], rooms['room_wing'], strict=True)],
+                        index=rooms.index, dtype=object)
+    rooms['zone_wing'] = grouped.fillna(rooms['room_wing']).where(on_split, '').astype(rooms['room_wing'].dtype)
+    orphans = rooms[on_split & grouped.isna() & (rooms['load_used'] > 0)]
+    for (floor_key, wing), group in sorted(orphans.groupby(['floor_key', 'room_wing']),
+                                           key=lambda g: (g[0][0], g[0][1] == '', g[0][1])):
+        n, first = len(group), group.iloc[0]
+        named = ', '.join(sorted(g for fk, g in floor_groups if fk == floor_key))
+        warning_rows.append({'type': 'wing_not_in_a_group', 'property': first['property'], 'floor': first['floor'],
+                             'detail': f"{'wing ' + wing if wing else 'no wing letter'}: {n} room{'s' if n > 1 else ''}, "
+                                       f"load {int(group['load_used'].sum())} - not in any exit's wing ({named}), "
+                                       f"so it's its own zone with no exits"})
 
     per_zone = rooms.groupby(ZONE_KEYS, as_index=False).agg(
         area_based_load=('per_code_load', 'sum'), load_used=('load_used', 'sum'),
@@ -189,8 +256,10 @@ def build_zones(rooms, exits, settings, warning_rows):
     for col in ['area_based_load', 'load_used', 'counted_capacity', 'rooms_in_scope', 'rooms_counted', 'exit_count']:
         zones[col] = zones[col].fillna(0).astype(int)
 
-    # pseudo zones -> split floor, 0 load, no exits
-    pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['exit_count'] == 0)
+    # pseudo zones -> split floor, 0 load, no exits (stairs, lifts). people counted in a room with no per code
+    #   load still keep their zone
+    pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['load_used'] == 0) \
+        & (zones['exit_count'] == 0)
     zones = zones[~pseudo].copy()
 
     # exit capacity -> 50% rule (BCBC 2024 3.4.3.2.(7))
@@ -200,22 +269,25 @@ def build_zones(rooms, exits, settings, warning_rows):
     zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
     # link doors -> people sent into another wing (supervisor model, no code clause; 3.4.3.1.(2) is the closest)
-    links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']]
+    #   into_wing names a wing (A) or a whole group (A+C+D) -> the zone holding it
+    links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']].copy()
+    links['into_zone'] = [into if (fk, into) in floor_groups else group_of.get((fk, into), into)
+                          for fk, into in zip(links['floor_key'], links['into_wing'], strict=True)]
     links = links.merge(zones[ZONE_KEYS + ['load_used', 'exit_count']], on=ZONE_KEYS, how='left')
     if len(links):
         links['people_sent'] = people_sent(links['load_used'], links['exit_count'], links['persons'],
                                            settings['link_method']).astype(int)
     else:
         links['people_sent'] = pd.Series(dtype=int)
-    inflow = links.groupby(['floor_key', 'into_wing'], as_index=False)['people_sent'].sum().rename(
-        columns={'into_wing': 'zone_wing', 'people_sent': 'link_inflow'})
+    inflow = links.groupby(['floor_key', 'into_zone'], as_index=False)['people_sent'].sum().rename(
+        columns={'into_zone': 'zone_wing', 'people_sent': 'link_inflow'})
     zones = zones.merge(inflow, on=['floor_key', 'zone_wing'], how='left')
     zones['link_inflow'] = zones['link_inflow'].fillna(0).astype(int)
     zones['total_load'] = zones['load_used'] + zones['link_inflow']
 
     zone_ids = set(zones['floor_key'] + ' | ' + zones['zone_wing'])
     for _, row in links.iterrows():
-        if f"{row['floor_key']} | {row['into_wing']}" not in zone_ids:
+        if f"{row['floor_key']} | {row['into_zone']}" not in zone_ids:
             warning_rows.append({'type': 'link_to_missing_wing', 'property': row['property'], 'floor': row['floor'],
                                  'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' has no zone - {row['people_sent']} people not added"})
 
@@ -265,6 +337,23 @@ def build_zones(rooms, exits, settings, warning_rows):
     zones['status_order'] = zones['status'].map(STATUS_ORDER)
     zones = zones.sort_values(['status_order', 'property', 'floor', 'zone_wing']).drop(columns='status_order')
     return zones.reset_index(drop=True)
+
+# exits' wings -> {(floor_key, wing): its group} and {(floor_key, group)}. a wing in two groups on a floor ->
+#   the first group alphabetically takes its rooms, so they're counted once, and it's listed
+def wing_groups(exits, warning_rows):
+    group_of, floor_groups = {}, set()
+    for floor_key, floor_exits in exits[exits['zone_wing'] != ''].groupby('floor_key'):
+        groups = sorted(set(floor_exits['zone_wing']))
+        first = floor_exits.iloc[0]
+        for wing, held in wing_clashes(groups).items():
+            warning_rows.append({'type': 'wing_in_two_groups', 'property': first['property'], 'floor': first['floor'],
+                                 'detail': f"wing {wing} is in {' and '.join(held)} - a wing can be in one group per "
+                                           f"floor; its rooms are counted in {held[0]}"})
+        for group in groups:
+            floor_groups.add((floor_key, group))
+            for wing in wing_letters(group):
+                group_of.setdefault((floor_key, wing), group)
+    return group_of, floor_groups
 
 # whole calculation -> rooms / exits tables + code factors in, 4 tables out
 def calculate(rooms, exits, factors):
@@ -383,7 +472,6 @@ def check_capacities(rooms, exits, factors, changes, room_types=None):
     for (prop, floor), floor_rooms in picked.groupby(['property', 'floor'], sort=True):
         before = calculate_floor(rooms, exits, factors, prop, floor)
         after = calculate_floor(trial, exits, factors, prop, floor)
-        split = (after['zones']['zone_wing'] != '').any()
         now = before['rooms'].set_index('room_id')
         then = after['rooms'].set_index('room_id')
         for room_id in floor_rooms['room_id']:
@@ -394,7 +482,7 @@ def check_capacities(rooms, exits, factors, changes, room_types=None):
             proposed = changes.get(room_id)
             verdict, colour, over = judge_room(a, proposed if proposed is not None else current)
             room_rows.append({'room_id': int(room_id), 'property': prop, 'floor': floor, 'space': r['space'],
-                              'zone_wing': r['room_wing'] if split else '',
+                              'zone_wing': r['zone_wing'],
                               'room_type': a['room_type'], 'room_type_before': r['room_type'],
                               'type_changed': room_id in room_types and a['room_type'] != r['room_type'],
                               'area_m2': r['area_m2'], 'current': current,

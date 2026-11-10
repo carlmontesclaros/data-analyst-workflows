@@ -362,7 +362,7 @@ def write_check_summary(check, path, user_name, when=None):
     body.append(para("Floor exits: occupant load vs exit capacity", bold=True, size=12, after=60))
     rows, fills = [], []
     for z in check['zones']:
-        zone = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '')
+        zone = egress.zone_name(z['floor'], z['zone_wing'])
         capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
         result = z['verdict'] + (f" (also: {z['other_flags']})" if z['other_flags'] else '')
         rows.append([zone + (' *' if z['has_checked_room'] else ''), f"{z['load_before']} -> {z['load_after']}", capacity, result])

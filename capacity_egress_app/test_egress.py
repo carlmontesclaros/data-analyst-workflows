@@ -282,3 +282,115 @@ def test_widths_read_as_nullable_ints_work():
         exits[col] = exits[col].astype('Int64')
     e = egress.calculate(pd.DataFrame([room('301', 20)]), exits, factors())['exits'].set_index('exit_id')
     assert (e.loc['S4 - doorway', 'persons'], e.loc['E3 - outside exit', 'persons']) == (137, 144)
+
+# wing groups -> a zone on a split floor can hold several wings (Clearihue 1: B on its own, A + C + D together)
+HALL = '16.2.4 - Circulation Space'
+
+def clearihue_1(b_exits=True):
+    # A+C+D: 10 + 5 + 8 counted = 23, three 88 cm doors (432). B: 60.55 m2 classroom = 33 per code
+    rooms = [room('A101', 20, 10, 'site count'), room('C101', 20, 5, 'site count'), room('D101', 20, 8, 'site count'),
+             room('B103', 60.55), room('S1', 39.68, sub=HALL), room('L11', 4.38, sub=HALL), room('_General', 0, sub=None)]
+    exits = [exit_row('E1 - outside exit (A101A)', 'doorway', 88, 'A+C+D'),
+             exit_row('E1 - outside exit (C101A)', 'doorway', 88, 'A+C+D'),
+             exit_row('E1 - outside exit (D101A)', 'doorway', 88, 'A+C+D')]
+    if b_exits:
+        exits += [exit_row('S10 - doorway', 'doorway', 88, 'B'), exit_row('E1 - outside exit (B101A)', 'doorway', 88, 'B'),
+                  exit_row('E1 - link into A', 'doorway', 88, 'B', into_wing='A')]
+    return rooms, exits
+
+def test_floor_split_into_b_and_a_c_d_group():
+    result = run(*clearihue_1())
+    assert sorted(result['zones']['zone_wing']) == ['A+C+D', 'B']   # stairs, lifts, _General carry 0 -> no zone
+    acd, b = zone(result, 'A+C+D'), zone(result, 'B')
+    assert (acd['load_used'], acd['exit_count'], acd['exit_capacity']) == (23, 3, 432)
+    assert (b['load_used'], b['exit_count'], b['exit_capacity']) == (33, 3, 432)
+    # link door into A -> lands in A's group: ceil(33 / 3 exits) = 11
+    assert (acd['link_inflow'], acd['total_load'], b['total_load']) == (11, 34, 33)
+    zones_of = result['rooms'].set_index('space')['zone_wing']
+    assert [zones_of[s] for s in ['A101', 'C101', 'D101', 'B103']] == ['A+C+D', 'A+C+D', 'A+C+D', 'B']
+    assert result['warnings'].query("type in ['wing_not_in_a_group', 'link_to_missing_wing']").empty
+
+def test_wing_group_written_any_way_is_one_zone():
+    rooms, exits = clearihue_1()
+    exits[0]['wing'], exits[1]['wing'], exits[2]['wing'] = 'd + a+c', 'A+C+D', 'c+d+a'
+    exits[-1]['into_wing'] = 'a+c+d'                  # a link door may name the whole group too
+    result = run(rooms, exits)
+    assert sorted(result['zones']['zone_wing']) == ['A+C+D', 'B']
+    assert (zone(result, 'A+C+D')['exit_count'], zone(result, 'A+C+D')['link_inflow']) == (3, 11)
+
+def test_wing_in_no_group_is_its_own_zone_and_flagged():
+    # Clearihue 1 today: the A+C+D group is set, no B exit measured yet -> B is not lost, it shows not surveyed
+    rooms, exits = clearihue_1(b_exits=False)
+    rooms.append(room('101', 20, 4, 'site count'))   # no wing letter
+    result = run(rooms, exits)
+    b = zone(result, 'B')
+    assert (b['status'], b['total_load']) == (egress.STATUS_NOT_SURVEYED, 33)
+    assert zone(result, '')['total_load'] == 4
+    w = result['warnings'].query("type == 'wing_not_in_a_group'")
+    assert len(w) == 2
+    assert "wing B: 1 room, load 33" in w.iloc[0]['detail'] and 'A+C+D' in w.iloc[0]['detail']
+    assert "no wing letter: 1 room, load 4" in w.iloc[1]['detail']
+    assert set(w['floor']) == {'3'}
+
+def test_counted_room_with_no_per_code_load_is_not_dropped():
+    # an excluded room type counted on site -> per code 0 but people in it, so its zone stays
+    rooms, exits = clearihue_1()
+    rooms.append(dict(room('G101', 20, 6, 'site count'), room_type_override='excluded'))
+    result = run(rooms, exits)
+    assert zone(result, 'G')['total_load'] == 6
+    assert len(result['warnings'].query("type == 'wing_not_in_a_group'")) == 1
+
+def test_wing_in_two_groups_on_one_floor_is_flagged():
+    rooms = [room('A101', 20, 10, 'site count'), room('C101', 20, 5, 'site count'), room('D101', 20, 8, 'site count')]
+    exits = [exit_row('S1', 'doorway', 88, 'A+C'), exit_row('S2', 'doorway', 88, 'A+C'),
+             exit_row('S3', 'doorway', 88, 'C+D'), exit_row('S4', 'doorway', 88, 'C+D')]
+    result = run(rooms, exits)
+    w = result['warnings'].query("type == 'wing_in_two_groups'")
+    assert len(w) == 1 and "wing C is in A+C and C+D" in w.iloc[0]['detail']
+    # first group alphabetically takes it, so C's people are counted once
+    assert (zone(result, 'A+C')['load_used'], zone(result, 'C+D')['load_used']) == (15, 8)
+
+def test_unreadable_wing_is_flagged():
+    result = run([room('A101', 20, 10, 'site count')], [exit_row('S1', 'doorway', 88, 'A, C'),
+                                                        exit_row('S2', 'doorway', 88, 'A, C')])
+    w = result['warnings'].query("type == 'bad_wing'")
+    assert len(w) == 2 and "'A, C'" in w.iloc[0]['detail']
+
+def test_floor_with_no_wing_on_its_exits_stays_one_zone():
+    # several prefixes, no wing on any exit -> one zone holding every room, as before groups
+    rooms = [room('A301', 20, 10, 'site count'), room('B301', 60.55), room('C301', 20, 5, 'site count'),
+             room('S1', 39.68, sub=HALL)]
+    result = run(rooms, TWO_DOORS)
+    assert result['zones']['zone_wing'].tolist() == ['']
+    assert (zone(result)['total_load'], zone(result)['exit_capacity']) == (48, 288)
+    assert set(result['rooms']['zone_wing']) == {''}
+    assert result['warnings'].query("type == 'wing_not_in_a_group'").empty
+
+def test_single_letter_wings_unchanged():
+    # Turpin-like: B measured, A not -> zone A not surveyed, as before groups (now also listed in the warnings)
+    rooms = [room('B301', 60.55, 161, 'site count'), room('A301', 20, 10, 'site count')]
+    exits = [exit_row('S4', 'doorway', 88, 'B'), exit_row('S5', 'doorway', 88, 'B')]
+    result = run(rooms, exits)
+    assert (zone(result, 'B')['total_load'], zone(result, 'B')['exit_capacity']) == (161, 288)
+    assert (zone(result, 'A')['status'], zone(result, 'A')['total_load']) == (egress.STATUS_NOT_SURVEYED, 10)
+
+def test_check_names_the_group_a_room_is_in():
+    rooms, exits, f = check_tables(*clearihue_1())
+    check = egress.check_capacities(rooms, exits, f, {1: 40})        # A101 10 -> 40
+    assert check['rooms'][0]['zone_wing'] == 'A+C+D'
+    acd = next(z for z in check['zones'] if z['zone_wing'] == 'A+C+D')
+    assert (acd['has_checked_room'], acd['load_before'], acd['load_after']) == (True, 34, 64)
+    assert not next(z for z in check['zones'] if z['zone_wing'] == 'B')['has_checked_room']
+
+@pytest.mark.parametrize('typed, group', [('', ''), (None, ''), ('b', 'B'), ('BM', 'BM'), (' d + a+c ', 'A+C+D'),
+                                          ('A+A+C', 'A+C')])
+def test_wing_group_notation(typed, group):
+    assert egress.wing_group(typed) == group
+
+@pytest.mark.parametrize('typed', ['A, C', 'A+', 'A+1', 'A C', 'A/C'])
+def test_wing_group_refuses_other_notations(typed):
+    with pytest.raises(ValueError):
+        egress.wing_group(typed)
+
+def test_wing_label():
+    assert [egress.wing_label(w) for w in ['', 'B', 'A+C+D']] == ['', 'wing B', 'wings A+C+D']

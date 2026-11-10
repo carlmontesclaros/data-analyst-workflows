@@ -2,6 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 import pytest
+from openpyxl import Workbook
 import capacity_db as db
 import excel_inputs as xi
 
@@ -168,6 +169,46 @@ def test_save_exit_add_edit_delete(conn):
 def test_save_exit_refuses_what_the_excel_sheet_refused(conn, bad):
     with pytest.raises(ValueError):
         db.save_exit(conn, good_exit(**bad), 'carl', 'Carl')
+
+# wing groups -> one way of writing each, and a wing in one group per floor
+def test_save_exit_takes_a_wing_group(conn):
+    pk = db.save_exit(conn, good_exit(wing=' d + a+c ', into_wing='b'), 'carl', 'Carl')
+    assert tuple(conn.execute("SELECT wing, into_wing FROM exits WHERE exit_pk = ?", (pk,)).fetchone()) == ('A+C+D', 'B')
+    db.save_exit(conn, good_exit(exit_id='S2 - doorway', wing='A+C+D'), 'carl', 'Carl')      # same group again: fine
+    db.save_exit(conn, good_exit(exit_id='S3 - doorway', wing='B'), 'carl', 'Carl')          # another wing: fine
+
+@pytest.mark.parametrize('wing', ['A, C', 'A+', 'A/C'])
+def test_save_exit_refuses_other_wing_notations(conn, wing):
+    with pytest.raises(ValueError, match=r'A\+C\+D'):
+        db.save_exit(conn, good_exit(wing=wing), 'carl', 'Carl')
+
+def test_save_exit_refuses_a_wing_in_two_groups(conn):
+    db.save_exit(conn, good_exit(wing='A+C+D'), 'carl', 'Carl')
+    with pytest.raises(ValueError, match=r'wing C is already in A\+C\+D \(S1 - doorway\)'):
+        db.save_exit(conn, good_exit(exit_id='S2 - doorway', wing='C'), 'carl', 'Carl')
+    other_floor = good_exit(property='Clearihue Building', floor='2', exit_id='S2 - doorway', wing='C')
+    db.save_exit(conn, other_floor, 'carl', 'Carl')                       # each floor has its own groups
+
+def test_editing_the_only_exit_of_a_group_can_change_the_group(conn):
+    pk = db.save_exit(conn, good_exit(wing='A+C+D'), 'carl', 'Carl')
+    db.save_exit(conn, good_exit(wing='A+C'), 'carl', 'Carl', exit_pk=pk)
+    assert conn.execute("SELECT wing FROM exits WHERE exit_pk = ?", (pk,)).fetchone()[0] == 'A+C'
+
+# the exits workbook -> groups read the same way as the editor's, problems listed (the import doesn't stop)
+def test_exits_workbook_reads_wing_groups_and_lists_problems(conn, tmp_path):
+    wb = Workbook()
+    wb.active.append(xi.EXIT_COLS)
+    eow = ['Engineering Office Wing', 1]
+    for wing, into, exit_id in [('d + a+c', None, 'S1 - doorway'), ('C', 'a', 'S2 - doorway'), ('A, B', None, 'S3 - doorway')]:
+        wb.active.append(eow + [wing, into, exit_id, 'doorway', 88])
+    wb.active.append(['Clearihue Building', 2, None, None, 'S3 - doorway', 'doorway', 179])
+    wb.save(tmp_path / 'exits.xlsx')
+    count, warnings = db.insert_exits(conn, xi.read_exits(str(tmp_path / 'exits.xlsx')))
+    assert count == 4
+    assert [tuple(r) for r in conn.execute("SELECT wing, into_wing FROM exits ORDER BY property, exit_id")] == \
+           [(None, None), ('A+C+D', None), ('C', 'A'), ('A, B', None)]
+    assert warnings == ["Engineering Office Wing floor 1 S3 - doorway: wing 'A, B' isn't a wing (B) or wings joined with + (A+C+D)",
+                        "Engineering Office Wing floor 1: wing C is in A+C+D and C - a wing can be in one group per floor"]
 
 def test_save_exit_refuses_duplicate_id(conn):
     db.save_exit(conn, good_exit(), 'carl', 'Carl')
