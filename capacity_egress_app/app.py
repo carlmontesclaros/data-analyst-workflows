@@ -10,8 +10,8 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from check_screen import CheckScreen
-from widgets import BuildingBox, anchor_for, heading_text, open_path, use_theme
+from check_screen import MIN_WINDOW, CheckScreen
+from widgets import BuildingBox, anchor_for, heading_text, open_path, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +56,7 @@ class App:
         self.on_back = on_back                         # back to the check screen
         root.title(f"Capacity & Egress - editor screen - {user_name}")
         root.geometry("1400x820")
+        root.minsize(*MIN_WINDOW)
         self.build_widgets()
         self.reload()
         self.root.after(POLL_MS, self.poll)
@@ -148,7 +149,9 @@ class App:
 
         # packed before the tables, so they can't push the export feedback off the window
         self.status_var = tk.StringVar()
-        ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4), foreground=colours.MUTED_FG).pack(fill='x', side='bottom')
+        # a long S: drive path wraps onto a second line rather than running off the window
+        wrap_to_width(ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4), foreground=colours.MUTED_FG),
+                      side_padding=16).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
         panes = ttk.PanedWindow(self.root, orient='vertical')

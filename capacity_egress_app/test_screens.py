@@ -8,10 +8,11 @@ import pandas as pd
 import pytest
 import app
 import capacity_db as db
+import check_screen as check_screen_module
 import colours
 import excel_inputs as xi
 import widgets
-from check_screen import CheckScreen, rooms_found_text
+from check_screen import MIN_WINDOW, CheckScreen, rooms_found_text
 from test_capacity_db import report, CONFIG_DIR
 
 LONG_ROOM = ('Engineering / Computer Science Building', '3', 'A120', 60.55, 24)
@@ -86,6 +87,92 @@ def test_editor_screen_keeps_status_line_and_buttons_visible(root, conn):
     status = [w for w in all_widgets(root) if isinstance(w, ttk.Label) and str(w.cget('textvariable')) == str(screen.status_var)]
     assert len(status) == 1 and is_inside_window(status[0], root)
     assert [b.cget('text') for b in buttons(root) if not is_inside_window(b, root)] == []
+
+# a person can shrink either screen to its smallest size: every control still shows in full there,
+# and the tables give up rows (they scroll) rather than anything else being cut off
+def shrink_to_minimum(window):
+    window.geometry('{}x{}'.format(*MIN_WINDOW))
+    window.update()
+    assert (window.winfo_width(), window.winfo_height()) == MIN_WINDOW
+
+def ancestors(w, window):
+    while w is not window:
+        w = w.master
+        yield w
+
+# drawn smaller than it asks for, or hanging past the edge of anything it sits in
+def is_cut_off(w, window):
+    return (w.winfo_width() < w.winfo_reqwidth() or w.winfo_height() < w.winfo_reqheight()
+            or not all(is_inside_window(w, a) for a in ancestors(w, window)))
+
+CONTAINERS = (ttk.Frame, ttk.Labelframe, ttk.Panedwindow, ttk.Scrollbar, ttk.Treeview)
+
+def cut_off_widgets(window):
+    return [f"{w.winfo_class()} {w.cget('text') or w.cget('textvariable')!s}" for w in all_widgets(window)
+            if w.winfo_ismapped() and not isinstance(w, CONTAINERS) and is_cut_off(w, window)]
+
+def rows_shown(tree):
+    row = int(ttk.Style(tree).lookup('Treeview', 'rowheight'))
+    return (tree.winfo_height() - row) // row        # less the heading, about a row tall
+
+def test_both_screens_have_one_smallest_size_a_laptop_can_show():
+    assert MIN_WINDOW <= (1366, 768) and MIN_WINDOW[1] <= 768
+
+def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
+    check_screen(root, conn)
+    assert root.minsize() == MIN_WINDOW
+
+def test_check_screen_fits_its_smallest_window(root, conn):
+    screen = check_screen(root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    shrink_to_minimum(root)
+    assert root.winfo_reqwidth() <= root.winfo_width()
+    assert root.winfo_reqheight() <= root.winfo_height()
+    assert cut_off_widgets(root) == []
+    assert {'Editor screen', 'Editors', 'Search', 'Check', 'Remove room', 'Start over',
+            'Save summary (.docx)'} <= {b.cget('text') for b in buttons(root) if b.winfo_ismapped()}
+
+# the Result column holds the verdict, the reason for the screen: no column is squeezed to fit the window
+def test_check_screen_tables_keep_every_column_at_its_width(root, conn):
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    for tree, columns in [(screen.found_tree, check_screen_module.FOUND_COLUMNS),
+                          (screen.check_tree, check_screen_module.CHECK_COLUMNS),
+                          (screen.zone_tree, check_screen_module.ZONE_COLUMNS)]:
+        shown = {col: int(tree.column(col, 'width')) for col, _ in columns}
+        assert [col for col, width in columns if shown[col] < width] == [], shown
+        assert sum(shown.values()) <= tree.winfo_width(), shown
+
+# an error can be longer than the window is wide: it wraps under the fields rather than running off the edge
+def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn):
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    screen.message_var.set("That room's floor has no exits measured, so " * 6)
+    root.update()
+    assert cut_off_widgets(root) == []
+    assert root.winfo_reqheight() <= root.winfo_height()
+
+def test_check_screen_tables_still_show_rows_at_the_smallest_size(root, conn):
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    assert rows_shown(screen.check_tree) >= 2 and rows_shown(screen.zone_tree) >= 2
+    assert rows_shown(screen.found_tree) >= 8
+
+def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
+    editor_screen(root, conn)
+    assert root.minsize() == MIN_WINDOW
+
+def test_editor_screen_fits_its_smallest_window(root, conn):
+    screen = editor_screen(root, conn)
+    # an export saved on the S: drive: its path alone is wider than the window
+    screen.status_var.set(f"written: {app.PHOTOS_DIR_WINDOWS}\\..\\exports\\Capacity results 2026-11-10.xlsx  "
+                          "(412 rooms, 96 zones, 230 exits, 17 flagged)")
+    shrink_to_minimum(root)
+    # the tables are wider than any window and scroll sideways; everything else shows in full
+    assert cut_off_widgets(root) == []
+    assert [b.cget('text') for b in buttons(root) if not b.winfo_ismapped()] == []
+    assert all(rows_shown(tree) >= 2 for tree in (screen.zone_tree, screen.room_tree, screen.exit_tree))
 
 def test_editor_screen_has_no_competing_primary_button(root, conn):
     editor_screen(root, conn)

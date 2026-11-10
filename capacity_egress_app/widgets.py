@@ -95,6 +95,12 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
+# a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
+# the label must be packed or gridded to fill the width it is given; side_padding is its own left + right padding
+def wrap_to_width(label, side_padding=0):
+    label.bind('<Configure>', lambda e: label.configure(wraplength=max(e.width - side_padding, 1)), add='+')
+    return label
+
 # search -> 'DTB A120', 'Turpin', 'A120'. words with a digit are room numbers, the rest name the building
 def initials(name):
     return ''.join(word[0] for word in re.findall(r'[A-Za-z]+', name) if word[0].isupper()).lower()
