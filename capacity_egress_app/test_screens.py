@@ -32,8 +32,10 @@ def conn():
 def root():
     try:
         r = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
     widgets.use_theme(r)
     yield r
     r.destroy()
