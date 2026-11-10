@@ -13,6 +13,7 @@ from widgets import FONTS, BuildingBox, anchor_for, heading_text, initials, open
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
 ANY = '(any)'
 MAX_RESULTS = 500
+MIN_WINDOW = (1100, 720)                                               # smallest window the screens are laid out for
 
 def find_rooms(rooms, query, prop=None, floor=None):
     if prop:
@@ -64,7 +65,7 @@ class CheckScreen:
         self.fonts = FONTS
         root.title("Room capacity check")
         root.geometry("1320x860")
-        root.minsize(1100, 720)
+        root.minsize(*MIN_WINDOW)
         self.build_widgets()
         self.reload()
         self.root.after(POLL_MS, self.poll)

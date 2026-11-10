@@ -11,7 +11,7 @@ import capacity_db as db
 import colours
 import excel_inputs as xi
 import widgets
-from check_screen import CheckScreen, rooms_found_text
+from check_screen import MIN_WINDOW, CheckScreen, rooms_found_text
 from test_capacity_db import report, CONFIG_DIR
 
 LONG_ROOM = ('Engineering / Computer Science Building', '3', 'A120', 60.55, 24)
@@ -50,6 +50,12 @@ def is_inside_window(w, window):
     return (w.winfo_ismapped() and w.winfo_rootx() + w.winfo_width() <= window.winfo_rootx() + window.winfo_width()
             and w.winfo_rooty() + w.winfo_height() <= window.winfo_rooty() + window.winfo_height())
 
+# layout tests measure widgets against the real window, so the screen must hold the smallest window the app supports
+# (CI runners have a 1024x768 display, where the window manager squeezes every window)
+def skip_if_screen_too_small(root):
+    if any(have < need for have, need in zip(root.wm_maxsize(), MIN_WINDOW, strict=True)):
+        pytest.skip(f"screen {root.wm_maxsize()} is smaller than the {MIN_WINDOW} window the app supports")
+
 def check_screen(root, conn):
     screen = CheckScreen(root, conn, 'carl', open_editor=lambda r=None: None, open_editors=lambda: None)
     screen.search_var.set('A120')
@@ -59,11 +65,13 @@ def check_screen(root, conn):
 
 # at the size the screen opens, nothing is cut off, including with a long building name on the room card
 def test_check_screen_fits_its_window(root, conn):
+    skip_if_screen_too_small(root)
     check_screen(root, conn)
     assert root.winfo_reqwidth() <= root.winfo_width()
     assert root.winfo_reqheight() <= root.winfo_height()
 
 def test_check_screen_shows_every_button(root, conn):
+    skip_if_screen_too_small(root)
     check_screen(root, conn)
     texts = {b.cget('text') for b in buttons(root)}
     assert {'Editor screen', 'Editors', 'Search', 'Check', 'Save summary (.docx)'} <= texts
@@ -81,6 +89,7 @@ def editor_screen(root, conn):
 
 # the status line is the only feedback an export gives; it can't be pushed off the window
 def test_editor_screen_keeps_status_line_and_buttons_visible(root, conn):
+    skip_if_screen_too_small(root)
     screen = editor_screen(root, conn)
     screen.status_var.set("written")
     root.update()
