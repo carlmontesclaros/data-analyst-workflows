@@ -91,9 +91,9 @@ def test_editor_screen_keeps_status_line_and_buttons_visible(root, conn):
 # a person can shrink either screen to its smallest size: every control still shows in full there,
 # and the tables give up rows (they scroll) rather than anything else being cut off
 def shrink_to_minimum(window):
-    window.geometry('{}x{}'.format(*MIN_WINDOW))
+    window.geometry('{}x{}'.format(*window.minsize()))
     window.update()
-    assert (window.winfo_width(), window.winfo_height()) == MIN_WINDOW
+    assert (window.winfo_width(), window.winfo_height()) == window.minsize()
 
 def ancestors(w, window):
     while w is not window:
@@ -115,13 +115,39 @@ def rows_shown(tree):
     row = int(ttk.Style(tree).lookup('Treeview', 'rowheight'))
     return (tree.winfo_height() - row) // row        # less the heading, about a row tall
 
-# the smallest size must still fit on a common 1366x768 laptop screen
+def asked_for(window):
+    return window.winfo_reqwidth(), window.winfo_reqheight()
+
+def at_least(size, floor):
+    return size[0] >= floor[0] and size[1] >= floor[1]
+
+# never smaller than the layout's floor, nor than the widgets ask for in this platform's font
+def stops_shrinking_before_anything_is_cut_off(window):
+    return at_least(window.minsize(), MIN_WINDOW) and at_least(window.minsize(), asked_for(window))
+
+# what the screen needs must still fit on a common 1366x768 laptop screen
 def fits_a_laptop(size):
     return size[0] <= 1366 and size[1] <= 768
 
 def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
     check_screen(root, conn)
-    assert root.minsize() == MIN_WINDOW and fits_a_laptop(root.minsize())
+    assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
+
+# Windows' Segoe UI draws taller and wider than the Mac font: the screens grow to what their widgets ask for
+@pytest.fixture
+def larger_font_root(root):
+    for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
+        root.tk.call('font', 'configure', name, '-size', -17)
+    return root
+
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
+def test_screens_fit_a_larger_platform_font(larger_font_root, conn, open_screen):
+    root = larger_font_root
+    open_screen(root, conn)
+    assert at_least((root.winfo_width(), root.winfo_height()), asked_for(root))
+    assert stops_shrinking_before_anything_is_cut_off(root)
+    shrink_to_minimum(root)
+    assert cut_off_widgets(root) == []
 
 def test_check_screen_fits_its_smallest_window(root, conn):
     screen = check_screen(root, conn)
@@ -162,7 +188,8 @@ def test_check_screen_tables_still_show_rows_at_the_smallest_size(root, conn):
 
 def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
     editor_screen(root, conn)
-    assert root.minsize() == MIN_WINDOW and fits_a_laptop(root.minsize())
+    assert at_least((root.winfo_width(), root.winfo_height()), asked_for(root))
+    assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
 
 def test_editor_screen_fits_its_smallest_window(root, conn):
     screen = editor_screen(root, conn)

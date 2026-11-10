@@ -95,6 +95,13 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
+# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them
+def fit_window(root, size, minimum):
+    root.update_idletasks()
+    need = (root.winfo_reqwidth(), root.winfo_reqheight())
+    root.minsize(*(max(m, n) for m, n in zip(minimum, need)))
+    root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need))))
+
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given; side_padding is its own left + right padding
 def wrap_to_width(label, side_padding=0):

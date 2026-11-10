@@ -7,13 +7,14 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, heading_text, initials, open_path, use_theme, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_window, heading_text, initials, open_path, use_theme, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
 ANY = '(any)'
 MAX_RESULTS = 500
 MIN_WINDOW = (1280, 720)                                               # smallest window the screens are laid out for
+OPEN_WINDOW = (1320, 860)
 
 # table columns -> (heading, width in px). no column is squeezed below its width, so a verdict is never cut short
 FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 165)]
@@ -70,9 +71,8 @@ class CheckScreen:
         self.room = None
         self.fonts = FONTS
         root.title("Room capacity check")
-        root.geometry("1320x860")
-        root.minsize(*MIN_WINDOW)
         self.build_widgets()
+        fit_window(root, OPEN_WINDOW, MIN_WINDOW)
         self.reload()
         self.root.after(POLL_MS, self.poll)
 

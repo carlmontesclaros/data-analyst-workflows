@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import BuildingBox, anchor_for, heading_text, open_path, use_theme, wrap_to_width
+from widgets import BuildingBox, anchor_for, fit_window, heading_text, open_path, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +24,7 @@ PHOTOS_DIR = PHOTOS_DIR_WINDOWS if sys.platform == 'win32' else PHOTOS_DIR_DEV
 BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py sanitize()
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
+OPEN_WINDOW = (1400, 820)
 
 def sanitize(name):
     for c in BAD_CHARS:
@@ -55,9 +56,8 @@ class App:
         self.user_name = user_name
         self.on_back = on_back                         # back to the check screen
         root.title(f"Capacity & Egress - editor screen - {user_name}")
-        root.geometry("1400x820")
-        root.minsize(*MIN_WINDOW)
         self.build_widgets()
+        fit_window(root, OPEN_WINDOW, MIN_WINDOW)
         self.reload()
         self.root.after(POLL_MS, self.poll)
 
@@ -154,7 +154,8 @@ class App:
                       side_padding=16).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
-        panes = ttk.PanedWindow(self.root, orient='vertical')
+        # the tables scroll, so they take what the window has left rather than setting its size
+        panes = ttk.PanedWindow(self.root, orient='vertical', width=1, height=1)
         panes.pack(fill='both', expand=True, padx=8, pady=(0, 4))
 
         # zones
