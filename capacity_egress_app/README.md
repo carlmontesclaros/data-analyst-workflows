@@ -142,6 +142,9 @@ capacity_egress_app/
   exports.py               results workbook, space report export, FMIS upload, capacity check summary (.docx)
   build_database.py        one-time first import
   test_*.py                pytest tests
+  pyproject.toml           pytest and ruff settings (an unclosed database fails the test)
+  requirements.txt         the app's packages, exact versions
+  requirements-dev.txt     plus pytest, pytest-cov and ruff
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
