@@ -1,6 +1,10 @@
 # settings for the tests and the lint check, the same on the Mac and in CI (.github/workflows/tests.yml)
 
 [tool.pytest.ini_options]
+# capture print() output in Python, not by swapping the process's stdin/stdout/stderr files: on Windows the default
+# file-level swap sits under Tcl's own std channels, and a later tk.Tk() then fails to read its init.tcl
+# ("couldn't read file ...init.tcl: No error") part-way through the run
+addopts = "--capture=sys"
 # a database or file left open fails the test: on the S: drive an open connection can hold the file
 filterwarnings = [
     "error::ResourceWarning",
