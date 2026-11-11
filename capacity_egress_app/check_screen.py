@@ -231,7 +231,7 @@ class CheckScreen:
         colours.colour_tags(self.check_tree)
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
-        self.zone_tree = self.make_tree(results, [('Zone', 120), ('Occupant load → with change', 215),
+        self.zone_tree = self.make_tree(results, [('Zone', 175), ('Occupant load → with change', 215),
                                                   ('Exit capacity', 105), ('Result', 340)], height=4)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
         colours.colour_tags(self.zone_tree)
@@ -383,7 +383,7 @@ class CheckScreen:
         for _, z in zones.iterrows():
             verdict = egress.zone_verdict(z)
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
-            name = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '')
+            name = egress.zone_name(z['floor'], z['zone_wing'])
             self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
 
     # the check -> nothing is saved
@@ -464,7 +464,7 @@ class CheckScreen:
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
         self.zone_tree.delete(*self.zone_tree.get_children())
         for z in self.check['zones']:
-            name = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '') + (' ★' if z['has_checked_room'] else '')
+            name = egress.zone_name(z['floor'], z['zone_wing']) + (' ★' if z['has_checked_room'] else '')
             capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
             self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
