@@ -320,6 +320,20 @@ def test_every_heading_fits_its_column(root, columns):
     assert too_narrow == []
 
 
+# a wing group (Clearihue 1: A+C+D) shows whole wherever a zone's wing is shown, not cut to "A+C+"
+def text_width(root, text):
+    return root.tk.call('font', 'measure', 'TkDefaultFont', text) + 8
+
+def test_a_wing_group_fits_the_editor_columns(root):
+    widths = dict(app.ZONE_COLUMNS) | dict(app.EXIT_COLUMNS)
+    assert {key: widths[key] for key in ['zone_wing', 'wing', 'into_wing']
+            if text_width(root, 'A+C+D') > widths[key]} == {}
+
+def test_a_wing_group_fits_the_check_screen_zone_column(root, conn):
+    screen = check_screen(root, conn)
+    name = egress.zone_name('1M', 'A+C+D') + ' ★'
+    assert text_width(root, name) <= int(screen.zone_tree.column('Zone', 'width'))
+
 # polish: details you only notice when they're wrong
 def test_buttons_and_fields_share_one_height(root):
     heights = {type(w).__name__: w.winfo_reqheight() for w in

@@ -21,7 +21,7 @@ OPEN_WINDOW = (1320, 860)
 FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 165)]
 CHECK_COLUMNS = [('Room', 100), ('Room type', 90), ('Capacity now', 125), ('Proposed', 85), ('Per code load', 105),
                  ('Result', 300)]
-ZONE_COLUMNS = [('Zone', 120), ('Occupant load → with change', 215), ('Exit capacity', 105), ('Result', 340)]
+ZONE_COLUMNS = [('Zone', 175), ('Occupant load → with change', 215), ('Exit capacity', 105), ('Result', 340)]
 # every verdict a zone can get, from the rule that gives them; over by 9999 stands for the longest overage
 ZONE_VERDICTS = [egress.zone_verdict(zone) for zone in [{'status': egress.STATUS_NOT_SURVEYED},
                                                         {'status': egress.STATUS_WITHIN, 'total_load': 0, 'exit_capacity': 0},
@@ -396,7 +396,7 @@ class CheckScreen:
         for _, z in zones.iterrows():
             verdict = egress.zone_verdict(z)
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
-            name = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '')
+            name = egress.zone_name(z['floor'], z['zone_wing'])
             self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
 
     # the check -> nothing is saved
@@ -477,7 +477,7 @@ class CheckScreen:
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
         self.zone_tree.delete(*self.zone_tree.get_children())
         for z in self.check['zones']:
-            name = f"Floor {z['floor']}" + (f" wing {z['zone_wing']}" if z['zone_wing'] else '') + (' ★' if z['has_checked_room'] else '')
+            name = egress.zone_name(z['floor'], z['zone_wing']) + (' ★' if z['has_checked_room'] else '')
             capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
             self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
