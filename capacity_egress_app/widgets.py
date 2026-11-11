@@ -102,6 +102,14 @@ def fit_window(root, size, minimum):
     root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
     root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
 
+# a table column whose words must never be cut short -> at least as wide as its longest text in the table's real font
+CELL_PADDING = 8                                                        # the theme's space around a cell's text, and a little more
+def fit_column(tree, col, texts):
+    font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
+    need = max(int(tree.tk.call('font', 'measure', font, text)) for text in texts) + CELL_PADDING
+    width = max(int(tree.column(col, 'minwidth')), need)
+    tree.column(col, width=width, minwidth=width)
+
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given; side_padding is its own left + right padding
 def wrap_to_width(label, side_padding=0):

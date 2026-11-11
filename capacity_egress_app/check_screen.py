@@ -7,7 +7,7 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_window, heading_text, initials, open_path, use_theme, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_window, heading_text, initials, open_path, use_theme, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
@@ -16,11 +16,13 @@ MAX_RESULTS = 500
 MIN_WINDOW = (1280, 720)                                               # smallest window the screens are laid out for
 OPEN_WINDOW = (1320, 860)
 
-# table columns -> (heading, width in px). no column is squeezed below its width, so a verdict is never cut short
+# table columns -> (heading, least width in px). no column is squeezed below its width; the zone Result column also
+# grows to the longest fixed zone verdict in the real font, so that verdict is never cut short (a room's may scroll)
 FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 165)]
 CHECK_COLUMNS = [('Room', 100), ('Room type', 90), ('Capacity now', 125), ('Proposed', 85), ('Per code load', 105),
                  ('Result', 300)]
 ZONE_COLUMNS = [('Zone', 120), ('Occupant load → with change', 215), ('Exit capacity', 105), ('Result', 340)]
+ZONE_VERDICTS = [egress.CANT_CHECK, 'within exit capacity', 'over exit capacity by 9999']
 
 def find_rooms(rooms, query, prop=None, floor=None):
     if prop:
@@ -245,6 +247,7 @@ class CheckScreen:
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
         self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1)
+        fit_column(self.zone_tree, 'Result', ZONE_VERDICTS)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
         colours.colour_tags(self.zone_tree)
 

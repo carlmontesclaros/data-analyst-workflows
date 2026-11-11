@@ -10,6 +10,7 @@ import app
 import capacity_db as db
 import check_screen as check_screen_module
 import colours
+import egress
 import excel_inputs as xi
 import widgets
 from check_screen import MIN_WINDOW, CheckScreen, rooms_found_text
@@ -340,3 +341,24 @@ def test_error_takes_the_place_of_the_help_line(root, conn):
     screen.new_var.set('30')
     assert screen.hint.cget('text') == help_text
     assert str(screen.hint.cget('foreground')) == colours.MUTED_FG
+
+# the width a cell gives its text, read off the drawn cell: its padding is the theme's, not a number copied from the code
+def text_room(tree, item, col):
+    x, y, width, height = tree.bbox(item, col)
+    return sum(tree.identify_element(px, y + height // 2) == 'text' for px in range(x, x + width))
+
+# a floor with no exits measured says so in full: its verdict is the longest one and must never be cut short
+@pytest.mark.parametrize('font_size', [None, -17])
+def test_zone_verdict_shows_in_full_at_the_smallest_size(root, conn, font_size):
+    if font_size:
+        for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
+            root.tk.call('font', 'configure', name, '-size', font_size)
+    screen = check_screen(root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    shrink_to_minimum(root)
+    zones = screen.zone_tree.get_children()
+    assert [screen.zone_tree.set(z, 'Result') for z in zones] == [egress.CANT_CHECK]
+    font = ttk.Style(root).lookup('Treeview', 'font')
+    assert text_room(screen.zone_tree, zones[0], 'Result') >= int(root.tk.call('font', 'measure', font, egress.CANT_CHECK))
+    assert fits_a_laptop(asked_for(root))

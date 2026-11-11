@@ -323,7 +323,7 @@ def exit_colour(exit_row):
     return AMBER if check.startswith('review') else GREEN
 
 # capacity check -> what if these rooms had these capacities? nothing is saved
-CANT_CHECK = "Can't check egress: exits on this floor haven't been measured."
+CANT_CHECK = "Can't check egress: exits not measured yet"
 
 # one rule for a zone's verdict -> the check result, the floor as it is now and the summary all use it
 def zone_verdict(zone):
