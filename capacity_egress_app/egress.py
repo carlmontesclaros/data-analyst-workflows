@@ -229,6 +229,17 @@ def build_zones(rooms, exits, settings, warning_rows):
     split_floors = set(exits.loc[exits['wing'] != '', 'floor_key'])
     group_of, floor_groups = wing_groups(exits, warning_rows)
 
+    # link doors -> into_wing names a wing (A) or a whole group (A+C+D) -> the zone holding it. a door into its own
+    #   zone is an inside door between its wings -> not an exit, no people
+    exits['into_zone'] = [into if not into or (fk, into) in floor_groups else group_of.get((fk, into), into)
+                          for fk, into in zip(exits['floor_key'], exits['into_wing'], strict=True)]
+    within = (exits['into_wing'] != '') & (exits['into_zone'] == exits['zone_wing'])
+    exits.loc[within, ['counts_as_exit', 'persons', 'width_check']] = [False, 0, 'not an exit - link within zone']
+    for _, row in exits[within].iterrows():
+        warning_rows.append({'type': 'link_within_zone', 'property': row['property'], 'floor': row['floor'],
+                             'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' is in its own zone "
+                                       f"({row['zone_wing']}) - not counted as an exit, no people added"})
+
     # room -> the group holding its wing. a wing no exit names stays its own zone (no exits -> not surveyed),
     #   so its people are never dropped; with people in it, it's listed
     on_split = rooms['floor_key'].isin(split_floors)
@@ -267,16 +278,8 @@ def build_zones(rooms, exits, settings, warning_rows):
     zones['exit_capacity'] = zones['exit_capacity'].fillna(0).astype(int)
 
     # link doors -> people sent into another wing (supervisor model, no code clause; 3.4.3.1.(2) is the closest)
-    #   into_wing names a wing (A) or a whole group (A+C+D) -> the zone holding it
-    links = exits.loc[exits['into_wing'] != '', ZONE_KEYS + ['exit_id', 'into_wing', 'persons']].copy()
-    links['into_zone'] = [into if (fk, into) in floor_groups else group_of.get((fk, into), into)
-                          for fk, into in zip(links['floor_key'], links['into_wing'], strict=True)]
-    within = links['into_zone'] == links['zone_wing']
-    for _, row in links[within].iterrows():
-        warning_rows.append({'type': 'link_within_zone', 'property': row['property'], 'floor': row['floor'],
-                             'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' is in its own zone "
-                                       f"({row['zone_wing']}) - no people added"})
-    links = links[~within]
+    links = exits.loc[(exits['into_wing'] != '') & ~within,
+                      ZONE_KEYS + ['exit_id', 'into_wing', 'into_zone', 'persons']].copy()
     links = links.merge(zones[ZONE_KEYS + ['load_used', 'exit_count']], on=ZONE_KEYS, how='left')
     if len(links):
         links['people_sent'] = people_sent(links['load_used'], links['exit_count'], links['persons'],

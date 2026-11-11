@@ -339,6 +339,8 @@ def test_link_door_into_its_own_group_adds_no_people():
     result = run(rooms, exits)
     z = zone(result, 'A+C+D')
     assert (z['link_inflow'], z['total_load'], z['link_sends']) == (0, 23, False)
+    # an inside door, not a way out -> the three 88 cm outside doors only: 3 x 144, 50% rule keeps 432
+    assert (z['exit_count'], z['exit_capacity']) == (3, 432)
     w = result['warnings'].query("type == 'link_within_zone'")
     assert len(w) == 1 and 'E2 - link into C' in w.iloc[0]['detail'] and 'A+C+D' in w.iloc[0]['detail']
 
