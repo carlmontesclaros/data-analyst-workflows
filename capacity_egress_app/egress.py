@@ -323,7 +323,9 @@ def exit_colour(exit_row):
     return AMBER if check.startswith('review') else GREEN
 
 # capacity check -> what if these rooms had these capacities? nothing is saved
-CANT_CHECK = "Can't check egress: exits not measured yet"    # kept short: the zone Result column fits a 1366 px laptop at Windows' larger font
+# kept short so the zone Result column fits a 1366 px laptop at Windows' larger font: at that font the check screen's
+# minimum is 1352 px with this wording, 1434 px with the original "Can't check egress: exits on this floor haven't been measured."
+CANT_CHECK = "Can't check egress: exits not measured yet"
 
 # one rule for a zone's verdict -> the check result, the floor as it is now and the summary all use it
 def zone_verdict(zone):
