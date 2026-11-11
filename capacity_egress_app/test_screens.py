@@ -122,8 +122,10 @@ def asked_for(window):
 def at_least(size, floor):
     return size[0] >= floor[0] and size[1] >= floor[1]
 
-# never smaller than the layout's floor, nor than the widgets ask for in this platform's font
+# never smaller than the layout's floor, nor than the widgets ask for in this platform's font once shrunk there
+# (a line that wraps asks for the width it was given, so it is only measured at the smallest size)
 def stops_shrinking_before_anything_is_cut_off(window):
+    shrink_to_minimum(window)
     return at_least(window.minsize(), MIN_WINDOW) and at_least(window.minsize(), asked_for(window))
 
 # what the screen needs must still fit on a common 1366x768 laptop screen
@@ -134,11 +136,17 @@ def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
     check_screen(root, conn)
     assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
 
-# Windows' Segoe UI draws taller and wider than the Mac font: the screens grow to what their widgets ask for
+# Windows' Segoe UI draws taller and wider than the Mac font (about 20 px a line): the screens grow to what
+# their widgets ask for
+WINDOWS_FONT = -17
+
+def use_font(root, size):
+    for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
+        root.tk.call('font', 'configure', name, '-size', size)
+
 @pytest.fixture
 def larger_font_root(root):
-    for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
-        root.tk.call('font', 'configure', name, '-size', -17)
+    use_font(root, WINDOWS_FONT)
     return root
 
 @pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
@@ -149,6 +157,26 @@ def test_screens_fit_a_larger_platform_font(larger_font_root, conn, open_screen)
     assert stops_shrinking_before_anything_is_cut_off(root)
     shrink_to_minimum(root)
     assert cut_off_widgets(root) == []
+
+# with the larger font the screens still fit a 1366 px laptop: the editor's search line and menu wrap onto more
+# lines rather than widening the window, and a menu group (data, exports, people) stays together on one line
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
+def test_screens_fit_a_laptop_with_a_larger_platform_font(larger_font_root, conn, open_screen):
+    root = larger_font_root
+    open_screen(root, conn)
+    assert fits_a_laptop(root.minsize())
+    shrink_to_minimum(root)
+    assert [b.cget('text') for b in buttons(root) if not is_inside_window(b, root) or is_cut_off(b, root)] == []
+
+def test_editor_screen_menu_groups_stay_on_one_line_when_it_wraps(larger_font_root, conn):
+    root = larger_font_root
+    editor_screen(root, conn)
+    shrink_to_minimum(root)
+    line = {b.cget('text'): b.winfo_rooty() for b in buttons(root)}
+    assert len({line[text] for text in ['← Check screen', 'Refresh', 'Export for FMIS', 'Change my name']}) > 1
+    for group in [['Refresh', 'Code factors', 'Refresh space report'],
+                  ['Export results workbook', 'Export space report', 'Export for FMIS'], ['Editors', 'Change my name']]:
+        assert len({line[text] for text in group}) == 1, group
 
 def test_check_screen_fits_its_smallest_window(root, conn):
     screen = check_screen(root, conn)
@@ -173,7 +201,10 @@ def test_check_screen_tables_keep_every_column_at_its_width(root, conn):
         assert sum(shown.values()) <= tree.winfo_width(), shown
 
 # an error can be longer than the window is wide: it wraps under the fields rather than running off the edge
-def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn):
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
+def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn, font_size):
+    if font_size:
+        use_font(root, font_size)
     screen = check_screen(root, conn)
     shrink_to_minimum(root)
     screen.message_var.set("That room's floor has no exits measured, so " * 6)
@@ -192,7 +223,11 @@ def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
     assert at_least((root.winfo_width(), root.winfo_height()), asked_for(root))
     assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
 
-def test_editor_screen_fits_its_smallest_window(root, conn):
+# with the larger font the wrapped menu takes the height of a table row, so the shortest table may show only one
+@pytest.mark.parametrize(('font_size', 'rows'), [(None, 2), (WINDOWS_FONT, 1)])
+def test_editor_screen_fits_its_smallest_window(root, conn, font_size, rows):
+    if font_size:
+        use_font(root, font_size)
     screen = editor_screen(root, conn)
     # an export saved on the S: drive: its path alone is wider than the window
     screen.status_var.set(f"written: {app.PHOTOS_DIR_WINDOWS}\\..\\exports\\Capacity results 2026-11-10.xlsx  "
@@ -201,7 +236,7 @@ def test_editor_screen_fits_its_smallest_window(root, conn):
     # the tables are wider than any window and scroll sideways; everything else shows in full
     assert cut_off_widgets(root) == []
     assert [b.cget('text') for b in buttons(root) if not b.winfo_ismapped()] == []
-    assert all(rows_shown(tree) >= 2 for tree in (screen.zone_tree, screen.room_tree, screen.exit_tree))
+    assert all(rows_shown(tree) >= rows for tree in (screen.zone_tree, screen.room_tree, screen.exit_tree))
 
 def test_editor_screen_has_no_competing_primary_button(root, conn):
     editor_screen(root, conn)
@@ -348,11 +383,10 @@ def text_room(tree, item, col):
     return sum(tree.identify_element(px, y + height // 2) == 'text' for px in range(x, x + width))
 
 # a floor with no exits measured says so in full: its verdict is the longest one and must never be cut short
-@pytest.mark.parametrize('font_size', [None, -17])
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
 def test_zone_verdict_shows_in_full_at_the_smallest_size(root, conn, font_size):
     if font_size:
-        for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
-            root.tk.call('font', 'configure', name, '-size', font_size)
+        use_font(root, font_size)
     screen = check_screen(root, conn)
     screen.new_var.set('30')
     screen.add_to_check()

@@ -22,7 +22,10 @@ FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 165)]
 CHECK_COLUMNS = [('Room', 100), ('Room type', 90), ('Capacity now', 125), ('Proposed', 85), ('Per code load', 105),
                  ('Result', 300)]
 ZONE_COLUMNS = [('Zone', 120), ('Occupant load → with change', 215), ('Exit capacity', 105), ('Result', 340)]
-ZONE_VERDICTS = [egress.CANT_CHECK, 'within exit capacity', 'over exit capacity by 9999']
+# every verdict a zone can get, from the rule that gives them; over by 9999 stands for the longest overage
+ZONE_VERDICTS = [egress.zone_verdict(zone) for zone in [{'status': egress.STATUS_NOT_SURVEYED},
+                                                        {'status': egress.STATUS_WITHIN, 'total_load': 0, 'exit_capacity': 0},
+                                                        {'status': egress.STATUS_REVIEW, 'total_load': 9999, 'exit_capacity': 0}]]
 
 def find_rooms(rooms, query, prop=None, floor=None):
     if prop:
