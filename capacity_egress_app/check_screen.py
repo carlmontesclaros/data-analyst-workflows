@@ -7,7 +7,7 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_window, heading_text, initials, open_path, use_theme, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_window, heading_text, initials, open_path, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
