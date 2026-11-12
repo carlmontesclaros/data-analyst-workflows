@@ -10,8 +10,8 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from check_screen import CheckScreen
-from widgets import BuildingBox, anchor_for, heading_text, open_path, use_theme
+from check_screen import MIN_WINDOW, CheckScreen
+from widgets import BuildingBox, FlowRow, anchor_for, fit_window, heading_text, open_path, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,20 +24,21 @@ PHOTOS_DIR = PHOTOS_DIR_WINDOWS if sys.platform == 'win32' else PHOTOS_DIR_DEV
 BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py sanitize()
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
+OPEN_WINDOW = (1400, 820)
 
 def sanitize(name):
     for c in BAD_CHARS:
         name = name.replace(c, '-')
     return name.strip()
 
-ZONE_COLUMNS = [('floor', 70), ('zone_wing', 50), ('status', 300), ('total_load', 115), ('exit_capacity', 105), ('exit_count', 60),
+ZONE_COLUMNS = [('floor', 70), ('zone_wing', 80), ('status', 300), ('total_load', 115), ('exit_capacity', 105), ('exit_count', 60),
                 ('rooms_counted', 125), ('rooms_in_scope', 125), ('link_inflow', 120), ('flags', 420)]
 ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 80), ('room_type', 90),
                 ('per_code_load', 115), ('capacity', 115), ('capacity_source', 125), ('load_used', 90), ('in_scope', 75),
                 ('flag', 180), ('note', 250)]
-EXIT_COLUMNS = [('floor', 50), ('wing', 45), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 85), ('stair_width_cm', 85),
+EXIT_COLUMNS = [('floor', 50), ('wing', 80), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 85), ('stair_width_cm', 85),
                 ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 150), ('width_check', 220),
-                ('into_wing', 70), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
+                ('into_wing', 80), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
 def exit_capacity_text(zone):
@@ -55,8 +56,8 @@ class App:
         self.user_name = user_name
         self.on_back = on_back                         # back to the check screen
         root.title(f"Capacity & Egress - editor screen - {user_name}")
-        root.geometry("1400x820")
         self.build_widgets()
+        fit_window(root, OPEN_WINDOW, MIN_WINDOW)
         self.reload()
         self.root.after(POLL_MS, self.poll)
 
@@ -112,29 +113,33 @@ class App:
 
     # layout
     def build_widgets(self):
-        top = ttk.Frame(self.root, padding=8)
-        top.pack(fill='x')
-        ttk.Label(top, text="Search room / building:").pack(side='left')
+        # the search line and the menu wrap onto more lines when the window is too narrow for them
+        top = FlowRow(self.root, gap=12)
+        top.pack(fill='x', padx=8, pady=8)
+        search_group = top.group()
+        ttk.Label(search_group, text="Search room / building:").pack(side='left')
         self.search_var = tk.StringVar()
-        search = ttk.Entry(top, textvariable=self.search_var, width=28)
+        search = ttk.Entry(search_group, textvariable=self.search_var, width=28)
         search.pack(side='left', padx=4)
         search.bind('<Return>', lambda e: self.search())
-        ttk.Button(top, text="Search", command=self.search).pack(side='left')
-        ttk.Label(top, text="   Building:").pack(side='left')
+        ttk.Button(search_group, text="Search", command=self.search).pack(side='left')
+        building_group = top.group()
+        ttk.Label(building_group, text="Building:").pack(side='left')
         self.building_var = tk.StringVar()
         # type to narrow the list, Down arrow opens it; Enter picks the top match
-        self.building = BuildingBox(top, self.building_var, '', self.pick_building, width=36)
+        self.building = BuildingBox(building_group, self.building_var, '', self.pick_building, width=36)
         self.building.box.pack(side='left', padx=4)
-        ttk.Label(top, text="Floor:").pack(side='left')
+        floor_group = top.group()
+        ttk.Label(floor_group, text="Floor:").pack(side='left')
         self.floor_var = tk.StringVar(value=ALL)
-        self.floor_box = ttk.Combobox(top, textvariable=self.floor_var, width=14, state='readonly')
+        self.floor_box = ttk.Combobox(floor_group, textvariable=self.floor_var, width=14, state='readonly')
         self.floor_box.pack(side='left', padx=4)
         self.floor_box.bind('<<ComboboxSelected>>', lambda e: self.show())
 
-        menu = ttk.Frame(self.root, padding=(8, 0, 8, 8))
-        menu.pack(fill='x')
+        menu = FlowRow(self.root, gap=12)
+        menu.pack(fill='x', padx=8, pady=(0, 8))
         if self.on_back:
-            ttk.Button(menu, text="← Check screen", command=self.on_back).pack(side='left', padx=(2, 0))
+            ttk.Button(menu.group(), text="← Check screen", command=self.on_back).pack(side='left', padx=2)
         # grouped by job, with a gap between groups: data, exports, people
         groups = [[("Refresh", self.manual_refresh), ("Code factors", self.edit_code_factors),
                    ("Refresh space report", self.refresh_report)],
@@ -143,15 +148,19 @@ class App:
                   [("Editors", lambda: editors_dialog(self.root, self.conn, self.user_login, self.user_name)),
                    ("Change my name", self.change_name)]]
         for group in groups:
-            for i, (text, cmd) in enumerate(group):
-                ttk.Button(menu, text=text, command=cmd).pack(side='left', padx=(16 if i == 0 else 2, 2))
+            frame = menu.group()
+            for text, cmd in group:
+                ttk.Button(frame, text=text, command=cmd).pack(side='left', padx=2)
 
         # packed before the tables, so they can't push the export feedback off the window
         self.status_var = tk.StringVar()
-        ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4), foreground=colours.MUTED_FG).pack(fill='x', side='bottom')
+        # a long S: drive path wraps onto a second line rather than running off the window
+        wrap_to_width(ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4),
+                                foreground=colours.MUTED_FG)).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
-        panes = ttk.PanedWindow(self.root, orient='vertical')
+        # the tables scroll, so they take what the window has left rather than setting its size
+        panes = ttk.PanedWindow(self.root, orient='vertical', width=1, height=1)
         panes.pack(fill='both', expand=True, padx=8, pady=(0, 4))
 
         # zones
@@ -404,7 +413,7 @@ class App:
             for _, z in after.iterrows():
                 b = before[before['zone_wing'] == z['zone_wing']]
                 was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
-                lines.append(f"  floor {z['floor']}{' wing ' + z['zone_wing'] if z['zone_wing'] else ''}: "
+                lines.append(f"  floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
                              f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}  [{z['status']}]")
                 if z['flags']:
                     lines.append(f"     {z['flags']}")
@@ -494,7 +503,7 @@ class App:
             for _, z in after['zones'].iterrows():
                 b = before[before['zone_wing'] == z['zone_wing']]
                 was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
-                lines.append(f"  floor {z['floor']}{' wing ' + z['zone_wing'] if z['zone_wing'] else ''}: "
+                lines.append(f"  floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
                              f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}  [{z['status']}]")
             preview_var.set('\n'.join(lines))
 
@@ -611,8 +620,8 @@ class App:
         frame = ttk.Frame(win, padding=10)
         frame.pack()
         types = sorted(self.factors['width_factors']['exit_type'])
-        fields = [('property', 'Property', None), ('floor', 'Floor', None), ('wing', 'Wing (A, B... blank = one zone)', None),
-                  ('into_wing', 'Into wing (link door only)', None), ('exit_id', 'Exit id (e.g. S4 - doorway)', None),
+        fields = [('property', 'Property', None), ('floor', 'Floor', None), ('wing', 'Wing (B, or a group: A+C+D; blank = one zone)', None),
+                  ('into_wing', 'Into wing (link door only: A or A+C+D)', None), ('exit_id', 'Exit id (e.g. S4 - doorway)', None),
                   ('exit_type', 'Exit type', types), ('clear_width_cm', 'Clear width (cm, narrowest, round down)', None),
                   ('stair_width_cm', 'Stair width behind the door (cm, blank = none)', None),
                   ('stair_type', 'Stair type', [''] + [t for t in types if t.startswith('stairs')]),

@@ -263,6 +263,24 @@ def test_add_exit_with_a_bad_width(root, conn, said):
     assert next(v for label, v in typed_again.items() if label.startswith('Clear width')) == '20'
     assert conn.execute("SELECT COUNT(*) FROM exits").fetchone()[0] == 2
 
+# a wing group typed in the form -> saved one way (A+C+D) and shown so; a wing already in another group is refused
+def test_add_exit_with_a_wing_group(root, conn, said):
+    screen = editor_screen(root, conn)
+    open_floor(screen, conn)
+    problems = when_open(screen, 'Add exit', lambda win: (fill_exit(win, NEW_EXIT | {'Wing': 'd + a+c'}), press(win, 'Save')))
+    screen.add_exit()
+    assert problems == [] and said == []
+    rows = {screen.exit_tree.item(i, 'values')[2]: screen.exit_tree.item(i, 'values')[1] for i in screen.exit_tree.get_children()}
+    assert rows['E1 - outside exit'] == 'A+C+D'
+
+    clash = NEW_EXIT | {'Exit id': 'E1A - outside exit', 'Wing': 'C'}
+    problems = when_open(screen, 'Add exit', lambda win: (fill_exit(win, clash), press(win, 'Save')),
+                         lambda win: press(win, 'Cancel'))
+    screen.add_exit()
+    assert problems == []
+    assert said[0][0] == 'showerror' and 'wing C is already in A+C+D (E1 - outside exit)' in said[0][2]
+    assert conn.execute("SELECT COUNT(*) FROM exits").fetchone()[0] == 3
+
 # delete one of two doors -> one exit left, the 50% rule gives 0 and the floor goes to review
 def test_delete_exit(root, conn, said, monkeypatch):
     screen = editor_screen(root, conn)

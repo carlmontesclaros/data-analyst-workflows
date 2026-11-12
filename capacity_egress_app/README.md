@@ -94,7 +94,7 @@ The first screen everyone sees. Built for a quick question like "can DTB A120 go
 3. **Room type and/or new capacity → Check.** Picking another room type (supervisor feedback, 2026-10-16) shows that type's per code load next to the box; Check then judges the room against it, and an unvisited room's per code load changes the floor load (a visited room's floor load stays its count). Leave New capacity blank to try only the room type. **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
 4. **Result:**
    - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) lets a room be designed for more people than the table, as long as the exits carry them and a sign is posted (3.1.17.1.(2)). Amber is project policy, so an editor looks into it. (It's a count **below** per code that the code says must "be shown".)
-   - **Each zone on the floor:** occupant load now → with the change, against exit capacity: **within**, **over by N**, or **"Can't check egress: exits on this floor haven't been measured."** An unmeasured floor is never shown as fine.
+   - **Each zone on the floor:** occupant load now → with the change, against exit capacity: **within**, **over by N**, or **"Can't check egress: exits not measured yet"**. An unmeasured floor is never shown as fine.
 5. **Save summary (.docx)**: one page to attach to the email to Mark. It lists, for each room, current capacity and source, proposed number, per code load and verdict; for each zone, occupant load now → after, exit capacity and verdict; the date, who ran it and the code edition. The footer reads "Screening only, not an approval. An editor reviews every change." The request's reason goes in the email. The file is written by the app itself, so nothing extra is installed.
 
 The check screen **never saves**. An editor who wants to apply a change presses **Editor screen**: the check screen is replaced by the editor screen, opened on the room picked (if any), where Change capacity or Change room type previews the floor and asks why. The editor screen's **Building** box takes typing the same way. **← Check screen** on the editor screen switches back, showing anything just saved. One window at a time; closing the editor screen closes the app.
@@ -290,13 +290,25 @@ Enter exits with **Add exit** in the app. One row per exit; a floor with three e
 
 | Field | What goes in it |
 |---|---|
-| wing | Wing letter (A, B...) for a floor split into wings. Fill it on **every** exit of that floor. Blank = the floor is one zone. |
+| wing | The zone this exit serves, on a floor split into wings: one wing (`B`), or a **group** of wings open to each other joined with `+` (`A+C+D`). Fill it on **every** exit of that floor. Blank = the floor is one zone. A wing can be in only one group per floor (`B` and `A+C+D` together are fine, `A+C` and `C+D` aren't). Order and case don't matter: `d + a+c` is saved as `A+C+D`. See **Wing groups** below. |
 | exit_id | Space number from the base drawings + what was measured: `S4 - doorway`, `S5 - open stair`. Outside doors aren't numbered on the plans: `E<floor> - outside exit`, plus a letter if there are several (`E2`, `E2A`, `E2B`). |
 | exit_type | `doorway`, `stairs` (rise ≤ 180 mm **and** run ≥ 280 mm) or `stairs_steep` (anything else). |
 | stair_width_cm, stair_type | Only for a door into a stair: the stair's narrowest clear width (cm, round down) and `stairs` / `stairs_steep`. Blank type = `stairs`. Blank width = door only (listed as `stair_not_measured`). |
 | clear_width_cm | Clear width in cm at the **narrowest** point, rounded down. Whole number, 50–500. |
-| into_wing | Only for a door into **another wing**: that wing's letter. |
+| into_wing | Only for a door into **another zone**: a wing's letter (`A`, counted in whichever group holds A) or the whole group (`A+C+D`). The editor refuses a wing in the exit's own group and a part of a group (`A+C` when the group is `A+C+D`); an imported door into its own zone is listed (`link_within_zone`) and adds no people. |
 | narrowest_point, notes | What was narrowest (`121 cm at handrail`). For stairs, the rise and run. |
+
+### Wing groups
+
+Most floors are one zone, even with several room prefixes (22 buildings, 64 floors have more than one). Whether a prefix is a separate zone is decided per floor on site. Where it is, every exit on the floor names its zone in `wing`:
+
+| Floor | Exits' wing | Zones |
+|---|---|---|
+| Clearihue 2 and 3 (wings open to each other) | blank | one zone, the whole floor |
+| David Turpin 1 (wall between A and B) | `A` or `B` | A, B |
+| Clearihue 1 (B not connected to A) | `B` on the B wing exits, `A+C+D` on the rest | B, A+C+D |
+
+Each room joins the zone whose group holds its wing (on Clearihue 1, every A, C and D room → A+C+D). A room whose wing no exit names (no exits measured for it yet, a stair `S1`, a lift `L11`, a room number with no letter) stays a zone of its own with no exits: it shows `NOT SURVEYED`, so its people are never dropped, and if it has any load it's listed as `wing_not_in_a_group` in the warnings. Stairs and lifts carry 0 people, so they make no zone and no warning.
 
 Where a stair has a door in front of it, measure **both**: the door in `clear_width_cm`, the stair in `stair_width_cm`. BCBC 2024 gives doors 6.1 and stairs 8.0 mm/person, so a stair can carry fewer people than its door even when it's wider (88 cm door = 144, 110 cm stair = 137). The exit counts the smaller (Carl, 2026-10-20). Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
 
@@ -308,13 +320,13 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 2. **Per code load** = net area ÷ m² per person, **rounded up** (3.4.3.1.(1) → Subsection 3.1.17).
 3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (all non-assignable 16.x: circulation, washrooms, mechanical, janitorial) count as 0, `out of scope`. Lounges (14.3, 1.85 m²) and kitchens (7.2, 9.30 m²) count at their Table 3.1.17.1. per code load; they aren't counted on site because their occupancy varies.
 4. **Wing of each room** = the letters at the start of its Space number (`B303` → B).
-5. **Zones.** A floor is one zone unless any exit on it has a wing; then each wing is its own zone. On a split floor, zones with no load and no exits are dropped.
+5. **Zones.** A floor is one zone unless any exit on it has a wing; then each exit's wing is a zone: one wing (`B`) or a group (`A+C+D`). A room is in the zone whose group holds its wing; a wing no exit names is its own zone with no exits (`wing_not_in_a_group` when it has load). A wing in two groups on one floor is counted in the first group alphabetically and listed (`wing_in_two_groups`); a wing that isn't letters or letters joined with `+` is used as typed and listed (`bad_wing`). On a split floor, zones with no load and no exits are dropped.
 6. **Open stairs count** (`open_stairs_count` = `yes`, Carl 2026-10-20): they lead down to an exit door, and this tool screens capacity, not fire separation. `no` is the strict reading of BCBC 3.4.4.1.(1) (exits fire separated): open stairs get 0 people and `not an exit - open stair`.
 7. **Persons per exit** = `clear_width_cm × 10 ÷ mm per person`, rounded down: doorway 6.1 (3.4.3.2.(1)(a)), stairs 8.0 ((b)), stairs_steep 9.2 ((c)). With a stair behind the door, the same for the stair, and the exit gets the **smaller** (`limited_by` = door / stair; `narrowest_persons` in `exit_calc.py`). Doors into the **same stair** (same S number on the floor, e.g. `S2 - doorway (A201b)` and `S2 - doorway (A206)`) are one exit: the slower of all those doors together and the stair, counted on the first door (`shares_stair` on the others; 3.4.3.1.(2), widths add up where exits converge).
 8. **50% rule** (3.4.3.2.(7)): exit capacity = the smaller of the total and 2 × (total − largest exit). A single exit gives 0.
 9. **Minimum widths** (Table 3.4.3.2.-A): doorway under 850 mm fails; stairs under 900 mm fail, 900–1099 mm is review (depends on storeys served), 1100 mm and over passes. A stair behind a door is checked too; the worse result wins.
 10. **Stairs are not cumulative across floors** (3.4.3.2.(4)).
-11. **Link doors** (supervisor model; no code clause covers a door between wings of one floor area, 3.4.3.1.(2) is the closest): people sent = the smaller of (sending wing load ÷ its exits) and the door's capacity, added to the receiving wing. One step only; a wing that sends and receives is flagged.
+11. **Link doors** (supervisor model; no code clause covers a door between wings of one floor area, 3.4.3.1.(2) is the closest): people sent = the smaller of (sending wing load ÷ its exits) and the door's capacity, added to the receiving zone (the group holding `into_wing`). One step only; a wing that sends and receives is flagged.
 12. **Occupant load** = load used + people received through link doors, compared with the exit capacity.
 13. **Status:** `NOT SURVEYED - no exit data` (no exits) / `REVIEW` (any flag) / `WITHIN CAPACITY - review before acting`. Flags: fewer than 2 exits, load over capacity, width fail, width review, width unknown, sends and receives link traffic, load is 0. **Never "approved".**
 
@@ -338,6 +350,7 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | Doors into the same stair count once, at the slower of the doors together and the stair | Carl | 2026-10-20 |
 | Floors stay separate (no cumulative stair widths through an open stair, 3.4.3.2.(6)); people leave down or out, never up | Carl | 2026-10-20 |
 | Turpin floor 1 wings stay separate zones with the link door (there's a wall between them) | Carl | 2026-10-20 |
+| A zone on a split floor can be a group of wings (`A+C+D`). Clearihue 1: B is its own zone (not really connected to A), A+C+D one zone; Clearihue 2 and 3 stay whole floors (connected) | Carl | 2026-11-10 |
 | Load = room capacity; FMIS's default 0 is not a count, so unvisited rooms use per code | Carl | 2026-10-02 |
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |

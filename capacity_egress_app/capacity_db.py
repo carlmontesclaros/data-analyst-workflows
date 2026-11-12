@@ -184,6 +184,22 @@ def insert_exits(conn, df):
         if pd.isna(row['clear_width_cm']):
             warnings.append(f"{label}: no width")
 
+    # wings -> the editor's notation (B, A+C+D), one group per wing per floor. anything else is kept as typed
+    #   and listed; the calculation lists it again
+    for col in ['wing', 'into_wing']:
+        exits[col] = exits[col].astype(object)
+        for i, row in exits[exits[col].notna() & (exits[col].astype(str).str.strip() != '')].iterrows():
+            try:
+                exits.loc[i, col] = egress.wing_group(row[col])
+            except ValueError:
+                exits.loc[i, col] = str(row[col]).strip()
+                warnings.append(f"{row['property']} floor {row['floor']} {row['exit_id']}: {col} '{exits.loc[i, col]}' "
+                                f"isn't a wing (B) or wings joined with + (A+C+D)")
+    for (prop, floor), floor_exits in exits.groupby(['property', 'floor']):
+        groups = set(floor_groups(conn, prop, floor)) | {g for g in floor_exits['wing'].dropna() if readable_wing(g)}
+        for wing, held in egress.wing_clashes(groups).items():
+            warnings.append(f"{prop} floor {floor}: wing {wing} is in {' and '.join(held)} - a wing can be in one group per floor")
+
     exits.to_sql('exits', conn, if_exists='append', index=False)
     return len(exits), warnings
 
@@ -524,12 +540,28 @@ def set_note(conn, table_name, record_id, note, user_login, user_name, expected=
         log_change(conn, user_login, user_name, table_name, record_id, column, old[0], note, 'note edited')
     return True
 
+# wing groups already on a floor -> {group: first exit_id}, leaving out one exit (the one being edited)
+def floor_groups(conn, prop, floor, leave_out=None):
+    groups = {}
+    for r in conn.execute("SELECT exit_id, wing FROM exits WHERE property = ? AND floor = ? AND exit_pk IS NOT ? "
+                          "AND COALESCE(wing, '') != '' ORDER BY exit_id", (prop, floor, leave_out)):
+        if readable_wing(r[1]):
+            groups.setdefault(egress.wing_group(r[1]), r[0])
+    return groups
+
+def readable_wing(text):
+    try:
+        egress.wing_group(text)
+        return True
+    except ValueError:
+        return False
+
 # exits -> same checks as the excel exits sheet
 EXIT_EDIT_COLS = ['property', 'floor', 'wing', 'into_wing', 'exit_id', 'exit_type', 'clear_width_cm',
                   'stair_width_cm', 'stair_type',
                   'measured_date', 'measured_by', 'narrowest_point', 'photo_ref', 'notes']
 
-def check_exit(conn, values):
+def check_exit(conn, values, exit_pk=None):
     problems = []
     if not values.get('exit_id'):
         problems.append("exit_id is required (e.g. 'S4 - doorway', 'E3 - outside exit')")
@@ -562,9 +594,28 @@ def check_exit(conn, values):
     if not floor_known:
         problems.append(f"{values.get('property')} floor {values.get('floor')} is not in the rooms table")
     for col in ['wing', 'into_wing']:
-        v = values.get(col) or ''
-        if v and not v.isalpha():
-            problems.append(f"{col} must be letters only (A, B, ...)")
+        try:
+            egress.wing_group(values.get(col))
+        except ValueError as err:
+            problems.append(f"{col}: {err}")
+    # a wing is in one group per floor -> B and A+C+D can share a floor, A+C and C+D can't
+    wing = values.get('wing')
+    groups = floor_groups(conn, values.get('property'), values.get('floor'), exit_pk)
+    mine = set(egress.wing_letters(egress.wing_group(wing))) if readable_wing(wing) else set()
+    for group, exit_id in groups.items():
+        shared = sorted(mine & set(egress.wing_letters(group)))
+        if shared and group != egress.wing_group(wing):
+            problems.append(f"{'wings ' + ', '.join(shared) + ' are' if len(shared) > 1 else 'wing ' + shared[0] + ' is'} "
+                            f"already in {group} ({exit_id}) on this floor - a wing can be in one group per floor")
+    into = values.get('into_wing')
+    if into and readable_wing(into):
+        into_group = egress.wing_group(into)
+        if mine & set(egress.wing_letters(into_group)):
+            problems.append(f"into_wing {into_group} is in this exit's own wing {egress.wing_group(wing)} - "
+                            f"a link door leads into another zone")
+        elif egress.WING_JOIN in into_group and into_group not in groups:
+            problems.append(f"into_wing {into_group} isn't a group on this floor "
+                            f"({', '.join(sorted(groups)) or 'none yet'}) - use one wing or a whole group")
     if values.get('into_wing') and not values.get('wing'):
         problems.append("a link door (into_wing) needs the wing it leaves from")
     date = values.get('measured_date')
@@ -583,7 +634,7 @@ def clean_exit(values):
         out[col] = v
     for col in ['wing', 'into_wing']:
         if out[col]:
-            out[col] = out[col].upper()
+            out[col] = egress.wing_group(out[col]) if readable_wing(out[col]) else out[col].upper()
     if out['exit_type']:
         out['exit_type'] = out['exit_type'].lower()
     if out['stair_type']:
@@ -604,7 +655,7 @@ def same_exit(row, expected):
 def save_exit(conn, values, user_login, user_name, exit_pk=None, expected=NO_CHECK):
     # expected = the exit row as the person saw it when they opened the form (edits only)
     values = clean_exit(values)
-    problems = check_exit(conn, values)
+    problems = check_exit(conn, values, exit_pk)
     if problems:
         raise ValueError('\n'.join(problems))
     with write_transaction(conn):
