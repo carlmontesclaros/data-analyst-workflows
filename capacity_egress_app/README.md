@@ -189,17 +189,17 @@ The template is never opened with pandas or openpyxl (that would delete the slic
 
 | Sheet | What it is |
 |---|---|
-| upload | `Id`, `PropertyId`, `FloorId` + the capacity in `OccupantsTotal` (FMIS keeps one total). Counted rooms only; FMIS leaves any space not in the file unchanged. This is the upload |
+| upload | `Id`, `PropertyId`, `FloorId` + the capacity in `OccupantsTotal` (FMIS keeps one total, no day/night split). This is the upload |
 | review | the same rows with FMIS names next to the app's names. Leading-zero matches are amber |
 | not_matched | counted rooms that fit no FMIS space, fit two, or share one with another room. Not in the upload; the app warns if there are any |
 | all_spaces | the three admin files combined, with the floor-belongs-to-property check |
 | readme | what each sheet means |
 
 - Match = building number (or property name if there's no number) + floor + space. If that misses, it tries again ignoring leading zeros (the space report turned `066` into `66`).
-- Counted rooms only: a blank might clear a number in FMIS, and 8,698 FMIS spaces hold a value today. A 0 is sent only if someone really entered it (400 rooms in the upload, 71 of them 0).
+- Counted rooms only: FMIS updates only the spaces in the file and leaves every other space as it is, so the 8,698 FMIS spaces that hold a value today keep it unless the room was counted. A 0 is sent only if someone really entered it (400 rooms in the upload, 71 of them 0).
 - Matching runs on the whole campus before narrowing to the pick, so a room sharing an FMIS space is held back whichever building is picked.
 
-Still open with the admin: which Occupants field is the real one, whether a blank clears a field (if not, the blanks could go too), and McKinnon floor 0 vs 00.
+Still open with the admin: McKinnon floor 0 vs 00.
 
 ## Several people at once
 
@@ -356,7 +356,8 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | Occupant load rounded up | Project default, confirm | 2026-09 |
 | Viewers can try a room type on the check screen (not saved); editors change it on the editor screen, logged with why | Supervisor feedback, Carl | 2026-10-16 |
 | Space report export: a visited room's PM change goes into `Capacity (Occupants)` (it's the room capacity FMIS gets; the site count stays in the change log) | Carl | 2026-10-16 |
-| FMIS upload sends counted rooms only, until the admin confirms what a blank does | Carl | 2026-11-05 |
+| ~~FMIS upload sends counted rooms only, until the admin confirms what a blank does~~ | Carl | 2026-11-05 |
+| FMIS upload sends counted rooms only, capacity in `OccupantsTotal` only: FMIS keeps one total, and spaces not in the file are left as they are | FMIS admin | 2026-11-12 |
 | Visited = Carl wrote something for the room (a count, note or room type in the space report, or an entry since). A first-import 0 with nothing written is the FMIS default, not a count: 952 rooms cleared back to per code, logged. Rebuilding with `build_database.py` would bring them back, since `classify_rooms` still takes every 0 in a visited building as a count | Carl | 2026-11-05 |
 | Blank unless visited: a room he only set a room type on, or noted he couldn't get into, has no count. 28 more 0s cleared. A seminar or meeting room he marked 0 stays 0: people meet there but don't work there | Carl | 2026-11-05 |
 | UI pass: table headings use the glossary's words, numbers line up on the right, one blue button (Check), a zone with no exits shows - not 0. Colours live in `colours.py`; row colours unchanged | Carl | 2026-11-06 |
