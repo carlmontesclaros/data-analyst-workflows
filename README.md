@@ -48,6 +48,13 @@ I’m keeping everything modular. Each project or workflow gets its own separate
     5. A newer space report is loaded with Refresh in the app, not by rebuilding. Rooms that disappear are kept and flagged, never deleted.
 * **Details:** method, decisions and open questions are in `capacity_egress_app/README.md`. It replaced the earlier `exiting_capacity_calculation` terminal script (retired 2026-10-05).
 
+## Test-weakening guard
+When a test fails, the fix belongs in the app (or whatever really caused it), not in the test. A Claude Code hook enforces that so a reviewer doesn't have to catch it: `.claude/settings.json` runs `.claude/hooks/guard_tests.py` before every Edit, Write and MultiEdit.
+* **What it blocks:** an edit to a test file (`test_*.py`, `*_test.py`, `conftest.py`) that would add a `pytest.mark.skip` / `skipif` / `xfail` mark (or unittest's skip decorators), add a `pytest.skip(...)` / `pytest.xfail(...)` / `pytest.importorskip(...)` call, leave fewer test functions, or leave fewer `assert` statements. Strings and comments don't count, so commenting out an assert counts as removing it. The agent is told to fix the app code instead.
+* **What it lets through:** non-test files, new tests and extra asserts, rewrites that keep the same tests and asserts, and the screen tests' no-display guard (`except tk.TclError` -> re-raise unless the message mentions the display -> `pytest.skip(f"no display: {e}")`), which only skips on a machine with no screen.
+* **Overriding it (humans only):** if a test really is wrong or obsolete, edit the file by hand in your editor, or turn the hook off for a while (`/hooks` in Claude Code, or remove the `PreToolUse` entry from `.claude/settings.json` and put it back afterwards).
+* **Limits:** it only sees Claude Code's file-editing tools, so a shell command (`sed`, `rm`, `git rm`) can still change a test file, and a test renamed while also losing its asserts is blocked even if that was intended. It needs `python3` on the PATH. Its own tests are `capacity_egress_app/test_guard_tests.py`.
+
 ## Future Ideas
 1. A web link for the capacity check screen (OREM and others, nothing to install). Starts with asking UVic IT; no outside hosting.
 2. Generalize the hierarchy of `facility_folder_automation` let the user choose which columns become folder levels, instead of hardcoding Property/Floor/Space.
