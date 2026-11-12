@@ -226,7 +226,7 @@ class CheckScreen:
         ttk.Button(line, text="Check", style='Accent.TButton', command=self.add_to_check).pack(side='left')
         ttk.Button(line, text="Remove room", command=self.remove_from_check).pack(side='left', padx=(18, 4))
         ttk.Button(line, text="Start over", command=self.start_over).pack(side='left', padx=4)
-        # one line: the help, or what's wrong with the number
+        # one label: the help, or what's wrong with the number (a long message wraps)
         self.hint = wrap_to_width(ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED_FG))
         self.hint.pack(fill='x', pady=(6, 0))
         self.message_var = tk.StringVar()
