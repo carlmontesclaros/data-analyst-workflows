@@ -95,6 +95,67 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
+# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them
+def fit_window(root, size, minimum):
+    root.update_idletasks()
+    need = (root.winfo_reqwidth(), root.winfo_reqheight())
+    root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
+    root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
+
+# a table column whose words must never be cut short -> at least as wide as its longest text in the table's real font
+CELL_PADDING = 8                                                        # the theme's space around a cell's text, and a little more
+def fit_column(tree, col, texts):
+    font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
+    need = max(int(tree.tk.call('font', 'measure', font, text)) for text in texts) + CELL_PADDING
+    width = max(int(tree.column(col, 'minwidth')), need)
+    tree.column(col, width=width, minwidth=width)
+
+# a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
+# the label must be packed or gridded to fill the width it is given. its text gets that width less the label's own
+# padding and the theme's border, measured off an empty label of the same style and padding
+def wrap_to_width(label):
+    empty = ttk.Label(label.master, style=label.cget('style'), padding=label.cget('padding'))
+    frame = empty.winfo_reqwidth()
+    empty.destroy()
+    label.bind('<Configure>', lambda e: label.configure(wraplength=max(e.width - frame, 1)), add='+')
+    return label
+
+# a line of groups (fields, buttons) that wraps onto more lines when the window is too narrow for one line.
+# it asks only for its widest group's width, so it never holds the window wider than that; a group stays on one line
+class FlowRow(ttk.Frame):
+    def __init__(self, parent, gap):
+        super().__init__(parent)
+        self.gap, self.groups = gap, []
+        self.bind('<Configure>', lambda e: self.flow(e.width))
+
+    # the next group, for the caller to fill
+    def group(self):
+        if not self.groups:
+            self.after_idle(self.ask)
+        self.groups.append(ttk.Frame(self))
+        return self.groups[-1]
+
+    # once the groups are filled and have their sizes
+    def ask(self):
+        self.update_idletasks()
+        self.flow(self.winfo_width())
+
+    def flow(self, width):
+        rows, x = [[]], 0
+        for g in self.groups:
+            if rows[-1] and x + self.gap + g.winfo_reqwidth() > width:
+                rows.append([])
+            x = (x + self.gap if rows[-1] else 0) + g.winfo_reqwidth()
+            rows[-1].append(g)
+        y = 0
+        for row in rows:
+            height, x = max(g.winfo_reqheight() for g in row), 0
+            for g in row:
+                g.place(x=x, y=y + (height - g.winfo_reqheight()) // 2)
+                x += g.winfo_reqwidth() + self.gap
+            y += height
+        self.configure(width=max(g.winfo_reqwidth() for g in self.groups), height=y)
+
 # search -> 'DTB A120', 'Turpin', 'A120'. words with a digit are room numbers, the rest name the building
 def initials(name):
     return ''.join(word[0] for word in re.findall(r'[A-Za-z]+', name) if word[0].isupper()).lower()
