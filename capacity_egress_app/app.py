@@ -182,7 +182,8 @@ class App:
         colours.colour_tags(self.room_tree)
         self.room_tree.tag_configure('missing', foreground=colours.ERROR_FG)     # after the colours, so red text wins
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
-        panes.add(room_frame, weight=4)
+        # the room list, the longest, gives up the most height on a small window, so zones and exits keep two rows
+        panes.add(room_frame, weight=5)
 
         # exits
         exit_frame = ttk.LabelFrame(panes, text="Exits")
