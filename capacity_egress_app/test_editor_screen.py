@@ -44,11 +44,17 @@ def conn(db_path):
 def root():
     try:
         r = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
     r.withdraw()
     widgets.use_theme(r)
     yield r
+    # a box a test left open (a refused Save keeps it up) holds the grab -> close it, innermost first
+    for w in reversed(list(all_widgets(r))):
+        if isinstance(w, tk.Toplevel):
+            w.destroy()
     r.destroy()
 
 # message boxes would stop the test until someone clicks OK -> write down what they said instead

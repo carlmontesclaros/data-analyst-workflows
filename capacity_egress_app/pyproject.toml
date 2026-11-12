@@ -1,0 +1,34 @@
+# settings for the tests and the lint check, the same on the Mac and in CI (.github/workflows/tests.yml)
+
+[tool.pytest.ini_options]
+# capture print() output in Python, not by swapping the process's stdin/stdout/stderr files: on Windows the default
+# file-level swap sits under Tcl's own std channels, and a later tk.Tk() then fails to read its init.tcl
+# ("couldn't read file ...init.tcl: No error") part-way through the run
+addopts = "--capture=sys"
+# a database or file left open fails the test: on the S: drive an open connection can hold the file
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/W style, F mistakes (unused imports, undefined names), B likely bugs, S security
+select = ["E", "F", "W", "B", "S"]
+ignore = [
+    "E501",   # long lines are fine in this repo
+    "S608",   # SQL built from table/column names: every name comes from a fixed list in capacity_db.py or is
+              # checked against PRAGMA table_info first; values always go in as ? parameters
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = [
+    "S101",   # tests use assert
+    "S318",   # test_exports parses the xml the app itself just wrote
+]
+"widgets.py" = [
+    "S603", "S606", "S607",   # open_path: opens a folder with the system's own opener (os.startfile / open /
+                              # xdg-open), the path as one list item, no shell
+]

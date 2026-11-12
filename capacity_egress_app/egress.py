@@ -46,7 +46,7 @@ def zone_name(floor, zone_wing):
 
 # settings table -> values the calculation needs
 def read_settings(settings_df):
-    s = dict(zip(settings_df['setting'], settings_df['value']))
+    s = dict(zip(settings_df['setting'], settings_df['value'], strict=False))
     if s.get('occupant_load_rounding', 'up') != 'up':
         raise ValueError(f"occupant_load_rounding is '{s['occupant_load_rounding']}', only 'up' is supported")
     link_method = s.get('link_share_method', 'even_split')

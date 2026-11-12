@@ -1,10 +1,10 @@
 import re
+import pathlib
 import sqlite3
 import statistics
 import time
 import tkinter as tk
 from tkinter import ttk
-import pandas as pd
 import pytest
 import app
 import capacity_db as db
@@ -27,14 +27,17 @@ def conn():
     db.insert_extra_settings(c)
     db.insert_rooms(c, xi.classify_rooms(report([LONG_ROOM])), 'first.xlsx')
     db.set_editor(c, 'carl', True, 'carl', 'Carl', why='first editor')
-    return c
+    yield c
+    c.close()
 
 @pytest.fixture
 def root():
     try:
         r = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
     widgets.use_theme(r)
     yield r
     r.destroy()
@@ -280,7 +283,7 @@ def test_rooms_found_says_when_the_list_is_cut():
 # one colour list -> changing a shade means changing one line
 @pytest.mark.parametrize('name', ['app.py', 'check_screen.py', 'widgets.py'])
 def test_screens_take_colours_from_colours_py(name):
-    assert re.findall(r"#[0-9A-Fa-f]{6}\b", open(name, encoding='utf-8').read()) == []
+    assert re.findall(r"#[0-9A-Fa-f]{6}\b", pathlib.Path(name).read_text(encoding='utf-8')) == []
 
 def test_legend_fits_on_one_line_each():
     assert all(len(meaning) <= 20 for _, _, meaning in colours.LEGEND)

@@ -35,7 +35,8 @@ def conn():
     db.import_code_factors(c, CONFIG_DIR)
     db.insert_extra_settings(c)
     db.insert_rooms(c, xi.classify_rooms(report(BASE_ROWS)), 'first.xlsx')
-    return c
+    yield c
+    c.close()
 
 def rooms(c):
     return {(r['space'], r['area_m2']): dict(r) for r in c.execute("SELECT * FROM rooms")}
@@ -447,6 +448,7 @@ def test_old_database_gets_the_editor_column():
     c.execute("INSERT INTO users VALUES ('carl', 'Carl')")
     db.create_schema(c)
     assert not db.is_editor(c, 'carl') and db.editor_count(c) == 0
+    c.close()
 
 def test_viewer_cant_save_once_there_are_editors(conn):
     # the screens hide the buttons, but every save also checks for itself
@@ -537,4 +539,5 @@ def test_old_database_gets_the_stair_columns():
               "exit_id TEXT NOT NULL, exit_type TEXT NOT NULL, clear_width_cm INTEGER)")
     db.create_schema(c)
     cols = [r[1] for r in c.execute("PRAGMA table_info(exits)")]
+    c.close()
     assert 'stair_width_cm' in cols and 'stair_type' in cols

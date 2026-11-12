@@ -243,7 +243,7 @@ def test_stair_minimum_width_is_checked_too():
     # Table 3.4.3.2.-A -> stairs under 900 mm fail even when the door is fine
     exits = run([room('301', 20)], [exit_row('S4 - doorway', 'doorway', 88, stair_cm=85, stair_type='stairs'),
                                     exit_row('S6 - doorway', 'doorway', 88, stair_cm=95, stair_type='stairs')])['exits']
-    checks = dict(zip(exits['exit_id'], exits['width_check']))
+    checks = dict(zip(exits['exit_id'], exits['width_check'], strict=False))
     assert checks == {'S4 - doorway': 'fail - below minimum', 'S6 - doorway': 'review - depends on storeys served'}
 
 def test_stair_door_without_a_stair_width_is_listed():

@@ -142,6 +142,9 @@ capacity_egress_app/
   exports.py               results workbook, space report export, FMIS upload, capacity check summary (.docx)
   build_database.py        one-time first import
   test_*.py                pytest tests
+  pyproject.toml           pytest and ruff settings (an unclosed database fails the test)
+  requirements.txt         the app's packages, exact versions
+  requirements-dev.txt     plus pytest, pytest-cov and ruff
   config/                  code factor CSVs, read once by build_database.py (after that, edit in the app)
   data/                    gitignored, local only
     capacity.db            the database
@@ -161,7 +164,8 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 
 1. **Once:** `python3 build_database.py`. Reads the space report and `floor_exits.xlsx` from `data/input/` and the CSVs from `config/`, and writes `data/capacity.db`. It refuses to run if the database already exists.
 2. `python3 app.py`. The first time on a computer, it asks for the name to show in the change log.
-3. Tests: `python3 -m pytest`
+3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` and `python3 -m ruff check .` (lint).
+   GitHub runs them on every push to `main` and on every pull request (`.github/workflows/tests.yml`): lint once, then the tests on Windows and on the Mac. A red X on a PR means something broke: don't merge until it's green.
 
 Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities.
 
@@ -274,7 +278,7 @@ Clause numbers were checked against the BCBC **2024** text (revision 2) on 2026-
 
 ## Installing on a Windows machine (step 7)
 
-1. Install Python from python.org (tick "Add to PATH"), then `py -m pip install pandas openpyxl`.
+1. Install Python 3.13 from python.org (tick "Add to PATH"), then from `capacity_egress_app/`: `py -m pip install -r requirements.txt` (the exact versions the tests pass with).
 2. Copy the `capacity_egress_app/` folder to the machine (`data/` only if you're bringing the database with you).
 3. Move `data/capacity.db` to the project folder on the S: drive and set `DB_PATH` at the top of `app.py` to that path. Everyone's app must point at the **same** file.
 4. Optional launcher `Capacity app.bat` next to `app.py`: `@echo off` / `cd /d %~dp0` / `py app.py` / `pause`.

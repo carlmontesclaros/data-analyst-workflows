@@ -83,8 +83,10 @@ def test_change_log_lookups_use_the_index(conn):
 def test_editor_screen_open_and_save(conn):
     try:
         root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
     try:
         root.withdraw()
         widgets.use_theme(root)

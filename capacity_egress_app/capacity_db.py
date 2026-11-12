@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS area_factors (
     room_type TEXT PRIMARY KEY,
     area_per_person_m2 REAL
 );
-    
+
 CREATE TABLE IF NOT EXISTS width_factors (
     exit_type TEXT PRIMARY KEY,
     mm_per_person REAL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS width_factors (
     minimum_mm_low_rise INTEGER,
     source TEXT
 );
-    
+
 CREATE TABLE IF NOT EXISTS category_map (
     space_sub_category TEXT PRIMARY KEY,
     room_type TEXT,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     in_latest_report INTEGER NOT NULL DEFAULT 1,
     last_report TEXT
 );
-    
+
 CREATE TABLE IF NOT EXISTS exits (
     exit_pk INTEGER PRIMARY KEY,
     property TEXT NOT NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS exits (
     notes TEXT,
     UNIQUE (property, floor, exit_id)
 );
-    
+
 CREATE TABLE IF NOT EXISTS audit_log (
     log_id INTEGER PRIMARY KEY,
     changed_at TEXT NOT NULL,

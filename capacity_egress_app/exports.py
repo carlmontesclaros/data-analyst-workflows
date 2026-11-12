@@ -77,11 +77,11 @@ def write_results_workbook(result, path, properties=None, floors=None):
             # zone colours -> whole row on floor_summary
             ws = writer.sheets['floor_summary']
             colours = pick(result['zones'], properties, floors).apply(egress.zone_colour, axis=1).tolist() if len(summary) else []
-            for row, colour in zip(ws.iter_rows(min_row=2), colours):
+            for row, colour in zip(ws.iter_rows(min_row=2), colours, strict=False):
                 for cell in row:
                     cell.fill = COLOUR_FILLS[colour]
-    except PermissionError:
-        raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again")
+    except PermissionError as err:
+        raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again") from err
     return {name: len(df) for name, df in tables.items()}
 
 # space report export -> Carl's space report (carl_space_report), filled with the app's rooms
@@ -197,10 +197,12 @@ def write_space_report(result, path, template_path=None, properties=None, floors
 
         start, end = sheet_xml.index('<sheetData>') + len('<sheetData>'), sheet_xml.index('</sheetData>')
         all_rows = re.findall(r'<row [^>]*/>|<row [^>]*>.*?</row>', sheet_xml[start:end], re.S)
-        row_number = lambda row: int(re.search(r' r="(\d+)"', row).group(1))
+        def row_number(row):
+            return int(re.search(r' r="(\d+)"', row).group(1))
         top_rows = [row for row in all_rows if row_number(row) <= header_row]
         styles = row_styles([row for row in all_rows if row_number(row) > header_row], n)
-        style = lambda c: f' s="{styles[c]}"' if styles[c] else ''
+        def style(c):
+            return f' s="{styles[c]}"' if styles[c] else ''
 
         # new rows -> app values over the template's row for the same room
         first = header_row + 1
@@ -268,8 +270,8 @@ def write_space_report(result, path, template_path=None, properties=None, floors
                     elif name == '[Content_Types].xml':
                         data = re.sub(rb'<Override PartName="/xl/calcChain.xml"[^>]*/>', b'', data)
                     out.writestr(item, data)
-        except PermissionError:
-            raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again")
+        except PermissionError as err:
+            raise PermissionError(f"can't write {path} - it's probably open in Excel. close it and try again") from err
     return {'rooms': len(rooms), 'matched_template': int(matched), 'template': os.path.basename(template_path)}
 
 
@@ -314,7 +316,7 @@ def table(header, rows, fills, widths):
                      for side in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'])
     def row(values, fill, bold=False):
         cells = ''
-        for value, width in zip(values, widths):
+        for value, width in zip(values, widths, strict=False):
             shade = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>' if fill else ''
             cells += (f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa"/>{shade}</w:tcPr>'
                       f'{para(value, bold=bold, after=0)}</w:tc>')
@@ -323,7 +325,7 @@ def table(header, rows, fills, widths):
     return (f'<w:tbl><w:tblPr><w:tblW w:w="{sum(widths)}" w:type="dxa"/><w:tblBorders>{border}</w:tblBorders>'
             f'<w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>'
             f'<w:tblGrid>{grid}</w:tblGrid>{row(header, "D9D9D9", bold=True)}'
-            + ''.join(row(r, f) for r, f in zip(rows, fills)) + '</w:tbl>')
+            + ''.join(row(r, f) for r, f in zip(rows, fills, strict=False)) + '</w:tbl>')
 
 def check_file_name(check, when=None):
     first = check['rooms'][0]
@@ -393,8 +395,8 @@ def write_check_summary(check, path, user_name, when=None):
             out.writestr('word/_rels/document.xml.rels', DOCX_DOC_RELS)
             out.writestr('word/styles.xml', DOCX_STYLES)
             out.writestr('word/document.xml', document)
-    except PermissionError:
-        raise PermissionError(f"can't write {path} - it's probably open in Word. close it and try again")
+    except PermissionError as err:
+        raise PermissionError(f"can't write {path} - it's probably open in Word. close it and try again") from err
     return path
 
 # fmis upload -> Tyler's file: each counted room's capacity against its FMIS space id, floor id and property id
@@ -423,7 +425,7 @@ def read_fmis_spaces(folder=FMIS_DIR):
         # names and floors stay text -> pandas turns a column of '040' into 40 otherwise
         frames.append(pd.read_excel(path, sheet_name=tab, dtype={'Name': str, 'Description': str}))
     props, floors, spaces = frames
-    spaces = spaces[spaces['ActiveFlag'] == True]
+    spaces = spaces[spaces['ActiveFlag'].eq(True)]
     combined = pd.DataFrame({
         'Property ID': spaces['PropertyId'],
         'Building Number': clean_text(spaces['PropertyId'].map(props.set_index('Id')['ExternalId'])),

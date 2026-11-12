@@ -9,12 +9,12 @@ def room_types(factors):
 
 def area_per_person(factors):
     table = factors['area_factors']
-    return dict(zip(table['room_type'], table['area_per_person_m2']))
+    return dict(zip(table['room_type'], table['area_per_person_m2'], strict=False))
 
 # sub-category -> room type it gets when the room has no override (category_map.csv)
 def default_room_types(factors):
     table = factors['category_map']
-    return dict(zip(table['space_sub_category'], table['room_type']))
+    return dict(zip(table['space_sub_category'], table['room_type'], strict=False))
 
 # room type text as stored -> lowercase, blank = none
 def clean_room_type(value):

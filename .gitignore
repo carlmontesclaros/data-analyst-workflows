@@ -44,3 +44,8 @@ graphify-out/
 
 # Routine capital tracker (confidential UVic financial data)
 routine-capital-excel/
+
+# test coverage output
+.coverage
+coverage.xml
+htmlcov/

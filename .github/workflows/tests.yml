@@ -1,0 +1,55 @@
+# every push to main and every pull request -> lint once, then the whole test suite on Windows (where the app is installed)
+# and on the Mac (where it's written). A red X on the PR = don't merge yet.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: capacity_egress_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install ruff==0.17.4
+      - run: python -m ruff check .
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: capacity_egress_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: capacity_egress_app/requirements*.txt
+      - run: python -m pip install -r requirements-dev.txt
+      # the runners start with a 1024x768 screen, smaller than the app's smallest window (MIN_WINDOW in check_screen.py), so the
+      # window-layout tests would measure the screen, not the app -> give them a workstation-size screen first
+      - name: set the screen to 1920x1080 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+      - name: set the screen to 1920x1080 (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          brew install displayplacer
+          screen_id=$(displayplacer list | awk '/^Persistent screen id:/ {print $4; exit}')
+          displayplacer "id:$screen_id res:1920x1080"
+      - name: check the screen holds the app's smallest window
+        run: python -c "import tkinter as tk; from check_screen import MIN_WINDOW; r = tk.Tk(); m = r.wm_maxsize(); print('largest window', m); assert all(have >= need for have, need in zip(m, MIN_WINDOW)), f'screen {m} is smaller than {MIN_WINDOW}'"
+      - run: python -m pytest -q --cov=. --cov-report=term-missing:skip-covered
