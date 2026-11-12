@@ -188,10 +188,10 @@ def test_fmis_upload_sends_counted_rooms_only_with_all_3_ids(tmp_path):
     info, sheets = upload_sheets(tmp_path, res)
     assert list(sheets) == ['upload', 'review', 'not_matched', 'all_spaces', 'readme']
     up = sheets['upload'].sort_values('Id')
-    assert up.columns.tolist() == ['Id', 'PropertyId', 'FloorId', 'OccupantsDay', 'OccupantsNight', 'OccupantsTotal']
-    # 0 is a count and gets sent; B305 has no count, a blank might clear FMIS -> left out
-    assert up[['Id', 'PropertyId', 'FloorId', 'OccupantsDay']].values.tolist() == [[100, 1, 10, 33], [101, 1, 10, 0]]
-    assert up['OccupantsNight'].tolist() == [33, 0] and up['OccupantsTotal'].tolist() == [33, 0]
+    # FMIS keeps one total, no day/night split
+    assert up.columns.tolist() == ['Id', 'PropertyId', 'FloorId', 'OccupantsTotal']
+    # 0 is a count and gets sent; B305 has no count -> left out, and FMIS leaves spaces not in the file as they are
+    assert up.values.tolist() == [[100, 1, 10, 33], [101, 1, 10, 0]]
     assert info == {'upload': 2, 'not_matched': 0}
     assert len(sheets['review']) == 2 and len(sheets['all_spaces']) == 5
 

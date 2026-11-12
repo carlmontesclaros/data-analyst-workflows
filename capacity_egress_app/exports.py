@@ -468,9 +468,9 @@ def match_fmis_spaces(rooms, spaces):
     return matched[~twice], problems
 
 FMIS_README = [
-    ('upload', 'Id (space id), PropertyId, FloorId + capacity in OccupantsDay / OccupantsNight / OccupantsTotal (same value, '
-               'keep the one FMIS needs), headers as in the Spaces export. Counted rooms only: a room with no count is left out, '
-               'so a blank never clears a number in FMIS. This is the upload.'),
+    ('upload', 'Id (space id), PropertyId, FloorId + capacity in OccupantsTotal (FMIS keeps one total, no day/night '
+               'split), headers as in the Spaces export. Counted rooms only: a room with no count is left out, and FMIS '
+               'does not change any space that is not in the file. This is the upload.'),
     ('review', 'Same rows as upload, with the FMIS names next to the space report names so each match can be checked.'),
     ('not_matched', 'Counted rooms that could not be matched to exactly one FMIS space, or that share one FMIS space with '
                     'another room. Not in the upload.'),
@@ -489,8 +489,7 @@ def write_fmis_upload(result, path, fmis_dir=FMIS_DIR, properties=None, floors=N
 
     capacity = matched['capacity'].astype('Int64')
     upload = pd.DataFrame({'Id': matched['Space ID'].astype(int), 'PropertyId': matched['Property ID'].astype(int),
-                           'FloorId': matched['Floor ID'].astype(int), 'OccupantsDay': capacity,
-                           'OccupantsNight': capacity, 'OccupantsTotal': capacity})
+                           'FloorId': matched['Floor ID'].astype(int), 'OccupantsTotal': capacity})
     review = pd.DataFrame({
         'Property ID': matched['Property ID'].astype(int), 'Floor ID': matched['Floor ID'].astype(int),
         'Space ID': matched['Space ID'].astype(int), 'Capacity': capacity,

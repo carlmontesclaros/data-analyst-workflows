@@ -189,7 +189,7 @@ The template is never opened with pandas or openpyxl (that would delete the slic
 
 | Sheet | What it is |
 |---|---|
-| upload | `Id`, `PropertyId`, `FloorId` + the capacity in `OccupantsDay`, `OccupantsNight`, `OccupantsTotal` (same value; keep the one FMIS needs). This is the upload |
+| upload | `Id`, `PropertyId`, `FloorId` + the capacity in `OccupantsTotal` (FMIS keeps one total). Counted rooms only; FMIS leaves any space not in the file unchanged. This is the upload |
 | review | the same rows with FMIS names next to the app's names. Leading-zero matches are amber |
 | not_matched | counted rooms that fit no FMIS space, fit two, or share one with another room. Not in the upload; the app warns if there are any |
 | all_spaces | the three admin files combined, with the floor-belongs-to-property check |
