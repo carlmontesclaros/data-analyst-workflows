@@ -38,7 +38,7 @@ jobs:
           cache: pip
           cache-dependency-path: capacity_egress_app/requirements*.txt
       - run: python -m pip install -r requirements-dev.txt
-      # the runners start with a 1024x768 screen, smaller than the app's smallest window (1100x720), so the
+      # the runners start with a 1024x768 screen, smaller than the app's smallest window (MIN_WINDOW in check_screen.py), so the
       # window-layout tests would measure the screen, not the app -> give them a workstation-size screen first
       - name: set the screen to 1920x1080 (Windows)
         if: runner.os == 'Windows'
