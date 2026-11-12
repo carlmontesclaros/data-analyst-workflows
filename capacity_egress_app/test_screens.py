@@ -2,7 +2,6 @@ import re
 import pathlib
 import sqlite3
 import statistics
-import sys
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -141,9 +140,8 @@ def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
     assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
 
 # Windows' Segoe UI draws taller and wider than the Mac font (about 20 px a line): the screens grow to what
-# their widgets ask for. On the Mac a larger font stands in for it; on Windows the default font already is Segoe UI
+# their widgets ask for
 WINDOWS_FONT = -17
-ON_WINDOWS = sys.platform == 'win32'
 
 def use_font(root, size):
     for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
@@ -205,8 +203,7 @@ def test_check_screen_tables_keep_every_column_at_its_width(root, conn):
         assert [col for col, width in columns if shown[col] < width] == [], shown
         assert sum(shown.values()) <= tree.winfo_width(), shown
 
-# an error can be longer than the window is wide: it wraps under the fields rather than running off the edge.
-# its extra lines come out of the tables, which scroll
+# an error can be longer than the window is wide: it wraps under the fields rather than running off the edge
 @pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
 def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn, font_size):
     if font_size:
@@ -216,13 +213,12 @@ def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn, font_s
     screen.message_var.set("That room's floor has no exits measured, so " * 6)
     root.update()
     assert cut_off_widgets(root) == []
+    assert root.winfo_reqheight() <= root.winfo_height()
 
-# the Mac font leaves the result tables two rows; Windows' taller font leaves them the one row they ask for
 def test_check_screen_tables_still_show_rows_at_the_smallest_size(root, conn):
-    rows = 1 if ON_WINDOWS else 2
     screen = check_screen(root, conn)
     shrink_to_minimum(root)
-    assert rows_shown(screen.check_tree) >= rows and rows_shown(screen.zone_tree) >= rows
+    assert rows_shown(screen.check_tree) >= 2 and rows_shown(screen.zone_tree) >= 2
     assert rows_shown(screen.found_tree) >= 8
 
 def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
@@ -230,8 +226,8 @@ def test_editor_screen_stops_shrinking_at_its_smallest_size(root, conn):
     assert at_least((root.winfo_width(), root.winfo_height()), asked_for(root))
     assert stops_shrinking_before_anything_is_cut_off(root) and fits_a_laptop(asked_for(root))
 
-# with Windows' font the menu wraps or the rows are taller, so the shortest table may show only one
-@pytest.mark.parametrize(('font_size', 'rows'), [(None, 1 if ON_WINDOWS else 2), (WINDOWS_FONT, 1)])
+# with the larger font the wrapped menu takes the height of a table row, so the shortest table may show only one
+@pytest.mark.parametrize(('font_size', 'rows'), [(None, 2), (WINDOWS_FONT, 1)])
 def test_editor_screen_fits_its_smallest_window(root, conn, font_size, rows):
     if font_size:
         use_font(root, font_size)
