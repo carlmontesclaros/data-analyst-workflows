@@ -5,19 +5,22 @@ Edit, Write and MultiEdit (.claude/settings.json) and compares the file as it is
 edit. It blocks (exit 2, reason on stderr for the agent) when the edit would, in a test file (test_*.py, *_test.py,
 conftest.py):
   - add a skip / skipif / xfail mark (pytest.mark.*, or unittest's skip decorators)
-  - add a skip call: pytest.skip/xfail/importorskip(...), the same names imported from pytest and called bare,
-    self.skipTest(...), raise unittest.SkipTest, raise pytest.skip.Exception / pytest.xfail.Exception
+  - add a skip call: pytest.skip/xfail/importorskip(...) (also through `import pytest as X`), the same names imported
+    from pytest and called bare, self.skipTest(...), raise unittest.SkipTest, raise pytest.skip.Exception /
+    pytest.xfail.Exception
   - add entries to collect_ignore / collect_ignore_glob
   - leave fewer test functions, fewer assert statements, or fewer @pytest.mark.parametrize cases
   - add an assert that is always true (assert True, assert 1, assert not False, assert 1 == 1, assert (x, 'why'))
 or, in pytest's own settings (pyproject.toml, pytest.ini, setup.cfg, tox.ini) or a CI workflow (.github/workflows/*.yml),
-add an option that deselects tests (-k, --deselect, --ignore, --ignore-glob, -m "not ...") to addopts or a pytest command.
+add an option that deselects tests (-k, --deselect, --ignore, --ignore-glob, -m) to addopts or a pytest command.
+It also refuses any edit to this file, and any edit to .claude/settings.json or .claude/settings.local.json that
+removes, changes or switches off (disableAllHooks) the hook entry that runs it: changing the guard is a human-only edit.
 
 The no-display guard the screen tests use (except tk.TclError -> if 'display' not in str(e): raise -> pytest.skip(f"no
 display: {e}")) is the one skip that is allowed: it only skips on a machine with no screen at all.
 
 Everything else (other files, new tests, extra asserts, unreadable hook input) is let through. A human who really means to
-remove or skip a test edits the file by hand, or turns the hook off for a while (see the root README).
+remove or skip a test, or to change this guard, edits the file by hand (see the root README).
 
 Standard library only; run with python3 -I so nothing in the working folder can be imported in its place.
 """
@@ -34,15 +37,17 @@ import tokenize
 TEST_FILE = re.compile(r'^(test_.*|.*_test|conftest)\.py$')
 PYTEST_CONFIG = {'pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini'}
 WORKFLOW = re.compile(r'(^|/)\.github/workflows/[^/]+\.ya?ml$')
+GUARD_FILE = re.compile(r'(^|/)\.claude/hooks/guard_tests\.py$')
+SETTINGS = re.compile(r'(^|/)\.claude/settings(\.local)?\.json$')
 
 # skip marks: @pytest.mark.skip / skipif / xfail (also via `from pytest import mark` or pytestmark = ...), and
 # unittest's @unittest.skip / skipIf / skipUnless / expectedFailure
 SKIP_MARK = re.compile(r'\bmark\s*\.\s*(skip|skipif|xfail)\b|\bunittest\s*\.\s*(skip|skipIf|skipUnless|expectedFailure)\b'
                        r'|^\s*@\s*(skip|skipIf|skipUnless|expectedFailure)\b', re.MULTILINE)
-SKIP_CALL = re.compile(r'\bpytest\s*\.\s*(skip|xfail|importorskip)\s*\(|\.\s*skipTest\s*\(|\bSkipTest\b'
-                       r'|\b(skip|xfail)\s*\.\s*Exception\b')
+SKIP_CALL = re.compile(r'\.\s*skipTest\s*\(|\bSkipTest\b|\b(skip|xfail)\s*\.\s*Exception\b')
 SKIP_NAMES = {'skip', 'xfail', 'importorskip'}
 FROM_PYTEST = re.compile(r'^\s*from\s+pytest\s+import\s+(?:\(([^)]*)\)|([^\n(]+))', re.MULTILINE)
+IMPORT = re.compile(r'^\s*import\s+([^\n;]+)', re.MULTILINE)
 COLLECT_IGNORE = re.compile(r'\bcollect_ignore(_glob)?\b')
 TEST_FUNC = re.compile(r'^\s*(async\s+)?def\s+test\w*\s*\(', re.MULTILINE)
 ASSERT = re.compile(r'^\s*assert\b', re.MULTILINE)
@@ -56,7 +61,7 @@ CODE_CHECK = re.compile(r'\bexcept\b[^\n]*\bTclError\b[\s\S]*\bnot\s+in\s+str\([
 LOOK_BACK = 4   # lines
 
 # options that stop pytest collecting or running some tests
-DESELECT = re.compile(r'''(?<![\w-])(--ignore-glob|--ignore|--deselect|-k|-m\s*=?\s*["']?\s*not\b)(?=[\s=\"']|$)''')
+DESELECT = re.compile(r'''(?<![\w-])(--ignore-glob|--ignore|--deselect|-k|-m(?!\s+pytest\b))(?=[\s=\"']|$)''')
 
 
 # token types whose text is not code: strings (incl. f-string pieces, 3.12+) and comments
@@ -84,18 +89,19 @@ def code_only(text):
 
 
 def file_kind(path):
-    """'test', 'config' (pytest settings or a CI workflow) or None (not guarded)."""
+    """'test', 'config' (pytest settings or a CI workflow), 'guard' (this file), 'settings' (the Claude Code settings
+    that run it) or None (not guarded)."""
     path = (path or '').replace('\\', '/')
     name = os.path.basename(path)
+    if GUARD_FILE.search(path):
+        return 'guard'
+    if SETTINGS.search(path):
+        return 'settings'
     if TEST_FILE.match(name):
         return 'test'
     if name in PYTEST_CONFIG or WORKFLOW.search(path):
         return 'config'
     return None
-
-
-def is_test_file(path):
-    return file_kind(path) == 'test'
 
 
 # --- test files ----------------------------------------------------------------------------------------------------
@@ -108,28 +114,37 @@ def _is_display_guard(lines, code_lines, i):
             and bool(CODE_CHECK.search('\n'.join(code_lines[start:i]))))
 
 
-def _pytest_aliases(code):
-    """Local names bound to pytest.skip / xfail / importorskip by `from pytest import ...`."""
-    names = set()
+def _pytest_skip_call(code):
+    """A pattern for calls to pytest.skip / xfail / importorskip under the names this code gives them: through pytest
+    or an `import pytest as X` alias, or bare once bound by `from pytest import ...`."""
+    modules, bare = {'pytest'}, set()
+    for m in IMPORT.finditer(code):
+        for part in m.group(1).split(','):
+            bits = part.split()
+            if len(bits) == 3 and bits[0] == 'pytest' and bits[1] == 'as':
+                modules.add(bits[2])
     for m in FROM_PYTEST.finditer(code):
         for part in (m.group(1) or m.group(2)).replace('\n', ' ').split(','):
             bits = part.split()
             if bits and bits[0] in SKIP_NAMES:
-                names.add(bits[2] if len(bits) == 3 and bits[1] == 'as' else bits[0])
-    return names
+                bare.add(bits[2] if len(bits) == 3 and bits[1] == 'as' else bits[0])
+    pattern = (r'\b(' + '|'.join(sorted(map(re.escape, modules))) + r')\s*\.\s*(' + '|'.join(sorted(SKIP_NAMES))
+               + r')\s*\(')
+    if bare:
+        pattern += r'|(?<![\w.])(' + '|'.join(sorted(map(re.escape, bare))) + r')\s*\('
+    return re.compile(pattern)
 
 
 def count_skip_calls(text, code):
     """Skip calls and raises in code, not counting the allowed no-display guard (judged with text, the same lines with
     their strings and comments still in)."""
     lines, code_lines = text.split('\n'), code.split('\n')
-    aliases = _pytest_aliases(code)
-    bare = re.compile(r'(?<![\w.])(' + '|'.join(sorted(map(re.escape, aliases))) + r')\s*\(') if aliases else None
+    pytest_skip = _pytest_skip_call(code)
     total = 0
     for i, line in enumerate(code_lines):
         if _is_display_guard(lines, code_lines, i):
             continue
-        total += len(SKIP_CALL.findall(line)) + (len(bare.findall(line)) if bare else 0)
+        total += len(SKIP_CALL.findall(line)) + len(pytest_skip.findall(line))
     return total
 
 
@@ -260,12 +275,13 @@ def weakening(old, new):
 
 # --- pytest settings and CI workflows ------------------------------------------------------------------------------
 
-KEY_LINE = re.compile(r'^\s*(\[|[\w.-]+\s*[=:])')
+KEY_LINE = re.compile(r'^\s*(\[|[A-Za-z_][\w.-]*\s*(=|:(?!:)))')
 
 
 def _pytest_runs(text):
-    """The parts of a settings or workflow file that pytest reads options from: each addopts value (to the next key)
-    and each line that runs pytest (with its \\ or ` continuation lines)."""
+    """The parts of a settings or workflow file that pytest reads options from: each addopts value (to the next key or
+    section; indented continuation lines such as `  --ignore=x` are part of the value) and each line that runs pytest,
+    from the word pytest on (with its \\ or ` continuation lines)."""
     lines, parts, i = text.split('\n'), [], 0
     while i < len(lines):
         line = lines[i]
@@ -276,11 +292,12 @@ def _pytest_runs(text):
             parts.append('\n'.join(lines[i:j]))
             i = j
             continue
-        if re.search(r'\bpytest\b', line):
+        run = re.search(r'\bpytest\b', line)
+        if run:
             j = i
             while lines[j].rstrip().endswith(('\\', '`')) and j + 1 < len(lines):
                 j += 1
-            parts.append('\n'.join(lines[i:j + 1]))
+            parts.append('\n'.join([line[run.start():], *lines[i + 1:j + 1]]))
             i = j + 1
             continue
         i += 1
@@ -294,6 +311,32 @@ def _deselects(text):
 def config_weakening(old, new):
     """What changing pytest's settings or a CI workflow from old to new would weaken (empty list = fine)."""
     return _compare({'deselect options': _deselects(old)}, {'deselect options': _deselects(new)})
+
+
+# --- the guard itself ----------------------------------------------------------------------------------------------
+
+def _guard_wiring(text):
+    """How a Claude Code settings file wires this guard in: its PreToolUse entries that run guard_tests.py, and whether
+    it switches all hooks off. None when the file isn't a JSON object (Claude Code can't load it either)."""
+    try:
+        settings = json.loads(text) if text.strip() else {}
+    except ValueError:
+        return None
+    if not isinstance(settings, dict):
+        return None
+    hooks = settings.get('hooks')
+    entries = hooks.get('PreToolUse') if isinstance(hooks, dict) else None
+    ours = [e for e in entries if 'guard_tests.py' in json.dumps(e)] if isinstance(entries, list) else []
+    return ours, bool(settings.get('disableAllHooks'))
+
+
+def guard_weakening(kind, old, new):
+    """What an edit to the guard's own file or its settings would weaken (empty list = fine)."""
+    if kind == 'guard':
+        return ['changes the test-weakening guard itself'] if new != old else []
+    if _guard_wiring(new) != _guard_wiring(old):
+        return ['removes, changes or switches off the hook that runs the test-weakening guard']
+    return []
 
 
 # --- the hook ------------------------------------------------------------------------------------------------------
@@ -341,14 +384,19 @@ def check(event):
     after = file_after(event.get('tool_name', ''), tool_input, current)
     if after is None:
         return None
-    found = weakening(current, after) if kind == 'test' else config_weakening(current, after)
+    if kind == 'test':
+        found = weakening(current, after)
+    elif kind == 'config':
+        found = config_weakening(current, after)
+    else:
+        found = guard_weakening(kind, current, after)
     if not found:
         return None
     return (f'Blocked: this edit to {os.path.basename(path)} weakens the tests - it ' + '; '.join(found) + '.\n'
             'A failing test is a report about the app: fix the app code (or the real cause) so the test passes as it '
             'is, rather than skipping, xfailing, deselecting, deleting or loosening it. Adding tests and asserts is '
             'always fine.\n'
-            'If a test truly is wrong or obsolete, stop and ask the human; they can change it by hand '
+            'If a test (or this guard) truly is wrong or obsolete, stop and ask the human; they can change it by hand '
             '(see "Test-weakening guard" in the root README).')
 
 

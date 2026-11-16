@@ -178,7 +178,23 @@ def test_blocks_skip_calls_imported_from_pytest(test_file, imports, call):
     assert 'adds 1 skip/xfail calls (0 -> 1)' in err
 
 
-@pytest.mark.parametrize('line', ['self.skipTest("later")', 'raise unittest.SkipTest("later")',
+@pytest.mark.parametrize('imports, line', [('import pytest as pt', '    pt.skip("x")'),
+                                           ('import pytest as pt', '    pt.xfail("x")'),
+                                           ('import os, pytest as pt', '    pt.importorskip("openpyxl")'),
+                                           ('import pytest as pt', '@pt.mark.skip\ndef test_later():\n    pass')])
+def test_blocks_skips_through_an_import_pytest_as_alias(test_file, imports, line):
+    test_file.write_text(BASE.replace('import pytest\n', f'import pytest\n{imports}\n'), encoding='utf-8')
+    code, err = run_hook(edit(test_file, "    assert min('ab') == 'a'\n", f"    assert min('ab') == 'a'\n{line}\n"))
+    assert code == 2
+    assert 'adds 1 skip' in err
+
+
+def test_allows_a_pt_skip_when_pt_is_not_pytest(test_file):
+    code, _ = run_hook(edit(test_file, "    assert min('ab') == 'a'", "    pt.skip('x')\n    assert min('ab') == 'a'"))
+    assert code == 0
+
+
+@pytest.mark.parametrize('line', ['self.skipTest("later")','raise unittest.SkipTest("later")',
                                   'raise SkipTest("later")', 'raise pytest.skip.Exception("later")',
                                   'raise pytest.xfail.Exception("later")'])
 def test_blocks_skip_raises_and_skiptest(test_file, line):
@@ -269,7 +285,10 @@ jobs:
     ('pyproject.toml', 'addopts = "--capture=sys"', 'addopts = [\n    "--capture=sys",\n    "--ignore=test_screens.py",\n]'),
     ('pyproject.toml', 'addopts = "--capture=sys"', 'addopts = "--capture=sys --ignore-glob=test_s*.py"'),
     ('pyproject.toml', 'addopts = "--capture=sys"', 'addopts = "--capture=sys -m \'not slow\'"'),
+    ('pyproject.toml', 'addopts = "--capture=sys"', 'addopts = "--capture=sys -m \'gui and not windows\'"'),
+    ('pyproject.toml', 'addopts = "--capture=sys"', 'addopts = "--capture=sys -m fast"'),
     ('pytest.ini', 'addopts = "--capture=sys"', 'addopts = --capture=sys -k "not windows"'),
+    ('tests.yml', '-q --cov=.', '-q -m fast --cov=.'),
     ('tests.yml', '-q --cov=.', '-q -k "not screens" --cov=.'),
     ('tests.yml', '-q --cov=.', '-q --deselect test_screens.py --cov=.'),
     ('tests.yml', 'python -m pytest -q --cov=.', 'python -m pytest -q \\\n          --ignore=test_screens.py --cov=.'),
@@ -291,6 +310,8 @@ def test_blocks_adding_a_deselect_option(tmp_path, name, old, new):
     ('pyproject.toml', 'filterwarnings = ["error::ResourceWarning"]', 'filterwarnings = []'),
     ('tests.yml', '-q --cov=.', '-q -x --cov=.'),
     ('tests.yml', 'pip install -r requirements-dev.txt', 'pip install -k -r requirements-dev.txt'),   # not a pytest line
+    ('tests.yml', 'python -m pip install -r requirements-dev.txt',                # python's -m, not pytest's
+     'python -m pip install pytest pytest-cov\n      - run: python -m pytest -q test_guard_tests.py'),
 ])
 def test_allows_other_settings_and_workflow_edits(tmp_path, name, old, new):
     base = WORKFLOW if name == 'tests.yml' else PYPROJECT
@@ -299,6 +320,30 @@ def test_allows_other_settings_and_workflow_edits(tmp_path, name, old, new):
     p = folder / name
     p.write_text(base, encoding='utf-8')
     assert run_hook(edit(p, old, new)) == (0, '')
+
+
+INI = {'pytest.ini': '[pytest]\naddopts =\n    --capture=sys\n    {}\ntestpaths = .\n',
+       'tox.ini': '[pytest]\naddopts =\n    --capture=sys\n    {}\ntestpaths = .\n',
+       'setup.cfg': '[tool:pytest]\naddopts = --capture=sys\n    {}\ntestpaths = .\n'}
+
+
+@pytest.mark.parametrize('name', sorted(INI))
+@pytest.mark.parametrize('option', ['--ignore=test_screens.py', '--deselect=test_speed.py::test_fast',
+                                    'test_speed.py::test_fast\n    -k "not screens"', '-m fast'])
+def test_blocks_a_deselect_option_on_an_ini_continuation_line(tmp_path, name, option):
+    # ini files spread addopts over indented lines; each of them is still part of the value pytest reads
+    p = tmp_path / name
+    p.write_text(INI[name].format('-p no:cacheprovider'), encoding='utf-8')
+    code, err = run_hook(write(p, INI[name].format(f'-p no:cacheprovider\n    {option}')))
+    assert code == 2
+    assert 'deselect options' in err
+
+
+@pytest.mark.parametrize('name', sorted(INI))
+def test_allows_other_options_on_an_ini_continuation_line(tmp_path, name):
+    p = tmp_path / name
+    p.write_text(INI[name].format('-p no:cacheprovider'), encoding='utf-8')
+    assert run_hook(write(p, INI[name].format('-p no:cacheprovider\n    --strict-markers')))[0] == 0
 
 
 def test_allows_removing_a_deselect_option(tmp_path):
@@ -453,3 +498,80 @@ def test_the_settings_command_runs_the_guard(tmp_path, test_file):
                               capture_output=True, text=True, timeout=30)
         assert proc.returncode == 2, (tool, proc.stderr)
         assert 'fix the app code' in proc.stderr
+
+
+# --- the guard itself ----------------------------------------------------------------------------------------------
+
+SETTINGS = (REPO / '.claude' / 'settings.json').read_text(encoding='utf-8')
+
+
+@pytest.fixture
+def guard_copy(tmp_path):
+    hooks = tmp_path / '.claude' / 'hooks'
+    hooks.mkdir(parents=True)
+    p = hooks / 'guard_tests.py'
+    p.write_text(GUARD.read_text(encoding='utf-8'), encoding='utf-8')
+    (tmp_path / '.claude' / 'settings.json').write_text(SETTINGS, encoding='utf-8')
+    return p
+
+
+@pytest.mark.parametrize('make_event', [
+    lambda p: edit(p, 'import ast\n', 'import ast\nsys = None\n'),
+    lambda p: write(p, 'import sys\nsys.exit(0)\n'),
+    lambda p: multi(p, ('import ast\n', 'import ast  # tidy\n')),
+])
+def test_blocks_any_edit_to_the_guard_itself(guard_copy, make_event):
+    code, err = run_hook(make_event(guard_copy))
+    assert code == 2
+    assert 'test-weakening guard' in err
+
+
+def test_allows_edits_to_other_hook_files(guard_copy):
+    assert run_hook(write(guard_copy.parent / 'notify.py', 'print("done")\n')) == (0, '')
+
+
+def _settings_with(change):
+    settings = json.loads(SETTINGS)
+    change(settings)
+    return json.dumps(settings, indent=2)
+
+
+@pytest.mark.parametrize('change', [
+    lambda s: s.pop('hooks'),
+    lambda s: s['hooks'].pop('PreToolUse'),
+    lambda s: s['hooks']['PreToolUse'].clear(),
+    lambda s: s['hooks']['PreToolUse'][0].update(matcher='NotebookEdit'),
+    lambda s: s['hooks']['PreToolUse'][0]['hooks'][0].update(command='true'),
+    lambda s: s.update(disableAllHooks=True),
+])
+def test_blocks_settings_edits_that_turn_the_guard_off(guard_copy, change):
+    p = guard_copy.parent.parent / 'settings.json'
+    code, err = run_hook(write(p, _settings_with(change)))
+    assert code == 2
+    assert 'switches off the hook' in err
+
+
+def test_blocks_a_settings_edit_that_breaks_the_json(guard_copy):
+    # settings Claude Code can't parse load no hooks at all
+    p = guard_copy.parent.parent / 'settings.json'
+    assert run_hook(edit(p, '"hooks": {', '"hooks": {{'))[0] == 2
+
+
+def test_blocks_switching_hooks_off_in_settings_local(guard_copy):
+    p = guard_copy.parent.parent / 'settings.local.json'
+    assert run_hook(write(p, '{"disableAllHooks": true}'))[0] == 2
+
+
+@pytest.mark.parametrize('change', [
+    lambda s: s.update(permissions={'allow': ['Bash(ls:*)']}),
+    lambda s: s['hooks']['PreToolUse'].append({'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': 'true'}]}),
+    lambda s: s['hooks'].update(Stop=[{'hooks': [{'type': 'command', 'command': 'true'}]}]),
+])
+def test_allows_settings_edits_that_keep_the_guard(guard_copy, change):
+    p = guard_copy.parent.parent / 'settings.json'
+    assert run_hook(write(p, _settings_with(change))) == (0, '')
+
+
+def test_allows_a_new_settings_local_without_hooks_off(guard_copy):
+    p = guard_copy.parent.parent / 'settings.local.json'
+    assert run_hook(write(p, '{"permissions": {"allow": ["Bash(ls:*)"]}}')) == (0, '')
