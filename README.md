@@ -48,6 +48,33 @@ I’m keeping everything modular. Each project or workflow gets its own separate
     5. A newer space report is loaded with Refresh in the app, not by rebuilding. Rooms that disappear are kept and flagged, never deleted.
 * **Details:** method, decisions and open questions are in `capacity_egress_app/README.md`. It replaced the earlier `exiting_capacity_calculation` terminal script (retired 2026-10-05).
 
+## Test-weakening guard
+When a test fails, the fix belongs in the app (or whatever really caused it), not in the test. A Claude Code hook enforces that so a reviewer doesn't have to catch it: `.claude/settings.json` runs `.claude/hooks/guard_tests.py` before every Edit, Write and MultiEdit.
+* **What it blocks in a test file** (`test_*.py`, `*_test.py`, `conftest.py`), when the edit would:
+  1. add a skip mark: `pytest.mark.skip` / `skipif` / `xfail` (also `pytestmark = ...`), or unittest's skip decorators
+  2. add a skip call: `pytest.skip(...)` / `pytest.xfail(...)` / `pytest.importorskip(...)` (also through `import pytest as pt`), the same names imported with `from pytest import ...` and called bare, `self.skipTest(...)`, `raise unittest.SkipTest`, `raise pytest.skip.Exception` / `pytest.xfail.Exception`
+  3. add entries to `collect_ignore` / `collect_ignore_glob`
+  4. leave fewer test functions, fewer `assert` statements, or fewer `@pytest.mark.parametrize` cases
+  5. add an assert that can't fail (`assert True`, `assert 1`, `assert not False`, `assert 1 == 1`, `assert (x, "why")`)
+
+  Strings and comments don't count, so commenting out an assert counts as removing it.
+* **What it blocks in pytest's settings and CI** (`pyproject.toml`, `pytest.ini`, `setup.cfg`, `tox.ini`, `.github/workflows/*.yml`): adding an option that deselects tests (`-k`, `--deselect`, `--ignore`, `--ignore-glob`, any `-m` marker expression) to `addopts` (continuation lines included) or a line that runs pytest. It doesn't judge any other edit to those files (see Limits).
+* **What it blocks on the guard itself:** any edit to `.claude/hooks/guard_tests.py`, and any edit to `.claude/settings.json` or `.claude/settings.local.json` that removes, changes or switches off (`disableAllHooks`) the hook entry that runs it. Other settings edits are fine. Changing the guard is a human-only edit.
+* The agent is told to fix the app code instead.
+* **What it lets through:** other files, new tests and extra asserts, rewrites that keep the same tests and asserts, removing a skip or a deselect option, and the screen tests' no-display guard (`except tk.TclError` -> re-raise unless the message mentions the display -> `pytest.skip(f"no display: {e}")`), meant to skip only on a machine with no screen. The guard checks that the TclError catch, the 'display' check and the re-raise are there, not that the `if` condition is left as it is (see Limits).
+* **Overriding it (humans only):** if a test, or the guard itself, really is wrong or obsolete, edit the file by hand in your editor (outside the agent), or turn the hook off for a while (`/hooks` in Claude Code, or remove the `PreToolUse` entry from `.claude/settings.json` by hand and put it back afterwards).
+* **Limits** (what it doesn't catch, so a reviewer still has to):
+  1. an early exit that stops a test checking anything, e.g. `if sys.platform == 'win32': return` before the asserts
+  2. weaker asserts that can still fail (`assert x == 5` loosened to `assert x > 0`), or deleting a test while adding a different one with as many asserts
+  3. shell commands (`sed`, `rm`, `git rm`, a script), including ones that change the guard or its settings: it only sees Claude Code's Edit, Write and MultiEdit
+  4. parametrize cases built in code rather than written as a list, a deselect option set through an environment variable (`PYTEST_ADDOPTS`) or a file it doesn't watch, test paths given to pytest on its command line (`python -m pytest test_egress.py` runs only that file), and skips through other helpers or plugins
+  5. other ways to get CI green while tests still fail: `|| true` on the pytest line, `continue-on-error`, shrinking the OS matrix, deleting the pytest step or adding an `if:` to it, `testpaths` / `python_files` collection settings, swapping a deselect option for a broader one (`-k 'not slow'` to `-k 'not slow and not screens'`), and the short or grouped option forms (`-mfast`, `-knot_screens`, `-qm fast`, `-qk "not screens"`)
+  6. widening the no-display guard's condition, e.g. `if 'display' not in str(e) and sys.platform != 'win32':`, which then skips on other Tk errors too
+  7. stopping pytest collecting tests without removing them: renaming a test class (`class TestA:` to `class A:`), or `__test__ = False` on a module or class
+  8. a test renamed while also losing its asserts is blocked even if that was intended
+
+  It needs `python3` on the PATH. Its own tests are `capacity_egress_app/test_guard_tests.py`.
+
 ## Future Ideas
 1. A web link for the capacity check screen (OREM and others, nothing to install). Starts with asking UVic IT; no outside hosting.
 2. Generalize the hierarchy of `facility_folder_automation` let the user choose which columns become folder levels, instead of hardcoding Property/Floor/Space.
