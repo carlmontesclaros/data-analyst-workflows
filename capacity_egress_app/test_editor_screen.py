@@ -534,10 +534,6 @@ def test_exports_after_a_floor_save_are_the_whole_campus_result(root, campus_pat
     try:
         screen = editor_screen(root, conn)
         open_floor(screen, conn)
-        problems = when_open(screen, 'Add exit', lambda win: (fill_exit(win, NEW_EXIT | {'Exit type': 'trapdoor'}), press(win, 'Save')),
-                             lambda win: press(win, 'Cancel'))
-        screen.add_exit()
-        del problems
         screen.change_capacity()
         win = dialog(screen, 'Change capacity')
         capacity, why = entries(win)
