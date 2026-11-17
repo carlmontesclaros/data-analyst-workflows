@@ -369,6 +369,12 @@ def load_rooms(conn):
 def load_exits(conn):
     return pd.read_sql("SELECT * FROM exits", conn)
 
+# one floor of one building -> its rooms and exits, same columns as the whole-table loads
+def load_floor(conn, prop, floor):
+    where = " WHERE property = ? AND floor = ?"
+    return (pd.read_sql("SELECT * FROM rooms" + where, conn, params=(prop, floor)),
+            pd.read_sql("SELECT * FROM exits" + where, conn, params=(prop, floor)))
+
 def load_code_factors(conn):
     return {
         'area_factors': pd.read_sql("SELECT * FROM area_factors", conn),

@@ -398,3 +398,129 @@ def test_wing_group_refuses_other_notations(typed):
 
 def test_wing_label():
     assert [egress.wing_label(w) for w in ['', 'B', 'A+C+D']] == ['', 'wing B', 'wings A+C+D']
+
+# --- one floor redone, the rest kept -> exactly what a whole-campus calculation gives -------------------------------
+# what the editor screen does after a save on one floor (zones never cross floors, so nothing else can have moved)
+
+def raw_room(room_id, floor, space, area, capacity=None, source='per code', override=None, sub=CLASSROOM, prop='Fake Hall'):
+    return {'room_id': room_id, 'property': prop, 'floor': floor, 'space': space, 'area_m2': area, 'sub_category': sub,
+            'capacity': capacity, 'capacity_source': source, 'room_type_override': override}
+
+def raw_exit(exit_pk, floor, exit_id, exit_type, cm, wing=None, into_wing=None, prop='Fake Hall', stair_cm=None, stair_type=None):
+    return {'exit_pk': exit_pk, 'property': prop, 'floor': floor, 'wing': wing, 'into_wing': into_wing,
+            'exit_id': exit_id, 'exit_type': exit_type, 'clear_width_cm': cm, 'stair_width_cm': stair_cm,
+            'stair_type': stair_type}
+
+# four floors with the awkward things a real campus has: wings and a link door, a room type nobody knows,
+# a floor with no exits, a floor where no room has a count yet
+CAMPUS_ROOMS = [
+    raw_room(1, '1', 'A101', 50.0, 20, 'site count'), raw_room(2, '1', 'B102', 30.0), raw_room(3, '1', 'C103', 45.0, 0, 'site count'),
+    raw_room(4, '2', '201', 40.0), raw_room(5, '2', '202', 40.0, override='lounge'), raw_room(6, '2', '203', 25.0),
+    raw_room(7, '3', '301', 60.0, 35, 'PM change'), raw_room(8, '3', '302', 60.0, 10, 'PM change'),
+    raw_room(9, '4', '401', 35.0, sub=None), raw_room(10, '1', 'A104', 20.0, 5, 'site count', prop='Other Hall'),
+]
+CAMPUS_EXITS = [
+    raw_exit(1, '1', 'S1 - doorway', 'doorway', 88, wing='A'), raw_exit(2, '1', 'S2 - doorway', 'doorway', 88, wing='B'),
+    raw_exit(3, '1', 'L1 - link', 'doorway', 88, wing='A', into_wing='B'),
+    raw_exit(4, '2', 'S1 - doorway', 'doorway', 88), raw_exit(5, '2', 'S2 - doorway', 'trapdoor', 88),
+    raw_exit(6, '3', 'S1 - doorway', 'doorway', 88), raw_exit(7, '3', 'S2 - doorway', 'doorway', None),
+    raw_exit(8, '1', 'S1 - doorway', 'doorway', 100, prop='Other Hall'),
+]
+
+def frames(rooms, exits):
+    return pd.DataFrame(rooms), pd.DataFrame(exits, columns=list(CAMPUS_EXITS[0]))
+
+# same rows in the same order with the same values. a blank is a blank (None or NaN), and the way a column is stored
+# (text or the string type) may differ from a fresh load, but a column of numbers must stay numbers
+def assert_same_frame(got, want, obj):
+    blanks = lambda df: df.astype(object).where(df.notna(), None)    # noqa: E731
+    pd.testing.assert_frame_equal(blanks(got), blanks(want), check_dtype=False, obj=obj)
+    for column in want.columns:
+        assert pd.api.types.is_numeric_dtype(got[column]) == pd.api.types.is_numeric_dtype(want[column]), f"{obj}.{column}"
+
+def assert_same_result(got, want):
+    for table in ('rooms', 'exits', 'zones'):
+        assert_same_frame(got[table], want[table], table)
+    assert got['settings'] == want['settings']
+    # the warnings are the same rows; only the order they were found in can differ
+    key = ['type', 'property', 'floor', 'detail']
+    assert_same_frame(got['warnings'].sort_values(key).reset_index(drop=True),
+                      want['warnings'].sort_values(key).reset_index(drop=True), 'warnings')
+
+def refreshed(rooms, exits, new_rooms, new_exits, prop, floor):
+    # the screen's way: the old whole-campus result + only that floor's rows read again and redone
+    f = factors()
+    old_rooms, old_exits = frames(rooms, exits)
+    before = egress.calculate(old_rooms, old_exits, f)
+    floor_rooms = pd.DataFrame([r for r in new_rooms if (r['property'], r['floor']) == (prop, floor)])
+    floor_exits = pd.DataFrame([e for e in new_exits if (e['property'], e['floor']) == (prop, floor)], columns=list(CAMPUS_EXITS[0]))
+    got_rooms, got_exits, got = egress.refresh_floor(old_rooms, old_exits, before, f, prop, floor, floor_rooms, floor_exits)
+    want_rooms, want_exits = frames(new_rooms, new_exits)
+    assert_same_frame(got_rooms, want_rooms, 'loaded rooms')
+    assert_same_frame(got_exits, want_exits, 'loaded exits')
+    return got, egress.calculate(want_rooms, want_exits, f)
+
+def edited(rows, key, value, **changes):
+    return [r | changes if r[key] == value else r for r in rows]
+
+@pytest.mark.parametrize('why, new_rooms, new_exits, floor', [
+    ('a capacity changed', edited(CAMPUS_ROOMS, 'room_id', 7, capacity=77, capacity_source='site count'), CAMPUS_EXITS, '3'),
+    ('a room type chosen', edited(CAMPUS_ROOMS, 'room_id', 6, room_type_override='office'), CAMPUS_EXITS, '2'),
+    ('a count on the floor nobody had counted', edited(CAMPUS_ROOMS, 'room_id', 9, capacity=12, capacity_source='site count'), CAMPUS_EXITS, '4'),
+    ('an exit added to a floor with wings and a link door',
+     CAMPUS_ROOMS, CAMPUS_EXITS + [raw_exit(9, '1', 'S3 - doorway', 'doorway', 120, wing='C')], '1'),
+    ('an exit added to a floor that had none', CAMPUS_ROOMS, CAMPUS_EXITS + [raw_exit(9, '4', 'S1 - doorway', 'doorway', 90)], '4'),
+    ('every exit on a floor deleted', CAMPUS_ROOMS, [e for e in CAMPUS_EXITS if e['floor'] != '3'], '3'),
+    ('an exit width changed', CAMPUS_ROOMS, edited(CAMPUS_EXITS, 'exit_pk', 7, clear_width_cm=95), '3'),
+])
+def test_one_floor_redone_gives_the_whole_campus_answer(why, new_rooms, new_exits, floor):
+    got, want = refreshed(CAMPUS_ROOMS, CAMPUS_EXITS, new_rooms, new_exits, 'Fake Hall', floor)
+    assert_same_result(got, want)
+
+# a floor whose rooms have no capacity at all comes back from the database as a column of None, not numbers ->
+# it must not turn the whole capacity column into text
+def test_a_floor_of_blank_capacities_keeps_the_number_columns_numbers():
+    got, want = refreshed(CAMPUS_ROOMS, CAMPUS_EXITS, CAMPUS_ROOMS, CAMPUS_EXITS, 'Fake Hall', '2')
+    assert_same_result(got, want)
+    assert pd.api.types.is_numeric_dtype(got['rooms']['capacity'])
+
+# a column with a value in every row loads as whole numbers. a save that leaves one blank (a door with no stair behind it,
+# a room nobody counted) must give numbers with blanks, like a whole reload, not fail or lose the other values
+STAIRED_EXITS = [e | {'stair_width_cm': 110, 'stair_type': 'stairs'} for e in CAMPUS_EXITS]
+COUNTED_ROOMS = [r | {'capacity': 10, 'capacity_source': 'site count'} if r['capacity'] is None else r for r in CAMPUS_ROOMS]
+
+@pytest.mark.parametrize('why, rooms, exits, new_rooms, new_exits, floor', [
+    ('one door on the floor has its stair cleared', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     edited(STAIRED_EXITS, 'exit_pk', 4, stair_width_cm=None, stair_type=None), '2'),
+    ('every door on the floor has its stair cleared', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     [e | {'stair_width_cm': None, 'stair_type': None} if e['floor'] == '2' else e for e in STAIRED_EXITS], '2'),
+    ('a plain doorway added to a floor that had no exits', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     STAIRED_EXITS + [raw_exit(9, '4', 'S1 - doorway', 'doorway', 90)], '4'),
+    ('a stair width that is not a whole number', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     edited(STAIRED_EXITS, 'exit_pk', 4, stair_width_cm=110.5), '2'),
+    ('a room count cleared', COUNTED_ROOMS, CAMPUS_EXITS,
+     edited(COUNTED_ROOMS, 'room_id', 4, capacity=None, capacity_source='per code'), CAMPUS_EXITS, '2'),
+])
+def test_a_blank_in_a_column_of_whole_numbers(why, rooms, exits, new_rooms, new_exits, floor):
+    got, want = refreshed(rooms, exits, new_rooms, new_exits, 'Fake Hall', floor)
+    assert_same_result(got, want)
+
+def test_refresh_floor_keeps_the_database_order_and_other_floors_untouched():
+    rooms, exits = frames(CAMPUS_ROOMS, CAMPUS_EXITS)
+    before = egress.calculate(rooms, exits, factors())
+    floor = pd.DataFrame([raw_room(7, '3', '301', 60.0, 99, 'site count')])       # room 8 is gone from the floor
+    got_rooms, _, got = egress.refresh_floor(rooms, exits, before, factors(), 'Fake Hall', '3', floor, exits.iloc[0:0])
+    assert got_rooms['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9, 10]
+    assert got['rooms']['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9, 10]
+    assert got['rooms'].loc[got['rooms']['room_id'] == 7, 'capacity'].item() == 99
+    assert got['rooms'].loc[got['rooms']['room_id'] == 1, 'capacity'].item() == 20
+    assert list(got['rooms'].index) == list(range(len(got['rooms'])))
+    assert before['rooms'].shape[0] == 10                                       # the old result is not changed
+
+# a floor where no room has a sub-category (a store, a plant floor) calculates like any other
+def test_a_floor_with_no_sub_categories_calculates():
+    rooms = [room('S1', 12.0, sub=None), room('S2', 8.0, sub=None)]
+    result = run(rooms, TWO_DOORS)
+    assert result['rooms']['in_scope'].tolist() == [True, True]
+    assert result['rooms']['per_code_load'].tolist() == [0, 0]
+    assert result['warnings']['type'].tolist().count('no_room_type') == 2
