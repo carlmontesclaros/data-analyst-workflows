@@ -92,7 +92,7 @@ def prepare_rooms(rooms, factors, settings, warning_rows):
 
     # scope -> every room except the excluded sub-category codes (a code covers its children)
     # scope is a project decision: 16.x non-assignable has no Table 3.1.17.1. row (lounges and kitchens do, so they count)
-    sub_code = rooms['sub_category'].astype(str).str.split(' - ').str[0].str.strip()
+    sub_code = rooms['sub_category'].fillna('').astype(str).str.split(' - ').str[0].str.strip()      # blank everywhere on a floor -> '', not an all-NaN column .str can't read
     rooms['in_scope'] = True
     for code in settings['room_exclude']:
         rooms.loc[(sub_code == code) | sub_code.str.startswith(code + '.'), 'in_scope'] = False
@@ -341,7 +341,11 @@ def build_zones(rooms, exits, settings, warning_rows):
         flag_texts.append('; '.join(flags))
     zones['status'] = statuses
     zones['flags'] = flag_texts
-    zones['status_order'] = zones['status'].map(STATUS_ORDER)
+    return order_zones(zones)
+
+# worst status first, then by building, floor and wing
+def order_zones(zones):
+    zones = zones.assign(status_order=zones['status'].map(STATUS_ORDER))
     zones = zones.sort_values(['status_order', 'property', 'floor', 'zone_wing']).drop(columns='status_order')
     return zones.reset_index(drop=True)
 
@@ -379,6 +383,33 @@ def calculate_floor(rooms, exits, factors, prop, floor):
     r = rooms[(rooms['property'] == prop) & (rooms['floor'] == floor)]
     e = exits[(exits['property'] == prop) & (exits['floor'] == floor)]
     return calculate(r, e, factors)
+
+# one floor's rows read again after a save on that floor -> the loaded tables and the result with only that floor redone.
+# zones never cross floors, so this is the whole-campus answer without calculating the other floors again.
+# every table keeps the order of a whole load / whole calculation, except the warnings (a floor's warnings go last)
+def refresh_floor(rooms, exits, result, factors, prop, floor, floor_rooms, floor_exits):
+    # a floor with no value in a column comes back from the database as text-typed blanks -> same types as the whole table
+    floor_rooms = floor_rooms.astype(rooms.dtypes.reindex(floor_rooms.columns).to_dict())
+    floor_exits = floor_exits.astype(exits.dtypes.reindex(floor_exits.columns).to_dict())
+    floor_result = calculate(floor_rooms, floor_exits, factors)
+    rooms = splice_floor(rooms, floor_rooms, prop, floor, 'room_id')
+    exits = splice_floor(exits, floor_exits, prop, floor, 'exit_pk')
+    refreshed = {'rooms': splice_floor(result['rooms'], floor_result['rooms'], prop, floor, 'room_id'),
+                 'exits': splice_floor(result['exits'], floor_result['exits'], prop, floor, 'exit_pk'),
+                 'zones': order_zones(splice_floor(result['zones'], floor_result['zones'], prop, floor)),
+                 'warnings': splice_floor(result['warnings'], floor_result['warnings'], prop, floor),
+                 'settings': result['settings']}
+    return rooms, exits, refreshed
+
+# a table with one floor's rows swapped for new ones
+def splice_floor(table, floor_rows, prop, floor, key=None):
+    kept = table[(table['property'] != prop) | (table['floor'] != floor)]
+    floor_rows = floor_rows.astype(kept.dtypes.reindex(floor_rows.columns).to_dict())
+    parts = [part for part in (kept, floor_rows) if len(part)]
+    spliced = pd.concat(parts) if parts else table.iloc[0:0]
+    if key and len(spliced):
+        spliced = spliced.sort_values(key)
+    return spliced.reset_index(drop=True)
 
 # colours -> same meaning on every table (README "Colours"): red only ever means over a hard limit
 GREEN, AMBER, RED, GREY, NONE = 'green', 'amber', 'red', 'grey', ''

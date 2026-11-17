@@ -6,9 +6,11 @@ from tkinter import ttk
 import pytest
 import app
 import capacity_db as db
+import egress
 import excel_inputs as xi
 import widgets
 from test_capacity_db import report, CONFIG_DIR
+from test_egress import assert_same_frame, assert_same_result
 
 EOW = 'Engineering Office Wing'
 ROOMS = [(EOW, '1', '101', 50.0, 20),      # counted 20 on a site visit
@@ -327,3 +329,224 @@ def test_change_code_factor(root, conn, said):
     assert conn.execute("SELECT mm_per_person FROM width_factors WHERE exit_type = 'doorway'").fetchone()[0] == 8.0
     assert db.history(conn, 'width_factors', 'doorway').iloc[0]['clause_ref'] == 'BCBC 2024 3.4.3.2.(1)'
     assert zone_row(screen)['capacity'] == '220'
+
+
+# --- a save redoes its own floor, not the campus -------------------------------------------------------------------
+# a save on one floor -> only that floor is read and calculated again; every other floor stays as it was. the screen must
+# still show exactly what a whole reload would (same rooms, exits, zones), whichever way the floor was saved
+
+OTHER = 'Clearihue Building'
+
+# 3 floors in 2 buildings: the one the tests save on (2 rooms, 2 doors), a floor where no room has a count yet
+# and no door was measured, and another building's floor with one door
+@pytest.fixture
+def campus_path(tmp_path):
+    path = str(tmp_path / 'campus.db')
+    c = db.connect(path)
+    db.create_schema(c)
+    db.import_code_factors(c, CONFIG_DIR)
+    db.insert_extra_settings(c)
+    db.insert_rooms(c, xi.classify_rooms(report(ROOMS + [(EOW, '2', '201', 40.0, None), (EOW, '2', '202', 45.0, None),
+                                                         (OTHER, '1', 'A101', 60.0, 35), (OTHER, '1', 'A102', 25.0, None)])), 'first.xlsx')
+    db.save_exit(c, doorway('S1 - doorway', 88), 'carl', 'Carl')
+    db.save_exit(c, doorway('S2 - doorway', 88), 'carl', 'Carl')
+    db.save_exit(c, doorway('S1 - doorway', 90) | {'property': OTHER}, 'carl', 'Carl')
+    db.set_editor(c, 'carl', True, 'carl', 'Carl', why='first editor')
+    c.close()
+    return path
+
+@pytest.fixture
+def calculated(monkeypatch):
+    # how many rooms each calculation was given
+    sizes = []
+    real = egress.calculate
+    def spy(rooms, exits, factors):
+        sizes.append(len(rooms))
+        return real(rooms, exits, factors)
+    monkeypatch.setattr(egress, 'calculate', spy)
+    return sizes
+
+def assert_shows_what_the_database_holds(screen, conn):
+    rooms, exits = db.load_rooms(conn), db.load_exits(conn)
+    assert_same_frame(screen.rooms, rooms, 'rooms')
+    assert_same_frame(screen.exits, exits, 'exits')
+    assert_same_result(screen.result, egress.calculate(rooms, exits, db.load_code_factors(conn)))
+    assert screen.seen_version == db.data_version(conn)
+
+def test_change_capacity_redoes_only_its_floor(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        screen.change_capacity()
+        win = dialog(screen, 'Change capacity')
+        capacity, why = entries(win)
+        type_into(capacity, '40')
+        type_into(why, 'OREM request')
+        calculated.clear()
+        press(win, 'Save')
+        assert said == [] and zone_row(screen)['load'] == '40'
+        assert max(calculated) < 6, calculated
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+def test_change_capacity_on_a_floor_nobody_has_counted(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        screen.focus_room(room(conn, '201'))
+        screen.root.update()
+        screen.change_capacity()
+        win = dialog(screen, 'Change capacity')
+        capacity, why = entries(win)
+        type_into(capacity, '12')
+        type_into(why, 'first count')
+        calculated.clear()
+        press(win, 'Save')
+        assert said == [] and max(calculated) < 6, calculated
+        assert screen.room_tree.item(f"r{room(conn, '201')['room_id']}", 'values')[7] == '12'
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+def test_change_room_type_redoes_only_its_floor(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        screen.change_room_type()
+        win = dialog(screen, 'Change room type')
+        combo = next(w for w in all_widgets(win) if isinstance(w, ttk.Combobox))
+        combo.set('office')
+        combo.event_generate('<<ComboboxSelected>>')
+        type_into(entries(win)[0], 'it is an office')
+        calculated.clear()
+        press(win, 'Save')
+        assert said == [] and max(calculated) < 6, calculated
+        assert room(conn, '101')['room_type_override'] == 'office'
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+def test_room_note_redoes_only_its_floor(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        def write(win):
+            next(w for w in all_widgets(win) if isinstance(w, tk.Text)).insert('1.0', 'tables moved to the back')
+            calculated.clear()
+            press(win, 'Save')
+        problems = when_open(screen, 'Note', write)
+        screen.room_note()
+        assert problems == [] and said == [] and max(calculated) < 6, calculated
+        assert screen.room_tree.item(f"r{room(conn, '101')['room_id']}", 'values')[12] == 'tables moved to the back'
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+def test_exit_saves_redo_only_their_floor(root, campus_path, said, calculated, monkeypatch):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        def forget_then_save(win, values):
+            fill_exit(win, values)
+            calculated.clear()
+            press(win, 'Save')
+
+        problems = when_open(screen, 'Add exit', lambda win: forget_then_save(win, NEW_EXIT))
+        screen.add_exit()
+        assert problems == [] and said == [] and max(calculated) < 6, calculated
+        assert zone_row(screen)['capacity'] == '451'
+        assert_shows_what_the_database_holds(screen, conn)
+
+        s2 = conn.execute("SELECT exit_pk FROM exits WHERE exit_id = 'S2 - doorway' AND property = ?", (EOW,)).fetchone()[0]
+        screen.exit_tree.selection_set(f"e{s2}")
+        problems = when_open(screen, 'Edit exit', lambda win: forget_then_save(win, {'Clear width': '95'}))
+        screen.edit_exit()
+        assert problems == [] and said == [] and max(calculated) < 6, calculated
+        assert_shows_what_the_database_holds(screen, conn)
+
+        screen.exit_tree.selection_set(f"e{s2}")
+        def write_note(win):
+            next(w for w in all_widgets(win) if isinstance(w, tk.Text)).insert('1.0', 'door sticks')
+            calculated.clear()
+            press(win, 'Save')
+        problems = when_open(screen, 'Note', write_note)
+        screen.exit_note()
+        assert problems == [] and said == [] and max(calculated) < 6, calculated
+        assert_shows_what_the_database_holds(screen, conn)
+
+        monkeypatch.setattr(app.simpledialog, 'askstring', lambda *a, **kw: 'measured the wrong door')
+        screen.exit_tree.selection_set(f"e{s2}")
+        calculated.clear()
+        screen.delete_exit()
+        assert said == [] and max(calculated) < 6, calculated
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+# the last door on a floor deleted -> the floor has no exits, like the floor nobody measured
+def test_deleting_the_last_exit_on_a_floor(root, campus_path, said, calculated, monkeypatch):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        screen.focus_room(room(conn, 'A101'))
+        screen.root.update()
+        pk = conn.execute("SELECT exit_pk FROM exits WHERE property = ?", (OTHER,)).fetchone()[0]
+        screen.exit_tree.selection_set(f"e{pk}")
+        monkeypatch.setattr(app.simpledialog, 'askstring', lambda *a, **kw: 'not a door')
+        calculated.clear()
+        screen.delete_exit()
+        assert said == [] and max(calculated) < 6, calculated
+        assert screen.exit_tree.get_children() == ()
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+# someone else saved on another floor while this screen was open -> this save shows their change too, not only its own
+def test_a_save_also_shows_what_someone_else_saved_on_another_floor(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        screen.change_capacity()
+        win = dialog(screen, 'Change capacity')
+        mark = db.connect(campus_path)
+        db.change_capacity(mark, room(mark, 'A101')['room_id'], 50, 'site count', 'carl', 'Mark', 'recounted')
+        mark.close()
+        capacity, why = entries(win)
+        type_into(capacity, '40')
+        type_into(why, 'OREM request')
+        press(win, 'Save')
+        assert said == []
+        assert_shows_what_the_database_holds(screen, conn)
+        assert screen.result['rooms'].set_index('room_id').loc[room(conn, 'A101')['room_id'], 'capacity'] == 50
+    finally:
+        conn.close()
+
+# the exports read the result. after a one-floor save it must be the whole-campus result row for row, warnings in
+# the order a restart would give them, so the files don't depend on what was saved before
+def test_exports_after_a_floor_save_are_the_whole_campus_result(root, campus_path, said):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        problems = when_open(screen, 'Add exit', lambda win: (fill_exit(win, NEW_EXIT | {'Exit type': 'trapdoor'}), press(win, 'Save')),
+                             lambda win: press(win, 'Cancel'))
+        screen.add_exit()
+        del problems
+        screen.change_capacity()
+        win = dialog(screen, 'Change capacity')
+        capacity, why = entries(win)
+        type_into(capacity, '40')
+        type_into(why, 'OREM request')
+        press(win, 'Save')
+        want = egress.calculate(db.load_rooms(conn), db.load_exits(conn), db.load_code_factors(conn))
+        got = screen.export_result()
+        for table in ('rooms', 'exits', 'zones', 'warnings'):
+            assert_same_frame(got[table], want[table], table)
+    finally:
+        conn.close()

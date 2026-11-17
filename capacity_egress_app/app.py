@@ -70,12 +70,32 @@ class App:
             self.exits = db.load_exits(self.conn)
             self.factors = db.load_code_factors(self.conn)
             self.result = egress.calculate(self.rooms, self.exits, self.factors)
+            self.result_in_whole_order = True
             self.seen_version = db.data_version(self.conn)
             self.properties = sorted(self.rooms['property'].unique())
             self.building.set_names(self.properties)
             self.show()
         finally:
             self.root.config(cursor='')
+
+    # one floor saved here -> read and calculate that floor again, the other floors can't have changed. if someone else
+    # saved too (the database moved on without this connection) -> everything may have changed, reload it all
+    def reload_floor(self, prop, floor):
+        if db.data_version(self.conn) != self.seen_version or self.exits.empty:
+            self.reload()
+            return
+        floor_rooms, floor_exits = db.load_floor(self.conn, prop, floor)
+        self.rooms, self.exits, self.result = egress.refresh_floor(self.rooms, self.exits, self.result, self.factors,
+                                                                   prop, floor, floor_rooms, floor_exits)
+        self.result_in_whole_order = False
+        self.show()
+
+    # the exports -> the whole-campus result, its warnings in the order a fresh start gives them
+    def export_result(self):
+        if not self.result_in_whole_order:
+            self.result = egress.calculate(self.rooms, self.exits, self.factors)
+            self.result_in_whole_order = True
+        return self.result
 
     # other people's saves -> reload when the database changed since this app last looked
     def refresh_if_changed(self):
@@ -336,8 +356,12 @@ class App:
             return None
         return pk
 
-    def after_change(self, message):
-        self.reload()
+    # floor = (building, floor) when the save only touched that floor, else everything is read again
+    def after_change(self, message, floor=None):
+        if floor is None:
+            self.reload()
+        else:
+            self.reload_floor(*floor)
         self.status_var.set(message)
 
     # from the check screen -> show that room's building and floor, room selected
@@ -397,7 +421,8 @@ class App:
 
         before = self.floor_result(room['property'], room['floor'])['zones']
 
-        def preview(*_):
+        # the number typed -> None, and the preview says so, when it isn't a whole number from 0
+        def entered():
             try:
                 new = int(cap_var.get())
                 if new < 0:
@@ -405,6 +430,12 @@ class App:
             except ValueError:
                 preview_var.set("Type a whole number (0 or more).")
                 return None
+            return new
+
+        def preview(*_):
+            new = entered()
+            if new is None:
+                return
             rooms = self.rooms.copy()
             mask = rooms['room_id'] == room['room_id']
             rooms.loc[mask, 'capacity'] = new
@@ -419,14 +450,13 @@ class App:
                 if z['flags']:
                     lines.append(f"     {z['flags']}")
             preview_var.set('\n'.join(lines))
-            return new
 
         cap_var.trace_add('write', preview)
         source_var.trace_add('write', preview)
         preview()
 
         def save():
-            new = preview()
+            new = entered()                           # the preview already shows this number's effect
             if new is None:
                 return
             try:
@@ -441,7 +471,8 @@ class App:
                     self.save_failed(err, parent=win)
                 return
             win.destroy()
-            self.after_change(f"saved: {room['property']} {room['space']} capacity {current or '-'} -> {new}")
+            self.after_change(f"saved: {room['property']} {room['space']} capacity {current or '-'} -> {new}",
+                              floor=(room['property'], room['floor']))
 
         buttons = ttk.Frame(frame)
         buttons.grid(row=6, column=0, columnspan=3, sticky='e')
@@ -525,7 +556,8 @@ class App:
             win.destroy()
             if changed:
                 self.after_change(f"saved: {room['property']} {room['space']} room type "
-                                  f"{text_or_blank(room['room_type']) or '-'} -> {chosen() or default or '-'}")
+                                  f"{text_or_blank(room['room_type']) or '-'} -> {chosen() or default or '-'}",
+                                  floor=(room['property'], room['floor']))
 
         buttons = ttk.Frame(frame)
         buttons.grid(row=5, column=0, columnspan=3, sticky='e')
@@ -564,7 +596,7 @@ class App:
         try:
             if db.set_note(self.conn, 'rooms', room['room_id'], note, self.user_login, self.user_name,
                            expected=room['note']):
-                self.after_change(f"note saved: {room['space']}")
+                self.after_change(f"note saved: {room['space']}", floor=(room['property'], room['floor']))
         except (ValueError, sqlite3.Error) as err:
             self.save_failed(err)
 
@@ -578,7 +610,7 @@ class App:
             return
         try:
             if db.set_note(self.conn, 'exits', pk, note, self.user_login, self.user_name, expected=e['notes']):
-                self.after_change(f"note saved: {e['exit_id']}")
+                self.after_change(f"note saved: {e['exit_id']}", floor=(e['property'], e['floor']))
         except (ValueError, sqlite3.Error) as err:
             self.save_failed(err)
 
@@ -668,7 +700,8 @@ class App:
                 self.save_failed(err)
                 values = entered
                 continue
-            self.after_change(f"exit saved: {entered['property']} floor {entered['floor']} {entered['exit_id']}")
+            self.after_change(f"exit saved: {entered['property']} floor {entered['floor']} {entered['exit_id']}",
+                              floor=(entered['property'], entered['floor']))
             return
 
     def add_exit(self):
@@ -701,7 +734,7 @@ class App:
         except (ValueError, sqlite3.Error) as err:
             self.save_failed(err)
             return
-        self.after_change(f"exit deleted: {e['exit_id']}")
+        self.after_change(f"exit deleted: {e['exit_id']}", floor=(e['property'], e['floor']))
 
     # code factors -> clause reference required, preview zones that change status
     def edit_code_factors(self):
@@ -862,7 +895,7 @@ class App:
         if not path:
             return
         try:
-            counts = exports.write_results_workbook(self.result, path, props, floors)
+            counts = exports.write_results_workbook(self.export_result(), path, props, floors)
         except PermissionError as err:
             messagebox.showerror("Not written", str(err))
             return
@@ -880,7 +913,7 @@ class App:
         if not path:
             return
         try:
-            info = exports.write_space_report(self.result, path, template, props, floors)
+            info = exports.write_space_report(self.export_result(), path, template, props, floors)
         except PermissionError as err:
             messagebox.showerror("Not written", str(err))
             return
@@ -895,7 +928,7 @@ class App:
         self.root.config(cursor='watch')               # reading the FMIS files takes a few seconds
         self.root.update_idletasks()
         try:
-            info = exports.write_fmis_upload(self.result, path, properties=props, floors=floors)
+            info = exports.write_fmis_upload(self.export_result(), path, properties=props, floors=floors)
         except (PermissionError, FileNotFoundError) as err:
             messagebox.showerror("Not written", str(err))
             return
