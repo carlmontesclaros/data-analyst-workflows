@@ -4,7 +4,7 @@ A desktop app for UVic Facilities Management that keeps the record of **room cap
 
 It replaces editing Excel by hand. A project manager who gets an OREM request ("can B303 go from 32 to 36?") opens the app, finds the room, types 36, sees whether the floor is still within its exit capacity, and saves or cancels. Every change is recorded with who made it, when and why.
 
-**Status: built and in use on the dev copy.** Build steps 1–6 are done and covered by the pytest suite. Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md).
+**Status: built and in use on the dev copy.** Build steps 1–6 are done and covered by the pytest suite. Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20).
 
 It's still a **screening tool, not a code determination**. Results say "within capacity, review before acting" or "review", never "approved".
 
@@ -60,13 +60,13 @@ Steps 1–6 were built by Claude at Carl's request (2026-10-05), each checked ag
 | 5 | Exits + code factors editing | | done |
 | 6 | Space report export, results workbook, daily backup | | done |
 | 7 | Install on Mark's machine + written instructions | | next |
-| 8 | Editors and viewers: editor list by Windows login, Editors screen, change log of adds/removes ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)) | a viewer can't open the editor screen; the last editor can't be removed | built 2026-10-13, not yet tried by Carl |
+| 8 | Editors and viewers: editor list by Windows login, Editors screen, change log of adds/removes | a viewer can't open the editor screen; the last editor can't be removed | built 2026-10-13, not yet tried by Carl |
 | 9 | Capacity check screen for everyone: search, try a number, floor result, summary .docx | DTB A120 → 300: needs justification (+117 over 183), Turpin 1 "can't check egress"; Turpin B303 24 → 160: wing B 161 → 297 vs 288, over by 9 | built 2026-10-13, not yet tried by Carl |
 | 10 | Colours on rooms, zones and exits + one legend | campus: zones 787 grey / 3 green; rooms 664 green, 54 amber, 13,734 grey | built 2026-10-13 |
 
 ## Editors and viewers
 
-Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)).
+Decided 2026-10-13 from Mark's answers.
 
 | | Editor | Viewer |
 |---|---|---|
