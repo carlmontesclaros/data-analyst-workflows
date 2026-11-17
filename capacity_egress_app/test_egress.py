@@ -484,6 +484,27 @@ def test_a_floor_of_blank_capacities_keeps_the_number_columns_numbers():
     assert_same_result(got, want)
     assert pd.api.types.is_numeric_dtype(got['rooms']['capacity'])
 
+# a column with a value in every row loads as whole numbers. a save that leaves one blank (a door with no stair behind it,
+# a room nobody counted) must give numbers with blanks, like a whole reload, not fail or lose the other values
+STAIRED_EXITS = [e | {'stair_width_cm': 110, 'stair_type': 'stairs'} for e in CAMPUS_EXITS]
+COUNTED_ROOMS = [r | {'capacity': 10, 'capacity_source': 'site count'} if r['capacity'] is None else r for r in CAMPUS_ROOMS]
+
+@pytest.mark.parametrize('why, rooms, exits, new_rooms, new_exits, floor', [
+    ('one door on the floor has its stair cleared', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     edited(STAIRED_EXITS, 'exit_pk', 4, stair_width_cm=None, stair_type=None), '2'),
+    ('every door on the floor has its stair cleared', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     [e | {'stair_width_cm': None, 'stair_type': None} if e['floor'] == '2' else e for e in STAIRED_EXITS], '2'),
+    ('a plain doorway added to a floor that had no exits', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     STAIRED_EXITS + [raw_exit(9, '4', 'S1 - doorway', 'doorway', 90)], '4'),
+    ('a stair width that is not a whole number', CAMPUS_ROOMS, STAIRED_EXITS, CAMPUS_ROOMS,
+     edited(STAIRED_EXITS, 'exit_pk', 4, stair_width_cm=110.5), '2'),
+    ('a room count cleared', COUNTED_ROOMS, CAMPUS_EXITS,
+     edited(COUNTED_ROOMS, 'room_id', 4, capacity=None, capacity_source='per code'), CAMPUS_EXITS, '2'),
+])
+def test_a_blank_in_a_column_of_whole_numbers(why, rooms, exits, new_rooms, new_exits, floor):
+    got, want = refreshed(rooms, exits, new_rooms, new_exits, 'Fake Hall', floor)
+    assert_same_result(got, want)
+
 def test_refresh_floor_keeps_the_database_order_and_other_floors_untouched():
     rooms, exits = frames(CAMPUS_ROOMS, CAMPUS_EXITS)
     before = egress.calculate(rooms, exits, factors())

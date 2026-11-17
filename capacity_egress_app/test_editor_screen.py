@@ -488,6 +488,25 @@ def test_exit_saves_redo_only_their_floor(root, campus_path, said, calculated, m
     finally:
         conn.close()
 
+# every door saved so far has a stair behind it -> a plain doorway added with the stair width left blank still shows
+def test_add_a_doorway_with_no_stair_when_every_other_door_has_one(root, campus_path, said):
+    c = db.connect(campus_path)
+    c.execute("UPDATE exits SET stair_width_cm = 110, stair_type = 'stairs'")
+    c.commit()
+    c.close()
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        open_floor(screen, conn)
+        problems = when_open(screen, 'Add exit', lambda win: (fill_exit(win, NEW_EXIT), press(win, 'Save')))
+        screen.add_exit()
+        assert problems == [] and said == []
+        pk = conn.execute("SELECT exit_pk FROM exits WHERE exit_id = ?", (NEW_EXIT['Exit id'],)).fetchone()[0]
+        assert screen.exit_tree.exists(f"e{pk}")
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
 # the last door on a floor deleted -> the floor has no exits, like the floor nobody measured
 def test_deleting_the_last_exit_on_a_floor(root, campus_path, said, calculated, monkeypatch):
     conn = db.connect(campus_path)

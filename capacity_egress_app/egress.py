@@ -389,8 +389,8 @@ def calculate_floor(rooms, exits, factors, prop, floor):
 # every table keeps the order of a whole load / whole calculation, except the warnings (a floor's warnings go last)
 def refresh_floor(rooms, exits, result, factors, prop, floor, floor_rooms, floor_exits):
     # a floor with no value in a column comes back from the database as text-typed blanks -> same types as the whole table
-    floor_rooms = floor_rooms.astype(rooms.dtypes.reindex(floor_rooms.columns).to_dict())
-    floor_exits = floor_exits.astype(exits.dtypes.reindex(floor_exits.columns).to_dict())
+    floor_rooms = typed_like(floor_rooms, rooms)
+    floor_exits = typed_like(floor_exits, exits)
     floor_result = calculate(floor_rooms, floor_exits, factors)
     rooms = splice_floor(rooms, floor_rooms, prop, floor, 'room_id')
     exits = splice_floor(exits, floor_exits, prop, floor, 'exit_pk')
@@ -404,12 +404,22 @@ def refresh_floor(rooms, exits, result, factors, prop, floor, floor_rooms, floor
 # a table with one floor's rows swapped for new ones
 def splice_floor(table, floor_rows, prop, floor, key=None):
     kept = table[(table['property'] != prop) | (table['floor'] != floor)]
-    floor_rows = floor_rows.astype(kept.dtypes.reindex(floor_rows.columns).to_dict())
+    floor_rows = typed_like(floor_rows, kept)
     parts = [part for part in (kept, floor_rows) if len(part)]
     spliced = pd.concat(parts) if parts else table.iloc[0:0]
     if key and len(spliced):
         spliced = spliced.sort_values(key)
     return spliced.reset_index(drop=True)
+
+# rows -> the table's column types. a whole-number column given a blank or a fraction becomes numbers with blanks, as a
+# whole read of the database gives it (the join widens the table's column to match), never a failure or a lost value
+def typed_like(rows, table):
+    dtypes = table.dtypes.reindex(rows.columns).to_dict()
+    for column, dtype in dtypes.items():
+        values = rows[column]
+        if dtype.kind in 'iub' and not (values.notna().all() and (values.astype(dtype) == values).all()):
+            dtypes[column] = np.float64 if dtype.kind in 'iu' else object
+    return rows.astype(dtypes)
 
 # colours -> same meaning on every table (README "Colours"): red only ever means over a hard limit
 GREEN, AMBER, RED, GREY, NONE = 'green', 'amber', 'red', 'grey', ''
