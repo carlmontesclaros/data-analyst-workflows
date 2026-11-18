@@ -579,7 +579,7 @@ def test_a_building_alone_is_its_rows_of_the_whole_campus():
         assert_same_result(renumbered(campus.building(prop)), renumbered(building_rows(want, prop)))
     assert_same_result(campus.whole(), want)
     # the warnings come in the order a whole calculation finds them, so the exports read the same as before
-    assert_same_frame(campus.whole()['warnings'], want['warnings'], 'warnings')
+    assert_same_frame(campus.whole(in_fresh_order=True)['warnings'], want['warnings'], 'warnings')
 
 # nothing is calculated until it's asked for, and a building already calculated isn't calculated again
 def test_the_campus_is_calculated_only_as_far_as_asked(monkeypatch):
@@ -591,10 +591,10 @@ def test_the_campus_is_calculated_only_as_far_as_asked(monkeypatch):
     first = campus.building('Other Hall')
     assert campus.building('Other Hall') is first
     assert sizes == [5]
-    campus.whole()
-    campus.whole()
+    whole = campus.whole()
+    assert campus.whole() is whole and campus.whole(in_fresh_order=True) is whole
+    assert campus.building('Other Hall') is first
     assert sizes == [5, 14]
-    assert campus.calculated_buildings() == ['Other Hall']
 
 # a save on one floor -> that floor read again: every building's result and the whole campus as a fresh calculation gives
 @pytest.mark.parametrize('why, new_rooms, new_exits, prop, floor', [
@@ -604,7 +604,7 @@ def test_the_campus_is_calculated_only_as_far_as_asked(monkeypatch):
      TWO_BUILDINGS_EXITS + [raw_exit(12, '2', 'S2 - doorway', 'doorway', 100, wing='D', prop='Other Hall')], 'Other Hall', '2'),
     ('every exit on a floor deleted', TWO_BUILDINGS_ROOMS, [e for e in TWO_BUILDINGS_EXITS if e['floor'] != '3'], 'Fake Hall', '3'),
 ])
-def test_a_floor_refreshed_in_the_campus_gives_a_fresh_calculation(why, new_rooms, new_exits, prop, floor):
+def test_a_floor_refreshed_in_the_campus_gives_a_fresh_calculation(why, new_rooms, new_exits, prop, floor, monkeypatch):
     f = factors()
     campus = egress.Campus(*frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS), f)
     other = 'Fake Hall' if prop == 'Other Hall' else 'Other Hall'
@@ -613,15 +613,21 @@ def test_a_floor_refreshed_in_the_campus_gives_a_fresh_calculation(why, new_room
     campus.whole()
     floor_rooms = pd.DataFrame([r for r in new_rooms if (r['property'], r['floor']) == (prop, floor)], columns=list(CAMPUS_ROOMS[0]))
     floor_exits = pd.DataFrame([e for e in new_exits if (e['property'], e['floor']) == (prop, floor)], columns=list(CAMPUS_EXITS[0]))
-    got = campus.refresh_floor(prop, floor, floor_rooms, floor_exits)
-
     want_rooms, want_exits = frames(new_rooms, new_exits)
     want = egress.calculate(want_rooms, want_exits, f)
+    sizes, real = [], egress.calculate
+    monkeypatch.setattr(egress, 'calculate', lambda r, e, f: sizes.append(len(r)) or real(r, e, f))
+    got = campus.refresh_floor(prop, floor, floor_rooms, floor_exits)
+
     assert_same_frame(got.rooms, want_rooms, 'loaded rooms')
     assert_same_frame(got.exits, want_exits, 'loaded exits')
     for p in (prop, other):
         assert_same_result(renumbered(got.building(p)), renumbered(building_rows(want, p)))
     assert got.building(other) is kept                                          # the other building isn't redone
     assert_same_result(got.whole(), want)
-    assert_same_frame(got.whole()['warnings'], want['warnings'], 'warnings')
+    assert sizes == [len(floor_rooms)]                                          # only the saved floor is calculated again
+    # the exports: the warnings in the order a fresh start finds them
+    assert_same_result(got.whole(in_fresh_order=True), want)
+    assert_same_frame(got.whole(in_fresh_order=True)['warnings'], want['warnings'], 'warnings')
+    assert sizes == [len(floor_rooms), len(want_rooms)]
     assert_same_result(campus.whole(), egress.calculate(*frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS), f))  # old one unchanged

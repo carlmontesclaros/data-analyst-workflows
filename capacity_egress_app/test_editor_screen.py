@@ -371,10 +371,12 @@ def assert_shows_what_the_database_holds(screen, conn):
     assert_same_frame(screen.rooms, rooms, 'rooms')
     assert_same_frame(screen.exits, exits, 'exits')
     want = egress.calculate(rooms, exits, db.load_code_factors(conn))
-    # every building the screen has calculated (the one on screen at least) -> its rows of a whole-campus calculation
-    assert screen.campus.calculated_buildings()
-    for prop in screen.campus.calculated_buildings():
+    # the building on screen -> its rows of a whole-campus calculation; a search across buildings -> the whole campus
+    prop = screen.building.picked()
+    if prop:
         assert_same_result(renumbered(screen.campus.building(prop)), renumbered(building_rows(want, prop)))
+    else:
+        assert_same_result(screen.campus.whole(), want)
     assert_same_result(screen.export_result(), want)
     assert screen.seen_version == db.data_version(conn)
 
@@ -633,8 +635,9 @@ def test_every_building_and_search_shows_what_a_whole_campus_calculation_gives(r
     finally:
         conn.close()
 
-# a search across buildings calculates the whole campus; a save after it -> the search shows the saved number
-def test_a_search_across_buildings_after_a_save_shows_the_saved_number(root, campus_path, said):
+# a search across buildings calculates the whole campus; a save after it -> the search shows the saved number, and
+# only the saved floor is calculated again, not the whole campus
+def test_a_search_across_buildings_after_a_save_shows_the_saved_number(root, campus_path, said, calculated):
     conn = db.connect(campus_path)
     try:
         screen = editor_screen(root, conn)
@@ -642,17 +645,23 @@ def test_a_search_across_buildings_after_a_save_shows_the_saved_number(root, cam
         screen.search()
         rid = room(conn, '101')['room_id']
         assert screen.room_tree.item(f"r{rid}", 'values')[7] == '20'
+        assert {r[1][0] for r in lists(screen)[1]} == {EOW, OTHER}
         open_floor(screen, conn)
         screen.change_capacity()
         win = dialog(screen, 'Change capacity')
         capacity, why = entries(win)
         type_into(capacity, '40')
         type_into(why, 'OREM request')
+        calculated.clear()
         press(win, 'Save')
         screen.building_var.set('')
         screen.search_var.set('0')
         screen.search()
         assert said == [] and screen.room_tree.item(f"r{rid}", 'values')[7] == '40'
+        assert {r[1][0] for r in lists(screen)[1]} == {EOW, OTHER}
+        assert max(calculated) < 6, calculated
+        got, want = shown_both_ways(screen)
+        assert got == want
         assert_shows_what_the_database_holds(screen, conn)
     finally:
         conn.close()

@@ -410,10 +410,11 @@ def splice_floor_result(result, floor_result, prop, floor):
 # screen opens with no building picked -> it calculates nothing until it shows one (calculating all 19,451 rooms at
 # every open was most of the wait on a busy machine)
 class Campus:
-    def __init__(self, rooms, exits, factors, buildings=None):
+    def __init__(self, rooms, exits, factors):
         self.rooms, self.exits, self.factors = rooms, exits, factors
-        self._buildings = dict(buildings or {})        # building -> its result
+        self._buildings = {}                            # building -> its result
         self._whole = None
+        self._whole_in_fresh_order = False
 
     def building(self, prop):
         if prop not in self._buildings:
@@ -421,25 +422,29 @@ class Campus:
                                               self.exits[self.exits['property'] == prop], self.factors)
         return self._buildings[prop]
 
-    # every building at once, its warnings in the order a fresh start finds them (the exports and their warnings sheet)
-    def whole(self):
-        if self._whole is None:
+    # every building at once. in_fresh_order -> its warnings in the order a fresh start finds them (the exports and their
+    # warnings sheet); otherwise a floor saved since may have its warnings last
+    def whole(self, in_fresh_order=False):
+        if self._whole is None or (in_fresh_order and not self._whole_in_fresh_order):
             self._whole = calculate(self.rooms, self.exits, self.factors)
+            self._whole_in_fresh_order = True
         return self._whole
 
-    def calculated_buildings(self):
-        return list(self._buildings)
-
-    # one floor's rows read again after a save on it -> a new Campus: only that floor calculated again, the other
-    # buildings' results kept, the whole campus calculated again the next time it's asked for. this one isn't changed
+    # one floor's rows read again after a save on it -> a new Campus: only that floor calculated again and swapped into
+    # the results already calculated (its building, the whole campus), the other buildings' results kept. this one
+    # isn't changed
     def refresh_floor(self, prop, floor, floor_rooms, floor_exits):
         rooms, exits, floor_rooms, floor_exits = splice_loaded_floor(self.rooms, self.exits, prop, floor,
                                                                      floor_rooms, floor_exits)
-        buildings = dict(self._buildings)
-        if prop in buildings:
-            buildings[prop] = splice_floor_result(buildings[prop], calculate(floor_rooms, floor_exits, self.factors),
-                                                  prop, floor)
-        return Campus(rooms, exits, self.factors, buildings)
+        refreshed = Campus(rooms, exits, self.factors)
+        refreshed._buildings = dict(self._buildings)
+        if prop in self._buildings or self._whole is not None:
+            floor_result = calculate(floor_rooms, floor_exits, self.factors)
+            if prop in self._buildings:
+                refreshed._buildings[prop] = splice_floor_result(self._buildings[prop], floor_result, prop, floor)
+            if self._whole is not None:
+                refreshed._whole = splice_floor_result(self._whole, floor_result, prop, floor)
+        return refreshed
 
 # a table with one floor's rows swapped for new ones
 def splice_floor(table, floor_rows, prop, floor, key=None):

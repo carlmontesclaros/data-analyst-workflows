@@ -98,7 +98,7 @@ class App:
 
     # the exports -> the whole-campus result, its warnings in the order a fresh start gives them
     def export_result(self):
-        return self.campus.whole()
+        return self.campus.whole(in_fresh_order=True)
 
     # other people's saves -> reload when the database changed since this app last looked
     def refresh_if_changed(self):
