@@ -588,7 +588,6 @@ def test_refresh_with_the_apps_own_counts_asks_then_keeps_or_replaces_fmis_capac
     questions = refresh_with(root, conn, said, monkeypatch, ROOMS, answer)
     assert questions[-1] == "The counts in this file match the app's own counts.\nKeep the FMIS capacities as they are?"
     assert fmis_of(conn, '101') == expected
-    assert ("This file's counts are the app's own" in said[-1][2]) == answer
 
 def test_refresh_from_a_raw_fmis_export_does_not_ask(root, conn, said, monkeypatch):
     rows = [(EOW, '1', '101', 50.0, 33), (EOW, '1', '102', 30.0, 0)]

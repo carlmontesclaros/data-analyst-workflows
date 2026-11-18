@@ -290,10 +290,12 @@ def insert_extra_settings(conn):
 # space report refresh -> match rooms on Property + Floor + Space (+ area when a key repeats)
 # only FMIS columns change, capacity / source / visited / note / override are never touched
 FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
+ROOM_KEYS = ['property', 'floor', 'space']
 
 # no column tells a raw FMIS export from Carl's report (same layout), so compare the counts with the app's:
-# rooms the app has a count for and the file has a count > 0 for (a 0 is FMIS's default, says nothing).
-# nearly all equal -> the file carries the app's counts. 90%, not all: a few rooms may have changed since it was exported
+# rooms the app has a count for and the file has a count for (blank says nothing, a 0 counts: FMIS's 0 next to a
+# counted 20 is a mismatch). nearly all equal -> the file carries the app's counts. 90%, not all: a few rooms
+# may have changed since it was exported
 OWN_COUNTS_SHARE = 0.9
 
 def match_report(conn, df):
@@ -307,22 +309,21 @@ def match_report(conn, df):
                                                  .astype(str).str.removesuffix('.0'))
 
     db = pd.read_sql("SELECT room_id, property, floor, space, area_m2, capacity, in_latest_report FROM rooms", conn)
-    keys = ['property', 'floor', 'space']
 
     # keys found once on both sides -> match on the key alone (area can change)
-    report_n = report.groupby(keys)['space'].transform('size')
-    db_n = db.groupby(keys)['space'].transform('size')
-    single = report[report_n == 1].merge(db[db_n == 1][keys + ['room_id']], on=keys, how='inner')
+    report_n = report.groupby(ROOM_KEYS)['space'].transform('size')
+    db_n = db.groupby(ROOM_KEYS)['space'].transform('size')
+    single = report[report_n == 1].merge(db[db_n == 1][ROOM_KEYS + ['room_id']], on=ROOM_KEYS, how='inner')
 
     # repeated keys -> match on key + area
     matched_report_idx = set(report[report_n == 1].reset_index().merge(
-        db[db_n == 1][keys], on=keys)['index'])
+        db[db_n == 1][ROOM_KEYS], on=ROOM_KEYS)['index'])
     rest_report = report[~report.index.isin(matched_report_idx)].copy()
     rest_db = db[~db['room_id'].isin(single['room_id'])].copy()
     rest_report['area_key'] = rest_report['area_m2'].round(2)
     rest_db['area_key'] = rest_db['area_m2'].round(2)
-    by_area = rest_report.reset_index().merge(rest_db[keys + ['area_key', 'room_id']],
-                                              on=keys + ['area_key'], how='inner')
+    by_area = rest_report.reset_index().merge(rest_db[ROOM_KEYS + ['area_key', 'room_id']],
+                                              on=ROOM_KEYS + ['area_key'], how='inner')
     by_area = by_area.drop_duplicates('index').drop_duplicates('room_id')
 
     matched = pd.concat([single, by_area.set_index('index')], ignore_index=False)
@@ -335,44 +336,34 @@ def counts_are_the_apps_own(conn, df):
     _, db_rooms, matched, _, _ = match_report(conn, df)
     app = db_rooms.set_index('room_id')['capacity']
     both = matched.assign(app_count=matched['room_id'].map(app))
-    both = both[both['app_count'].notna() & (both['fmis_count'] > 0)]
+    both = both[both['app_count'].notna() & both['fmis_count'].notna()]
     return bool(len(both) > 0 and (both['fmis_count'] == both['app_count']).mean() >= OWN_COUNTS_SHARE)
 
 def refresh_space_report(conn, df, report_name, user_login=None, keep_fmis_capacity=False):
-    # keep_fmis_capacity: the file's counts are the app's own -> FMIS capacities stay (the caller asks, never guessed here)
+    # keep_fmis_capacity: the file's counts are the app's own -> matched rooms keep their FMIS capacity (the caller asks)
     require_editor(conn, user_login)
     report, db, matched, new_rooms, missing_ids = match_report(conn, df)
-    keys = ['property', 'floor', 'space']
-    # kept -> the FMIS capacity stays as it is, for matched and new rooms alike
-    keep_fmis = keep_fmis_capacity
 
-    # matched rooms -> update FMIS columns, remember FMIS capacity when it's a real number
+    # matched rooms -> update FMIS columns, remember FMIS capacity when it's a real number (unless kept)
+    set_cols = FMIS_COLS if keep_fmis_capacity else FMIS_COLS + ['fmis_capacity']
     changed = 0
     for _, row in matched.iterrows():
         values = [None if pd.isna(row[c]) else row[c] for c in FMIS_COLS]
-        if keep_fmis:
-            cur = conn.execute(f"""UPDATE rooms SET {', '.join(c + ' = ?' for c in FMIS_COLS)},
-                                   in_latest_report = 1, last_report = ?
-                                   WHERE room_id = ? AND NOT ({' AND '.join(f'{c} IS ?' for c in FMIS_COLS)}
-                                   AND in_latest_report = 1)""",
-                               values + [report_name, int(row['room_id'])] + values)
-            changed += cur.rowcount
-            continue
-        fmis = int(row['fmis_count']) if pd.notna(row['fmis_count']) and row['fmis_count'] > 0 else None
-        cur = conn.execute(f"""UPDATE rooms SET {', '.join(c + ' = ?' for c in FMIS_COLS)},
-                               fmis_capacity = ?, in_latest_report = 1, last_report = ?
-                               WHERE room_id = ? AND NOT ({' AND '.join(f'{c} IS ?' for c in FMIS_COLS)}
-                               AND fmis_capacity IS ? AND in_latest_report = 1)""",
-                           values + [fmis, report_name, int(row['room_id'])] + values + [fmis])
+        if not keep_fmis_capacity:
+            values.append(int(row['fmis_count']) if pd.notna(row['fmis_count']) and row['fmis_count'] > 0 else None)
+        cur = conn.execute(f"""UPDATE rooms SET {', '.join(c + ' = ?' for c in set_cols)},
+                               in_latest_report = 1, last_report = ?
+                               WHERE room_id = ? AND NOT ({' AND '.join(f'{c} IS ?' for c in set_cols)}
+                               AND in_latest_report = 1)""",
+                           values + [report_name, int(row['room_id'])] + values)
         changed += cur.rowcount
     conn.execute("UPDATE rooms SET last_report = ? WHERE in_latest_report = 1", (report_name,))
 
     # new rooms -> per code until someone counts them
     if len(new_rooms):
-        insert = new_rooms[keys + FMIS_COLS + ['room_type_override', 'note']].copy()
+        insert = new_rooms[ROOM_KEYS + FMIS_COLS + ['room_type_override', 'note']].copy()
         insert['room_type_override'] = insert['room_type_override'].str.strip().str.lower()
-        insert['fmis_capacity'] = (pd.array([None] * len(new_rooms), dtype='Int64') if keep_fmis
-                                   else new_rooms['fmis_count'].where(new_rooms['fmis_count'] > 0).astype('Int64'))
+        insert['fmis_capacity'] = new_rooms['fmis_count'].where(new_rooms['fmis_count'] > 0).astype('Int64')
         insert['in_latest_report'] = 1
         insert['last_report'] = report_name
         # executemany, not to_sql -> to_sql commits on its own and would split the refresh
@@ -391,8 +382,7 @@ def refresh_space_report(conn, df, report_name, user_login=None, keep_fmis_capac
                                WHERE capacity IS NOT NULL AND fmis_capacity IS NOT NULL
                                AND capacity != fmis_capacity""").fetchall()
     return {'matched': len(matched), 'changed': changed, 'new': len(new_rooms),
-            'missing': len(missing_ids), 'disagree': [dict(r) for r in disagree],
-            'fmis_capacity_kept': keep_fmis}
+            'missing': len(missing_ids), 'disagree': [dict(r) for r in disagree]}
 
 # reading tables back for the calculation and the app
 def load_rooms(conn):
