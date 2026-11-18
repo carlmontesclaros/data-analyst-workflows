@@ -52,4 +52,7 @@ jobs:
           displayplacer "id:$screen_id res:1920x1080"
       - name: check the screen holds the app's smallest window
         run: python -c "import tkinter as tk; from check_screen import MIN_WINDOW; r = tk.Tk(); m = r.wm_maxsize(); print('largest window', m); assert all(have >= need for have, need in zip(m, MIN_WINDOW)), f'screen {m} is smaller than {MIN_WINDOW}'"
+      # CI shows the windows for real; locally conftest.py makes them transparent
       - run: python -m pytest -q --cov=. --cov-report=term-missing:skip-covered
+        env:
+          CAPACITY_TEST_WINDOWS: real
