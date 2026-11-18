@@ -69,6 +69,47 @@ def test_refresh_never_touches_capacity(conn):
     assert r['fmis_capacity'] == 99
     assert [d['space'] for d in result['disagree']] == ['101']
 
+# Carl's own report / the app's export carry the app's counts in Capacity (Occupants), not FMIS values
+# -> refreshing from one must not turn the FMIS capacity into the site count (found loading the 12 Nov report)
+def own_report_rows(conn, area_101=50.0):
+    conn.execute("UPDATE rooms SET fmis_capacity = 31 WHERE space = '101'")
+    conn.execute("UPDATE rooms SET fmis_capacity = 12 WHERE space = '102'")
+    conn.execute("UPDATE rooms SET fmis_capacity = 35 WHERE space = 'A202'")
+    conn.execute("UPDATE rooms SET capacity = 40, capacity_source = 'PM change' WHERE space = 'A202'")
+    # counts as the app's export writes them: the room's real count, blank for every other room
+    return [('Engineering Office Wing', '1', '101', area_101, 20), ('Engineering Office Wing', '1', '102', 30.0, 0),
+            ('Clearihue Building', '2', 'A201', 40.0, None), ('Clearihue Building', '2', 'A202', 40.0, 40),
+            ('McKinnon Building', '0', '010', 12.0, None), ('McKinnon Building', '0', '010', 25.0, None)]
+
+def fmis_capacities(conn):
+    return {r['space']: r['fmis_capacity'] for r in conn.execute("SELECT * FROM rooms")}
+
+def test_refresh_from_the_apps_own_counts_keeps_fmis_capacity(conn):
+    rows = own_report_rows(conn, area_101=55.0)
+    before = fmis_capacities(conn)
+    result = db.refresh_space_report(conn, report(rows), 'carl_space_report.xlsx')
+    assert fmis_capacities(conn) == before == {'101': 31, '102': 12, 'A201': None, 'A202': 35, '010': None}
+    # the other FMIS columns still refresh from this file, and the comparison with FMIS is still there
+    assert conn.execute("SELECT area_m2 FROM rooms WHERE space = '101'").fetchone()[0] == 55.0
+    assert result['fmis_capacity_kept'] is True
+    assert sorted(d['space'] for d in result['disagree']) == ['101', '102', 'A202']
+
+def test_refresh_from_the_apps_own_counts_does_not_blank_fmis_of_unvisited_rooms(conn):
+    rows = own_report_rows(conn)
+    conn.execute("UPDATE rooms SET fmis_capacity = 8 WHERE space = '010' AND area_m2 = 25.0")
+    db.refresh_space_report(conn, report(rows), 'carl_space_report.xlsx')
+    assert conn.execute("SELECT fmis_capacity FROM rooms WHERE space = '010' AND area_m2 = 25.0").fetchone()[0] == 8
+
+def test_refresh_from_a_raw_fmis_export_still_updates_fmis_capacity(conn):
+    own_report_rows(conn)
+    # FMIS's own numbers: different from the app's counts on the counted rooms
+    rows = [('Engineering Office Wing', '1', '101', 50.0, 33), ('Engineering Office Wing', '1', '102', 30.0, 0),
+            ('Clearihue Building', '2', 'A201', 40.0, 6), ('Clearihue Building', '2', 'A202', 40.0, 50),
+            ('McKinnon Building', '0', '010', 12.0, 0), ('McKinnon Building', '0', '010', 25.0, 9)]
+    result = db.refresh_space_report(conn, report(rows), 'fmis_export.xlsx')
+    assert fmis_capacities(conn) == {'101': 33, '102': None, 'A201': 6, 'A202': 50, '010': 9}
+    assert result['fmis_capacity_kept'] is False
+
 def test_refresh_new_and_missing_rooms(conn):
     rows = [r for r in BASE_ROWS if r[2] != 'A201'] + [('Clearihue Building', '2', 'A203', 20.0, 0)]
     result = db.refresh_space_report(conn, report(rows), 'second.xlsx')

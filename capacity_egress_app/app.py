@@ -878,7 +878,9 @@ class App:
         self.after_change("space report refreshed")
         messagebox.showinfo("Refreshed", f"matched: {result['matched']} (changed {result['changed']})\n"
                                          f"new rooms (per code): {result['new']}\nmissing rooms (kept, flagged): "
-                                         f"{result['missing']}\nFMIS capacity disagrees with the app: {len(result['disagree'])}")
+                                         f"{result['missing']}\nFMIS capacity disagrees with the app: {len(result['disagree'])}"
+                                         + ("\n\nThis file's counts are the app's own, so FMIS capacities were left as they are."
+                                            if result['fmis_capacity_kept'] else ""))
 
     # exports -> whole campus, or the building / floor picked
     def export_scope(self):
