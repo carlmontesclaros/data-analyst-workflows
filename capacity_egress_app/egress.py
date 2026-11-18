@@ -386,22 +386,65 @@ def calculate_floor(rooms, exits, factors, prop, floor):
     e = exits[(exits['property'] == prop) & (exits['floor'] == floor)]
     return calculate(r, e, factors)
 
-# one floor's rows read again after a save on that floor -> the loaded tables and the result with only that floor redone.
-# zones never cross floors, so this is the whole-campus answer without calculating the other floors again.
-# every table keeps the order of a whole load / whole calculation, except the warnings (a floor's warnings go last)
-def refresh_floor(rooms, exits, result, factors, prop, floor, floor_rooms, floor_exits):
+# the loaded tables with one floor's rows read again after a save on it -> (rooms, exits, that floor's rooms, its exits),
+# the floor's rows in the tables' types
+def splice_loaded_floor(rooms, exits, prop, floor, floor_rooms, floor_exits):
     # a floor with no value in a column comes back from the database as text-typed blanks -> same types as the whole table
     floor_rooms = typed_like(floor_rooms, rooms)
     floor_exits = typed_like(floor_exits, exits)
-    floor_result = calculate(floor_rooms, floor_exits, factors)
-    rooms = splice_floor(rooms, floor_rooms, prop, floor, 'room_id')
-    exits = splice_floor(exits, floor_exits, prop, floor, 'exit_pk')
-    refreshed = {'rooms': splice_floor(result['rooms'], floor_result['rooms'], prop, floor, 'room_id'),
-                 'exits': splice_floor(result['exits'], floor_result['exits'], prop, floor, 'exit_pk'),
-                 'zones': order_zones(splice_floor(result['zones'], floor_result['zones'], prop, floor)),
-                 'warnings': splice_floor(result['warnings'], floor_result['warnings'], prop, floor),
-                 'settings': result['settings']}
-    return rooms, exits, refreshed
+    return (splice_floor(rooms, floor_rooms, prop, floor, 'room_id'), splice_floor(exits, floor_exits, prop, floor, 'exit_pk'),
+            floor_rooms, floor_exits)
+
+# a result with one floor's rows swapped for that floor calculated again. zones never cross floors, so this is the answer
+# a whole calculation gives without calculating the other floors again. every table keeps the order of a whole
+# calculation, except the warnings (a floor's warnings go last)
+def splice_floor_result(result, floor_result, prop, floor):
+    return {'rooms': splice_floor(result['rooms'], floor_result['rooms'], prop, floor, 'room_id'),
+            'exits': splice_floor(result['exits'], floor_result['exits'], prop, floor, 'exit_pk'),
+            'zones': order_zones(splice_floor(result['zones'], floor_result['zones'], prop, floor)),
+            'warnings': splice_floor(result['warnings'], floor_result['warnings'], prop, floor),
+            'settings': result['settings']}
+
+# the whole campus, calculated only as far as a screen asks: one building on its own, or every building at once.
+# zones never cross floors, so a building calculated alone is exactly its rows of the whole-campus result. the editor
+# screen opens with no building picked -> it calculates nothing until it shows one (calculating all 19,451 rooms at
+# every open was most of the wait on a busy machine)
+class Campus:
+    def __init__(self, rooms, exits, factors):
+        self.rooms, self.exits, self.factors = rooms, exits, factors
+        self._buildings = {}                            # building -> its result
+        self._whole = None
+        self._whole_in_fresh_order = False
+
+    def building(self, prop):
+        if prop not in self._buildings:
+            self._buildings[prop] = calculate(self.rooms[self.rooms['property'] == prop],
+                                              self.exits[self.exits['property'] == prop], self.factors)
+        return self._buildings[prop]
+
+    # every building at once. in_fresh_order -> its warnings in the order a fresh start finds them (the exports and their
+    # warnings sheet); otherwise a floor saved since may have its warnings last
+    def whole(self, in_fresh_order=False):
+        if self._whole is None or (in_fresh_order and not self._whole_in_fresh_order):
+            self._whole = calculate(self.rooms, self.exits, self.factors)
+            self._whole_in_fresh_order = True
+        return self._whole
+
+    # one floor's rows read again after a save on it -> a new Campus: only that floor calculated again and swapped into
+    # the results already calculated (its building, the whole campus), the other buildings' results kept. this one
+    # isn't changed
+    def refresh_floor(self, prop, floor, floor_rooms, floor_exits):
+        rooms, exits, floor_rooms, floor_exits = splice_loaded_floor(self.rooms, self.exits, prop, floor,
+                                                                     floor_rooms, floor_exits)
+        refreshed = Campus(rooms, exits, self.factors)
+        refreshed._buildings = dict(self._buildings)
+        if prop in self._buildings or self._whole is not None:
+            floor_result = calculate(floor_rooms, floor_exits, self.factors)
+            if prop in self._buildings:
+                refreshed._buildings[prop] = splice_floor_result(self._buildings[prop], floor_result, prop, floor)
+            if self._whole is not None:
+                refreshed._whole = splice_floor_result(self._whole, floor_result, prop, floor)
+        return refreshed
 
 # a table with one floor's rows swapped for new ones
 def splice_floor(table, floor_rows, prop, floor, key=None):

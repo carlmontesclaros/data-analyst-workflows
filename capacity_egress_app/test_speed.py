@@ -60,7 +60,7 @@ def test_campus_is_campus_size(conn):
     assert conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == BUILDINGS * FLOORS * ROOMS_PER_FLOOR
     assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] > LOG_ROWS
 
-# what every screen does when it opens or refreshes: read everything, calculate the whole campus
+# what the check screen does when it opens or refreshes, and the exports: read everything, calculate the whole campus
 def test_opening_the_data_is_quick(conn):
     def open_data():
         egress.calculate(db.load_rooms(conn), db.load_exits(conn), db.load_code_factors(conn))
