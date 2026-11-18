@@ -15,13 +15,6 @@ import pytest
 HIDE = os.environ.get('CAPACITY_TEST_WINDOWS', 'hidden') != 'real'
 
 
-def _make_invisible(window):
-    try:
-        window.attributes('-alpha', 0.0)
-    except tk.TclError:      # a platform without window transparency: leave the window as it is
-        pass
-
-
 @pytest.fixture(autouse=True, scope='session')
 def hidden_windows():
     if not HIDE:
@@ -32,7 +25,7 @@ def hidden_windows():
     def hiding(cls):
         def __init__(self, *args, **kwargs):
             originals[cls](self, *args, **kwargs)
-            _make_invisible(self)
+            self.attributes('-alpha', 0.0)
         return __init__
 
     for cls in originals:
