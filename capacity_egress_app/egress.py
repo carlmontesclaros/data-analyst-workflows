@@ -267,8 +267,10 @@ def build_zones(rooms, exits, settings, warning_rows):
     for col in ['area_based_load', 'load_used', 'counted_capacity', 'rooms_in_scope', 'rooms_counted', 'exit_count']:
         zones[col] = zones[col].fillna(0).astype(int)
 
-    # pseudo zones -> split floor, 0 load, no exits
-    pseudo = zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['exit_count'] == 0)
+    # pseudo zones -> split floor, 0 load, no exits. load_used too: counted people (an excluded room type with a site
+    #   count) have no per code load but are still people, so their zone stays
+    pseudo = (zones['floor_key'].isin(split_floors) & (zones['area_based_load'] == 0) & (zones['load_used'] == 0)
+              & (zones['exit_count'] == 0))
     zones = zones[~pseudo].copy()
 
     # exit capacity -> 50% rule (BCBC 2024 3.4.3.2.(7))

@@ -378,6 +378,27 @@ def test_single_letter_wings_unchanged():
     assert (zone(result, 'B')['total_load'], zone(result, 'B')['exit_capacity']) == (161, 288)
     assert (zone(result, 'A')['status'], zone(result, 'A')['total_load']) == (egress.STATUS_NOT_SURVEYED, 10)
 
+def test_counted_room_with_no_per_code_load_is_not_dropped():
+    # wing A: one counted room of an excluded type -> per code load 0, but 12 people counted. no A exit -> the zone
+    #   used to be dropped as a pseudo zone and the 12 vanished. it stays, not surveyed, and is listed
+    excluded = dict(room('A301', 20, 12, 'site count'), room_type_override='excluded')
+    rooms = [room('B301', 60.55, 161, 'site count'), excluded]
+    exits = [exit_row('S4', 'doorway', 88, 'B'), exit_row('S5', 'doorway', 88, 'B')]
+    result = run(rooms, exits)
+    a = zone(result, 'A')
+    assert (a['area_based_load'], a['load_used'], a['exit_count']) == (0, 12, 0)
+    assert (a['status'], a['total_load']) == (egress.STATUS_NOT_SURVEYED, 12)
+    assert result['zones']['load_used'].sum() == 161 + 12
+    assert result['warnings'].query("type == 'wing_not_in_a_group'")['detail'].str.contains('load 12').any()
+
+def test_wing_with_no_load_and_no_exits_is_still_dropped():
+    # an uncounted excluded room: 0 per code, 0 counted -> nothing to lose, no zone, as before
+    excluded = dict(room('A301', 20), room_type_override='excluded')
+    rooms = [room('B301', 60.55, 161, 'site count'), excluded]
+    exits = [exit_row('S4', 'doorway', 88, 'B'), exit_row('S5', 'doorway', 88, 'B')]
+    assert zone(run(rooms, exits), 'B')['total_load'] == 161
+    assert run(rooms, exits)['zones']['zone_wing'].tolist() == ['B']
+
 def test_check_names_the_group_a_room_is_in():
     rooms, exits, f = check_tables(*clearihue_1())
     check = egress.check_capacities(rooms, exits, f, {1: 40})        # A101 10 -> 40
