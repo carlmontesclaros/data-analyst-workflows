@@ -61,16 +61,12 @@ class App:
         self.reload()
         self.root.after(POLL_MS, self.poll)
 
-    # data -> whole campus once, then only the floor that changed
+    # data -> whole campus read once, then only the floor that changed. a building is calculated when it's shown
     def reload(self):
         self.root.config(cursor='watch')
         self.root.update_idletasks()
         try:
-            self.rooms = db.load_rooms(self.conn)
-            self.exits = db.load_exits(self.conn)
-            self.factors = db.load_code_factors(self.conn)
-            self.result = egress.calculate(self.rooms, self.exits, self.factors)
-            self.result_in_whole_order = True
+            self.campus = egress.Campus(db.load_rooms(self.conn), db.load_exits(self.conn), db.load_code_factors(self.conn))
             self.seen_version = db.data_version(self.conn)
             self.properties = sorted(self.rooms['property'].unique())
             self.building.set_names(self.properties)
@@ -78,24 +74,31 @@ class App:
         finally:
             self.root.config(cursor='')
 
+    # the loaded tables, as the database held them at the last read
+    @property
+    def rooms(self):
+        return self.campus.rooms
+
+    @property
+    def exits(self):
+        return self.campus.exits
+
+    @property
+    def factors(self):
+        return self.campus.factors
+
     # one floor saved here -> read and calculate that floor again, the other floors can't have changed. if someone else
     # saved too (the database moved on without this connection) -> everything may have changed, reload it all
     def reload_floor(self, prop, floor):
         if db.data_version(self.conn) != self.seen_version or self.exits.empty:
             self.reload()
             return
-        floor_rooms, floor_exits = db.load_floor(self.conn, prop, floor)
-        self.rooms, self.exits, self.result = egress.refresh_floor(self.rooms, self.exits, self.result, self.factors,
-                                                                   prop, floor, floor_rooms, floor_exits)
-        self.result_in_whole_order = False
+        self.campus = self.campus.refresh_floor(prop, floor, *db.load_floor(self.conn, prop, floor))
         self.show()
 
     # the exports -> the whole-campus result, its warnings in the order a fresh start gives them
     def export_result(self):
-        if not self.result_in_whole_order:
-            self.result = egress.calculate(self.rooms, self.exits, self.factors)
-            self.result_in_whole_order = True
-        return self.result
+        return self.campus.whole()
 
     # other people's saves -> reload when the database changed since this app last looked
     def refresh_if_changed(self):
@@ -257,19 +260,30 @@ class App:
         self.floor_var.set(ALL)
         self.show()
 
+    # what the lists show -> (the result holding it, its rooms): the building picked (its floor, if one is picked), or the
+    # rooms a search finds. nothing picked or found -> (None, None), nothing calculated
     def selected_rooms(self):
-        rooms = self.result['rooms']
         prop, floor, term = self.building.picked(), self.floor_var.get(), self.search_var.get().strip().lower()
         if prop:
-            rooms = rooms[rooms['property'] == prop]
+            result = self.campus.building(prop)
+            rooms = result['rooms']
             if floor and floor != ALL:
                 rooms = rooms[rooms['floor'] == floor]
-        elif term:
-            rooms = rooms[rooms['space'].str.lower().str.contains(term, regex=False)
-                          | rooms['property'].str.lower().str.contains(term, regex=False)]
-        else:
-            rooms = rooms.iloc[0:0]
-        return rooms
+            return result, rooms
+        if not term:
+            return None, None
+        found = self.found(self.rooms, term)
+        props = found['property'].unique()
+        if len(props) == 0:
+            return None, None
+        # one building -> that building alone, several -> the whole campus
+        result = self.campus.building(props[0]) if len(props) == 1 else self.campus.whole()
+        return result, self.found(result['rooms'], term)
+
+    @staticmethod
+    def found(rooms, term):
+        return rooms[rooms['space'].str.lower().str.contains(term, regex=False)
+                     | rooms['property'].str.lower().str.contains(term, regex=False)]
 
     def show(self):
         keep = {tree: tree.selection() for tree in (self.room_tree, self.exit_tree)}
@@ -282,11 +296,16 @@ class App:
                 tree.see(still[0])
 
     def fill_lists(self):
-        rooms = self.selected_rooms()
+        result, rooms = self.selected_rooms()
+        if result is None:                            # nothing picked or found -> empty lists, nothing calculated
+            for tree in (self.zone_tree, self.room_tree, self.exit_tree):
+                tree.delete(*tree.get_children())
+            self.show_counts(0, 0, 0)
+            return
         keys = set(zip(rooms['property'], rooms['floor'], strict=False))
-        zones = self.result['zones']
+        zones = result['zones']
         zones = zones.loc[[k in keys for k in zip(zones['property'], zones['floor'], strict=False)]]    # .loc: an empty list must not wipe the columns
-        exits = self.result['exits']
+        exits = result['exits']
         exits = exits.loc[[k in keys for k in zip(exits['property'], exits['floor'], strict=False)]]
 
         self.zone_tree.delete(*self.zone_tree.get_children())
@@ -319,8 +338,11 @@ class App:
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
 
-        shown = f"{len(rooms)} rooms" + (" (first 3000 shown)" if len(rooms) > 3000 else '')
-        self.status_var.set(f"{shown}, {len(zones)} zones, {len(exits)} exits   |   database: {DB_PATH}")
+        self.show_counts(len(rooms), len(zones), len(exits))
+
+    def show_counts(self, rooms, zones, exits):
+        shown = f"{rooms} rooms" + (" (first 3000 shown)" if rooms > 3000 else '')
+        self.status_var.set(f"{shown}, {zones} zones, {exits} exits   |   database: {DB_PATH}")
 
     def pick_zone(self):
         sel = self.zone_tree.selection()
@@ -338,10 +360,11 @@ class App:
             return None
         rid = int(sel[0][1:])
         self.refresh_if_changed()                     # start from the latest values
-        rooms = self.result['rooms'].set_index('room_id')
-        if rid not in rooms.index:
+        prop = self.rooms.loc[self.rooms['room_id'] == rid, 'property']
+        if prop.empty:
             messagebox.showinfo("Room not found", "That room is no longer in the database.")
             return None
+        rooms = self.campus.building(prop.iloc[0])['rooms'].set_index('room_id')
         return rooms.loc[rid].to_dict() | {'room_id': rid}
 
     def current_exit_pk(self):
@@ -813,7 +836,7 @@ class App:
             except (ValueError, KeyError) as err:
                 info_var.set(f"can't preview: {err}")
                 return
-            before = self.result['zones']
+            before = self.campus.whole()['zones']
             keys = ['floor_key', 'zone_wing']
             cols = ['status', 'total_load', 'exit_capacity']
             both = before[keys + cols].merge(after[keys + cols], on=keys, how='outer', suffixes=('_before', '_after'))

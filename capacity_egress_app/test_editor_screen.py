@@ -10,7 +10,7 @@ import egress
 import excel_inputs as xi
 import widgets
 from test_capacity_db import report, CONFIG_DIR
-from test_egress import assert_same_frame, assert_same_result
+from test_egress import assert_same_frame, assert_same_result, building_rows, renumbered
 
 EOW = 'Engineering Office Wing'
 ROOMS = [(EOW, '1', '101', 50.0, 20),      # counted 20 on a site visit
@@ -370,7 +370,12 @@ def assert_shows_what_the_database_holds(screen, conn):
     rooms, exits = db.load_rooms(conn), db.load_exits(conn)
     assert_same_frame(screen.rooms, rooms, 'rooms')
     assert_same_frame(screen.exits, exits, 'exits')
-    assert_same_result(screen.result, egress.calculate(rooms, exits, db.load_code_factors(conn)))
+    want = egress.calculate(rooms, exits, db.load_code_factors(conn))
+    # every building the screen has calculated (the one on screen at least) -> its rows of a whole-campus calculation
+    assert screen.campus.calculated_buildings()
+    for prop in screen.campus.calculated_buildings():
+        assert_same_result(renumbered(screen.campus.building(prop)), renumbered(building_rows(want, prop)))
+    assert_same_result(screen.export_result(), want)
     assert screen.seen_version == db.data_version(conn)
 
 def test_change_capacity_redoes_only_its_floor(root, campus_path, said, calculated):
@@ -542,7 +547,7 @@ def test_a_save_also_shows_what_someone_else_saved_on_another_floor(root, campus
         press(win, 'Save')
         assert said == []
         assert_shows_what_the_database_holds(screen, conn)
-        assert screen.result['rooms'].set_index('room_id').loc[room(conn, 'A101')['room_id'], 'capacity'] == 50
+        assert screen.campus.building(OTHER)['rooms'].set_index('room_id').loc[room(conn, 'A101')['room_id'], 'capacity'] == 50
     finally:
         conn.close()
 
@@ -563,6 +568,92 @@ def test_exports_after_a_floor_save_are_the_whole_campus_result(root, campus_pat
         got = screen.export_result()
         for table in ('rooms', 'exits', 'zones', 'warnings'):
             assert_same_frame(got[table], want[table], table)
+    finally:
+        conn.close()
+
+# --- the editor screen calculates a building when it shows it, not the campus when it opens ---------------------------
+# it opens on no building, so calculating the whole campus (19,451 rooms) only to show empty lists was most of the wait
+# on a busy machine. whatever it shows must still be exactly what one whole-campus calculation gives
+
+def test_opening_the_editor_screen_calculates_no_rooms(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        assert calculated == []
+        assert screen.zone_tree.get_children() == () and screen.room_tree.get_children() == ()
+        assert screen.status_var.get().startswith('0 rooms, 0 zones, 0 exits')
+        assert screen.building.names == [OTHER, EOW]
+        open_floor(screen, conn, 'A101')         # Clearihue: 2 rooms
+        open_floor(screen, conn, '201')          # Engineering Office Wing: 4 rooms
+        open_floor(screen, conn, '101')          # the same building again -> already calculated
+        assert calculated == [2, 4]
+        assert said == []
+    finally:
+        conn.close()
+
+# the screen as it was: every building shown from one whole-campus calculation
+class WholeCampus(egress.Campus):
+    def building(self, prop):
+        return building_rows(self.whole(), prop)
+
+def lists(screen):
+    zones = [(t.item(i, 'values'), t.item(i, 'tags')) for t in [screen.zone_tree] for i in t.get_children()]
+    rooms, exits = ([(i, t.item(i, 'values'), t.item(i, 'tags')) for i in t.get_children()]
+                    for t in (screen.room_tree, screen.exit_tree))
+    return zones, rooms, exits, screen.status_var.get()
+
+def shown_both_ways(screen):
+    screen.show()
+    got, calculated = lists(screen), screen.campus
+    screen.campus = WholeCampus(calculated.rooms, calculated.exits, calculated.factors)
+    screen.show()
+    want = lists(screen)
+    screen.campus = calculated
+    return got, want
+
+def test_every_building_and_search_shows_what_a_whole_campus_calculation_gives(root, campus_path, said):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        for space in ('101', '201', 'A101'):
+            open_floor(screen, conn, space)                      # its floor
+            got, want = shown_both_ways(screen)
+            assert got == want and got[1], space
+            screen.floor_var.set(app.ALL)                        # the whole building
+            got, want = shown_both_ways(screen)
+            assert got == want and got[1], space
+        for term in ('0', '20'):                                 # rooms in both buildings, rooms in one
+            screen.building_var.set('')
+            screen.search_var.set(term)
+            screen.search()
+            got, want = shown_both_ways(screen)
+            assert got == want and got[1], term
+        assert {r[1][0] for r in lists(screen)[1]} == {EOW}
+        assert said == []
+    finally:
+        conn.close()
+
+# a search across buildings calculates the whole campus; a save after it -> the search shows the saved number
+def test_a_search_across_buildings_after_a_save_shows_the_saved_number(root, campus_path, said):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        screen.search_var.set('0')
+        screen.search()
+        rid = room(conn, '101')['room_id']
+        assert screen.room_tree.item(f"r{rid}", 'values')[7] == '20'
+        open_floor(screen, conn)
+        screen.change_capacity()
+        win = dialog(screen, 'Change capacity')
+        capacity, why = entries(win)
+        type_into(capacity, '40')
+        type_into(why, 'OREM request')
+        press(win, 'Save')
+        screen.building_var.set('')
+        screen.search_var.set('0')
+        screen.search()
+        assert said == [] and screen.room_tree.item(f"r{rid}", 'values')[7] == '40'
+        assert_shows_what_the_database_holds(screen, conn)
     finally:
         conn.close()
 

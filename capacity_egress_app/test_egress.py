@@ -469,17 +469,17 @@ def assert_same_result(got, want):
                       want['warnings'].sort_values(key).reset_index(drop=True), 'warnings')
 
 def refreshed(rooms, exits, new_rooms, new_exits, prop, floor):
-    # the screen's way: the old whole-campus result + only that floor's rows read again and redone
+    # the screen's way: the building's old result + only that floor's rows read again and redone
     f = factors()
-    old_rooms, old_exits = frames(rooms, exits)
-    before = egress.calculate(old_rooms, old_exits, f)
+    campus = egress.Campus(*frames(rooms, exits), f)
+    campus.building(prop)
     floor_rooms = pd.DataFrame([r for r in new_rooms if (r['property'], r['floor']) == (prop, floor)])
     floor_exits = pd.DataFrame([e for e in new_exits if (e['property'], e['floor']) == (prop, floor)], columns=list(CAMPUS_EXITS[0]))
-    got_rooms, got_exits, got = egress.refresh_floor(old_rooms, old_exits, before, f, prop, floor, floor_rooms, floor_exits)
+    got = campus.refresh_floor(prop, floor, floor_rooms, floor_exits)
     want_rooms, want_exits = frames(new_rooms, new_exits)
-    assert_same_frame(got_rooms, want_rooms, 'loaded rooms')
-    assert_same_frame(got_exits, want_exits, 'loaded exits')
-    return got, egress.calculate(want_rooms, want_exits, f)
+    assert_same_frame(got.rooms, want_rooms, 'loaded rooms')
+    assert_same_frame(got.exits, want_exits, 'loaded exits')
+    return renumbered(got.building(prop)), renumbered(building_rows(egress.calculate(want_rooms, want_exits, f), prop))
 
 def edited(rows, key, value, **changes):
     return [r | changes if r[key] == value else r for r in rows]
@@ -528,15 +528,17 @@ def test_a_blank_in_a_column_of_whole_numbers(why, rooms, exits, new_rooms, new_
 
 def test_refresh_floor_keeps_the_database_order_and_other_floors_untouched():
     rooms, exits = frames(CAMPUS_ROOMS, CAMPUS_EXITS)
-    before = egress.calculate(rooms, exits, factors())
+    campus = egress.Campus(rooms, exits, factors())
+    before = campus.building('Fake Hall')
     floor = pd.DataFrame([raw_room(7, '3', '301', 60.0, 99, 'site count')])       # room 8 is gone from the floor
-    got_rooms, _, got = egress.refresh_floor(rooms, exits, before, factors(), 'Fake Hall', '3', floor, exits.iloc[0:0])
-    assert got_rooms['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9, 10]
-    assert got['rooms']['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9, 10]
+    refreshed_campus = campus.refresh_floor('Fake Hall', '3', floor, exits.iloc[0:0])
+    got = refreshed_campus.building('Fake Hall')
+    assert refreshed_campus.rooms['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9, 10]
+    assert got['rooms']['room_id'].tolist() == [1, 2, 3, 4, 5, 6, 7, 9]
     assert got['rooms'].loc[got['rooms']['room_id'] == 7, 'capacity'].item() == 99
     assert got['rooms'].loc[got['rooms']['room_id'] == 1, 'capacity'].item() == 20
     assert list(got['rooms'].index) == list(range(len(got['rooms'])))
-    assert before['rooms'].shape[0] == 10                                       # the old result is not changed
+    assert before['rooms'].shape[0] == 9 and campus.rooms.shape[0] == 10        # the old result is not changed
 
 # a floor where no room has a sub-category (a store, a plant floor) calculates like any other
 def test_a_floor_with_no_sub_categories_calculates():
@@ -545,3 +547,81 @@ def test_a_floor_with_no_sub_categories_calculates():
     assert result['rooms']['in_scope'].tolist() == [True, True]
     assert result['rooms']['per_code_load'].tolist() == [0, 0]
     assert result['warnings']['type'].tolist().count('no_room_type') == 2
+
+# --- the campus calculated a building at a time, as the editor screen shows it -> the same answer as all at once -----
+# zones never cross floors, so a building calculated alone must be exactly its rows of the whole-campus result
+
+# a second building with its own awkward things: a room type nobody knows, wings with a link door, a wing no exit names
+TWO_BUILDINGS_ROOMS = CAMPUS_ROOMS + [
+    raw_room(11, '1', 'B105', 30.0, 12, 'site count', prop='Other Hall'), raw_room(12, '2', '201', 40.0, override='lounge', prop='Other Hall'),
+    raw_room(13, '2', 'C202', 25.0, prop='Other Hall'), raw_room(14, '2', 'D203', 15.0, 4, 'site count', prop='Other Hall'),
+]
+TWO_BUILDINGS_EXITS = CAMPUS_EXITS + [
+    raw_exit(9, '1', 'S2 - doorway', 'doorway', 88, prop='Other Hall'),
+    raw_exit(10, '2', 'S1 - doorway', 'doorway', 88, wing='C', prop='Other Hall'),
+    raw_exit(11, '2', 'L1 - link', 'doorway', 88, wing='C', into_wing='D', prop='Other Hall'),
+]
+
+def building_rows(result, prop):
+    return {t: result[t][result[t]['property'] == prop] for t in ('rooms', 'exits', 'zones', 'warnings')} | \
+           {'settings': result['settings']}
+
+# row numbers say nothing about a room; a building's tables are numbered from 0 like any other table
+def renumbered(result):
+    return {t: v.reset_index(drop=True) if isinstance(v, pd.DataFrame) else v for t, v in result.items()}
+
+def test_a_building_alone_is_its_rows_of_the_whole_campus():
+    rooms, exits = frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS)
+    want = egress.calculate(rooms, exits, factors())
+    assert set(want['warnings']['property']) == {'Fake Hall', 'Other Hall'}       # both buildings have warnings to keep
+    campus = egress.Campus(rooms, exits, factors())
+    for prop in ('Other Hall', 'Fake Hall'):
+        assert_same_result(renumbered(campus.building(prop)), renumbered(building_rows(want, prop)))
+    assert_same_result(campus.whole(), want)
+    # the warnings come in the order a whole calculation finds them, so the exports read the same as before
+    assert_same_frame(campus.whole()['warnings'], want['warnings'], 'warnings')
+
+# nothing is calculated until it's asked for, and a building already calculated isn't calculated again
+def test_the_campus_is_calculated_only_as_far_as_asked(monkeypatch):
+    rooms, exits = frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS)
+    sizes, real = [], egress.calculate
+    monkeypatch.setattr(egress, 'calculate', lambda r, e, f: sizes.append(len(r)) or real(r, e, f))
+    campus = egress.Campus(rooms, exits, factors())
+    assert sizes == []
+    first = campus.building('Other Hall')
+    assert campus.building('Other Hall') is first
+    assert sizes == [5]
+    campus.whole()
+    campus.whole()
+    assert sizes == [5, 14]
+    assert campus.calculated_buildings() == ['Other Hall']
+
+# a save on one floor -> that floor read again: every building's result and the whole campus as a fresh calculation gives
+@pytest.mark.parametrize('why, new_rooms, new_exits, prop, floor', [
+    ('a capacity changed', edited(TWO_BUILDINGS_ROOMS, 'room_id', 13, capacity=9, capacity_source='site count'),
+     TWO_BUILDINGS_EXITS, 'Other Hall', '2'),
+    ('an exit added to a floor with wings and a link door', TWO_BUILDINGS_ROOMS,
+     TWO_BUILDINGS_EXITS + [raw_exit(12, '2', 'S2 - doorway', 'doorway', 100, wing='D', prop='Other Hall')], 'Other Hall', '2'),
+    ('every exit on a floor deleted', TWO_BUILDINGS_ROOMS, [e for e in TWO_BUILDINGS_EXITS if e['floor'] != '3'], 'Fake Hall', '3'),
+])
+def test_a_floor_refreshed_in_the_campus_gives_a_fresh_calculation(why, new_rooms, new_exits, prop, floor):
+    f = factors()
+    campus = egress.Campus(*frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS), f)
+    other = 'Fake Hall' if prop == 'Other Hall' else 'Other Hall'
+    kept = campus.building(other)
+    campus.building(prop)
+    campus.whole()
+    floor_rooms = pd.DataFrame([r for r in new_rooms if (r['property'], r['floor']) == (prop, floor)], columns=list(CAMPUS_ROOMS[0]))
+    floor_exits = pd.DataFrame([e for e in new_exits if (e['property'], e['floor']) == (prop, floor)], columns=list(CAMPUS_EXITS[0]))
+    got = campus.refresh_floor(prop, floor, floor_rooms, floor_exits)
+
+    want_rooms, want_exits = frames(new_rooms, new_exits)
+    want = egress.calculate(want_rooms, want_exits, f)
+    assert_same_frame(got.rooms, want_rooms, 'loaded rooms')
+    assert_same_frame(got.exits, want_exits, 'loaded exits')
+    for p in (prop, other):
+        assert_same_result(renumbered(got.building(p)), renumbered(building_rows(want, p)))
+    assert got.building(other) is kept                                          # the other building isn't redone
+    assert_same_result(got.whole(), want)
+    assert_same_frame(got.whole()['warnings'], want['warnings'], 'warnings')
+    assert_same_result(campus.whole(), egress.calculate(*frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS), f))  # old one unchanged
