@@ -565,3 +565,33 @@ def test_exports_after_a_floor_save_are_the_whole_campus_result(root, campus_pat
             assert_same_frame(got[table], want[table], table)
     finally:
         conn.close()
+
+# refresh space report -> a file carrying the app's own counts: the app asks before FMIS capacities are kept or replaced
+def refresh_with(root, conn, said, monkeypatch, rows, keep_answer):
+    questions = []
+    def askyesno(title, text, **kw):
+        questions.append(text)
+        return keep_answer if text.startswith('The counts') else True
+    monkeypatch.setattr(app.filedialog, 'askopenfilename', lambda **kw: '/x/carl_space_report.xlsx')
+    monkeypatch.setattr(app.xi, 'read_space_report', lambda path: report(rows))
+    monkeypatch.setattr(app.messagebox, 'askyesno', askyesno)
+    editor_screen(root, conn).refresh_report()
+    return questions
+
+def fmis_of(conn, space):
+    return conn.execute("SELECT fmis_capacity FROM rooms WHERE space = ?", (space,)).fetchone()[0]
+
+@pytest.mark.parametrize('answer, expected', [(True, 31), (False, 20)])
+def test_refresh_with_the_apps_own_counts_asks_then_keeps_or_replaces_fmis_capacity(root, conn, said, monkeypatch, answer, expected):
+    conn.execute("UPDATE rooms SET fmis_capacity = 31 WHERE space = '101'")
+    conn.commit()
+    questions = refresh_with(root, conn, said, monkeypatch, ROOMS, answer)
+    assert questions[-1] == "The counts in this file match the app's own counts.\nKeep the FMIS capacities as they are?"
+    assert fmis_of(conn, '101') == expected
+    assert ("This file's counts are the app's own" in said[-1][2]) == answer
+
+def test_refresh_from_a_raw_fmis_export_does_not_ask(root, conn, said, monkeypatch):
+    rows = [(EOW, '1', '101', 50.0, 33), (EOW, '1', '102', 30.0, 0)]
+    questions = refresh_with(root, conn, said, monkeypatch, rows, False)
+    assert len(questions) == 1 and questions[0].startswith('2 rows in')
+    assert fmis_of(conn, '101') == 33

@@ -296,14 +296,8 @@ FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
 # nearly all equal -> the file carries the app's counts. 90%, not all: a few rooms may have changed since it was exported
 OWN_COUNTS_SHARE = 0.9
 
-def counts_are_the_apps_own(matched, db_rooms):
-    app = db_rooms.set_index('room_id')['capacity']
-    both = matched.assign(app_count=matched['room_id'].map(app))
-    both = both[both['app_count'].notna() & (both['fmis_count'] > 0)]
-    return bool(len(both) > 0 and (both['fmis_count'] == both['app_count']).mean() >= OWN_COUNTS_SHARE)
-
-def refresh_space_report(conn, df, report_name, user_login=None):
-    require_editor(conn, user_login)
+def match_report(conn, df):
+    # the report's rooms against the app's -> (report, db rooms, matched, new rooms, ids of rooms missing from the report)
     report = df.rename(columns=ROOM_COLUMN_NAMES).copy()
     report['fmis_count'] = pd.to_numeric(report['Capacity (Occupants)'], errors='coerce')
     # same room twice, one copy blank -> keep one (ECS 242A)
@@ -334,10 +328,23 @@ def refresh_space_report(conn, df, report_name, user_login=None):
     matched = pd.concat([single, by_area.set_index('index')], ignore_index=False)
     new_rooms = report[~report.index.isin(set(matched_report_idx) | set(by_area['index']))]
     missing_ids = set(db['room_id']) - set(matched['room_id'])
+    return report, db, matched, new_rooms, missing_ids
 
-    # Carl's own report / the app's export hold the app's counts in Capacity (Occupants), not FMIS values
-    # -> then the FMIS capacity stays as it is, for matched and new rooms alike
-    keep_fmis = counts_are_the_apps_own(matched, db)
+def counts_are_the_apps_own(conn, df):
+    # the app asks before refreshing when this is true
+    _, db_rooms, matched, _, _ = match_report(conn, df)
+    app = db_rooms.set_index('room_id')['capacity']
+    both = matched.assign(app_count=matched['room_id'].map(app))
+    both = both[both['app_count'].notna() & (both['fmis_count'] > 0)]
+    return bool(len(both) > 0 and (both['fmis_count'] == both['app_count']).mean() >= OWN_COUNTS_SHARE)
+
+def refresh_space_report(conn, df, report_name, user_login=None, keep_fmis_capacity=False):
+    # keep_fmis_capacity: the file's counts are the app's own -> FMIS capacities stay (the caller asks, never guessed here)
+    require_editor(conn, user_login)
+    report, db, matched, new_rooms, missing_ids = match_report(conn, df)
+    keys = ['property', 'floor', 'space']
+    # kept -> the FMIS capacity stays as it is, for matched and new rooms alike
+    keep_fmis = keep_fmis_capacity
 
     # matched rooms -> update FMIS columns, remember FMIS capacity when it's a real number
     changed = 0
