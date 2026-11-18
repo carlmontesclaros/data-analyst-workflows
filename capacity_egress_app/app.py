@@ -866,9 +866,15 @@ class App:
                                    "Room capacities, sources, notes and room types are not changed.\nContinue?"):
             return
         try:
+            # the file's counts equal the app's own -> ask before FMIS capacities are kept or replaced
+            keep_fmis = db.counts_are_the_apps_own(self.conn, df)
+            if keep_fmis:
+                keep_fmis = messagebox.askyesno("Refresh rooms", "The counts in this file match the app's own counts.\n"
+                                                "Keep the FMIS capacities as they are?")
             # one transaction -> nobody sees a half-refreshed room list
             with db.write_transaction(self.conn):
-                result = db.refresh_space_report(self.conn, df, os.path.basename(path), self.user_login)
+                result = db.refresh_space_report(self.conn, df, os.path.basename(path), self.user_login,
+                                                 keep_fmis_capacity=keep_fmis)
                 db.log_change(self.conn, self.user_login, self.user_name, 'rooms', 'all', 'space report', None,
                               os.path.basename(path), f"refresh: {result['matched']} matched, {result['new']} new, "
                               f"{result['missing']} missing")

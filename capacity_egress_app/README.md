@@ -167,7 +167,7 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` and `python3 -m ruff check .` (lint).
    GitHub runs them on every push to `main` and on every pull request (`.github/workflows/tests.yml`): lint once, then the tests on Windows and on the Mac. A red X on a PR means something broke: don't merge until it's green.
 
-Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities.
+Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities. If the file's counts match the app's own (Carl's report or the app's export, not a raw FMIS export), the app asks "Keep the FMIS capacities as they are?": Yes leaves the stored FMIS capacities alone, No reads the counts as FMIS values like a raw export.
 
 ### Export space report
 
