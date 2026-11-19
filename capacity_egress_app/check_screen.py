@@ -112,6 +112,8 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
+        # side margins 24 -> 16 px: at the Windows font the tables' full headings ask for 1381 px at 24, 1367 at 17 and
+        # 1365 at 16, and the screen must fit a 1366 px laptop
         outer = ttk.Frame(self.root, padding=(16, 10, 16, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
