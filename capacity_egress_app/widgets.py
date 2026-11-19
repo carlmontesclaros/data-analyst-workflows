@@ -109,6 +109,24 @@ def fit_column(tree, col, texts):
     width = max(int(tree.column(col, 'minwidth')), need)
     tree.column(col, width=width, minwidth=width)
 
+# a whole table -> every column at least as wide as its heading and its values in the table's real font, and never
+# narrower than its least width. columns: [(key, least width)]. keys in free_text are typed notes of any length: only
+# their heading is fitted, and they scroll. refit after every fill, from the least widths, so a column also gives the
+# width back when its longest value goes. always: {key: texts} that the column must hold even while the table is empty
+def fit_columns(tree, columns, free_text=(), always=None):
+    style = ttk.Style(tree)
+    cell_font = style.lookup('Treeview', 'font') or 'TkDefaultFont'
+    heading_font = style.lookup('Treeview.Heading', 'font') or 'TkDefaultFont'
+    def measure(font, text):
+        return int(tree.tk.call('font', 'measure', font, text)) + CELL_PADDING
+    items = tree.get_children()
+    for key, least in columns:
+        need = measure(heading_font, tree.heading(key, 'text'))
+        texts = {str(tree.set(item, key)) for item in items} if key not in free_text else set()
+        need = max([need] + [measure(cell_font, text) for text in texts | set((always or {}).get(key, ()))])
+        width = max(least, need)
+        tree.column(key, width=width, minwidth=width)
+
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given. its text gets that width less the label's own
 # padding and the theme's border, measured off an empty label of the same style and padding

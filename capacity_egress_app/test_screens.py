@@ -201,7 +201,11 @@ def test_check_screen_tables_keep_every_column_at_its_width(root, conn):
                           (screen.zone_tree, check_screen_module.ZONE_COLUMNS)]:
         shown = {col: int(tree.column(col, 'width')) for col, _ in columns}
         assert [col for col, width in columns if shown[col] < width] == [], shown
-        assert sum(shown.values()) <= tree.winfo_width(), shown
+        if tree is not screen.found_tree:
+            assert sum(shown.values()) <= tree.winfo_width(), shown
+    # a building name longer than its column is shown in full by scrolling the list sideways, not by cutting it
+    assert sum(int(screen.found_tree.column(col, 'width')) for col, _ in check_screen_module.FOUND_COLUMNS) > screen.found_tree.winfo_width()
+    assert screen.found_tree.xview() != (0.0, 1.0)
 
 # an error can be longer than the window is wide: it wraps under the fields rather than running off the edge
 @pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
@@ -413,3 +417,83 @@ def test_zone_verdict_shows_in_full_at_the_smallest_size(root, conn, font_size):
     font = ttk.Style(root).lookup('Treeview', 'font')
     assert text_room(screen.zone_tree, zones[0], 'Result') >= int(root.tk.call('font', 'measure', font, egress.CANT_CHECK))
     assert fits_a_laptop(asked_for(root))
+
+
+# at the Windows font no heading and no value in a check or editor table is cut: every column is as wide as the
+# widest of its heading and its values, drawn in the table's real font (typed notes may be longer, so they scroll)
+def cut_columns(tree, keys):
+    style = ttk.Style(tree)
+    cell_font = style.lookup('Treeview', 'font') or 'TkDefaultFont'
+    heading_font = style.lookup('Treeview.Heading', 'font') or 'TkDefaultFont'
+    def measure(font, text):
+        return int(tree.tk.call('font', 'measure', font, text)) + 8
+    cut = []
+    for key in keys:
+        need = measure(heading_font, tree.heading(key, 'text'))
+        if key not in ('note', 'notes'):
+            need = max([need] + [measure(cell_font, tree.set(item, key)) for item in tree.get_children()])
+        if int(tree.column(key, 'width')) < need:
+            cut.append((key, int(tree.column(key, 'width')), need))
+    return cut
+
+def test_check_screen_tables_show_every_heading_and_room_in_full_at_the_windows_font(larger_font_root, conn):
+    screen = check_screen(larger_font_root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    larger_font_root.update()
+    assert screen.check_tree.get_children() and screen.zone_tree.get_children()
+    for tree in (screen.found_tree, screen.check_tree, screen.zone_tree):
+        assert cut_columns(tree, tree['columns']) == []
+
+def editor_with_rooms(root, conn):
+    screen = editor_screen(root, conn)
+    screen.search_var.set('A120')
+    screen.search()
+    root.update()
+    return screen
+
+def test_editor_tables_show_every_heading_and_value_in_full_at_the_windows_font(larger_font_root, conn):
+    screen = editor_with_rooms(larger_font_root, conn)
+    assert screen.zone_tree.get_children() and screen.room_tree.get_children() and not screen.exit_tree.get_children()
+    for tree in (screen.zone_tree, screen.room_tree, screen.exit_tree):
+        assert cut_columns(tree, tree['columns']) == []
+
+def test_the_check_screen_still_fits_a_laptop_with_every_column_in_full(larger_font_root, conn):
+    screen = check_screen(larger_font_root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    assert fits_a_laptop(larger_font_root.minsize())
+    shrink_to_minimum(larger_font_root)
+    assert cut_off_widgets(larger_font_root) == []
+    assert cut_columns(screen.check_tree, screen.check_tree['columns']) == []
+
+def open_code_factors(root, conn):
+    screen = editor_screen(root, conn)
+    screen.edit_code_factors()
+    root.update()
+    return [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+
+# the Code factors dialog grows to what its form asks for, so Preview, Save and the Why field are never cut off
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
+def test_code_factors_dialog_shows_its_form_in_full(root, conn, font_size):
+    if font_size:
+        use_font(root, font_size)
+    win = open_code_factors(root, conn)
+    assert asked_for(win)[0] <= win.winfo_width() and asked_for(win)[1] <= win.winfo_height()
+    shown = [b for b in buttons(win) if b.cget('text') in ('Preview', 'Save', 'Close')]
+    assert len(shown) == 3 and [b.cget('text') for b in shown if not is_inside_window(b, win)] == []
+    whys = [w for w in all_widgets(win) if isinstance(w, ttk.Entry) and w.winfo_reqwidth() > 100]
+    assert whys and [w for w in whys if not is_inside_window(w, win)] == []
+    assert cut_off_widgets(win) == []
+
+def test_change_dialog_titles_use_the_app_strong_font(root, conn):
+    screen = editor_with_rooms(root, conn)
+    screen.room_tree.selection_set(screen.room_tree.get_children()[0])
+    for open_dialog in (screen.change_capacity, screen.change_room_type):
+        before = set(root.winfo_children())
+        open_dialog()
+        root.update()
+        win = next(w for w in root.winfo_children() if w not in before and isinstance(w, tk.Toplevel))
+        title = next(w for w in all_widgets(win) if isinstance(w, ttk.Label) and 'floor 3 room A120' in str(w.cget('text')))
+        assert str(title.cget('font')) == 'AppStrongFont'
+        win.destroy()

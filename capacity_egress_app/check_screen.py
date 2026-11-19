@@ -7,7 +7,7 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_window, heading_text, initials, open_path, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_columns, fit_window, heading_text, initials, open_path, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
@@ -112,7 +112,7 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
-        outer = ttk.Frame(self.root, padding=(24, 10, 24, 8))
+        outer = ttk.Frame(self.root, padding=(20, 10, 20, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
         outer.rowconfigure(1, weight=1)
@@ -250,7 +250,6 @@ class CheckScreen:
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
         self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1)
-        fit_column(self.zone_tree, 'Result', ZONE_VERDICTS)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
         colours.colour_tags(self.zone_tree)
 
@@ -265,18 +264,33 @@ class CheckScreen:
         message = self.message_var.get()
         self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED_FG)
 
+    # every column as wide as its heading and values: after each fill. the zone Result column also holds every fixed verdict
+    def fit(self, tree, columns=None):
+        columns = columns or {self.found_tree: FOUND_COLUMNS, self.check_tree: CHECK_COLUMNS, self.zone_tree: ZONE_COLUMNS}[tree]
+        fit_columns(tree, columns, always={'Result': ZONE_VERDICTS} if columns is ZONE_COLUMNS else None)
+
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height, selectmode='browse')
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
+        # the table asks the window for the room its headings and the fixed zone verdicts need. a value that needs more (a
+        # long building name) makes the table scroll sideways rather than widen the window past a laptop screen
+        if columns is ZONE_COLUMNS:
+            fit_column(tree, 'Result', ZONE_VERDICTS)
+        self.fit(tree, columns)
+        asked = sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=ys.set)
+        xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
         tree.grid(row=0, column=0, sticky='nsew')
         ys.grid(row=0, column=1, sticky='ns')
+        xs.grid(row=1, column=0, sticky='ew')
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
+        frame.configure(width=asked + ys.winfo_reqwidth(), height=tree.winfo_reqheight() + xs.winfo_reqheight())
+        frame.grid_propagate(False)
         return tree
 
     # finding rooms
@@ -298,6 +312,7 @@ class CheckScreen:
             colour = egress.room_colour(r)
             self.found_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=[r['space'], r['floor'], r['property']],
                                    tags=(colour,) if colour else ())
+        self.fit(self.found_tree)
         if not len(found) and not (self.search_var.get().strip() or prop):
             self.found_var.set("Type a room or building, or pick a building.")
         else:
@@ -398,6 +413,7 @@ class CheckScreen:
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
             name = egress.zone_name(z['floor'], z['zone_wing'])
             self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
+        self.fit(self.zone_tree)
 
     # the check -> nothing is saved
     def add_to_check(self):
@@ -474,6 +490,7 @@ class CheckScreen:
             proposed = '-' if r['proposed'] is None else r['proposed']
             self.check_tree.insert('', 'end', iid=f"r{r['room_id']}", values=[f"Floor {r['floor']}  {r['space']}", room_type,
                                    now, proposed, per_code, verdict], tags=(r['colour'],) if r['colour'] else ())
+        self.fit(self.check_tree)
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
         self.zone_tree.delete(*self.zone_tree.get_children())
         for z in self.check['zones']:
@@ -482,6 +499,7 @@ class CheckScreen:
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
             self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
                                   tags=(z['colour'],))
+        self.fit(self.zone_tree)
 
     def save_summary(self):
         if not self.check or not self.check['rooms']:

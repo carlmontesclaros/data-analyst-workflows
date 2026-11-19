@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import BuildingBox, FlowRow, anchor_for, fit_window, heading_text, open_path, use_theme, wrap_to_width
+from widgets import BuildingBox, FlowRow, anchor_for, fit_columns, fit_window, heading_text, open_path, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +39,9 @@ ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category'
 EXIT_COLUMNS = [('floor', 50), ('wing', 80), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 85), ('stair_width_cm', 85),
                 ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 150), ('width_check', 220),
                 ('into_wing', 80), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
+
+# typed notes can be any length: their column keeps its width and scrolls
+FREE_TEXT = ('note', 'notes')
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
 def exit_capacity_text(zone):
@@ -227,6 +230,7 @@ class App:
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
+        fit_columns(tree, columns, FREE_TEXT)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
         tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -338,6 +342,8 @@ class App:
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
 
+        for tree, columns in [(self.zone_tree, ZONE_COLUMNS), (self.room_tree, ROOM_COLUMNS), (self.exit_tree, EXIT_COLUMNS)]:
+            fit_columns(tree, columns, FREE_TEXT)
         self.show_counts(len(rooms), len(zones), len(exits))
 
     def show_counts(self, rooms, zones, exits):
@@ -412,7 +418,7 @@ class App:
 
         current = '' if pd.isna(room['capacity']) else str(int(room['capacity']))
         ttk.Label(frame, text=f"{room['property']} floor {room['floor']} room {room['space']}",
-                  font=('TkDefaultFont', 11, 'bold')).grid(row=0, column=0, columnspan=3, sticky='w')
+                  font='AppStrongFont').grid(row=0, column=0, columnspan=3, sticky='w')
         ttk.Label(frame, text=f"Room capacity now: {current or '-'} ({room['capacity_source']}),  "
                               f"per code load: {room['per_code_load']}").grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
@@ -521,7 +527,7 @@ class App:
         frame.pack(fill='both', expand=True)
         current = '' if pd.isna(room['capacity']) else int(room['capacity'])
         ttk.Label(frame, text=f"{room['property']} floor {room['floor']} room {room['space']}",
-                  font=('TkDefaultFont', 11, 'bold')).grid(row=0, column=0, columnspan=3, sticky='w')
+                  font='AppStrongFont').grid(row=0, column=0, columnspan=3, sticky='w')
         ttk.Label(frame, text=f"Room type now: {text_or_blank(room['room_type']) or '-'} ({room['room_type_source']}),  "
                               f"sub-category: {text_or_blank(room['sub_category']) or '-'}\n"
                               f"Per code load now: {room['per_code_load']},  room capacity: {current if current != '' else '-'} "
@@ -763,7 +769,6 @@ class App:
     def edit_code_factors(self):
         win = tk.Toplevel(self.root)
         win.title("Code factors")
-        win.geometry("900x560")
         notebook = ttk.Notebook(win)
         notebook.pack(fill='both', expand=True, padx=6, pady=6)
         trees = {}
@@ -874,6 +879,7 @@ class App:
         ttk.Button(buttons, text="Preview", command=preview).pack(side='left', padx=4)
         ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
         ttk.Button(buttons, text="Close", command=win.destroy).pack(side='left')
+        fit_window(win, (900, 560), (600, 400))
 
     # space report refresh -> room list only, capacities never touched
     def refresh_report(self):
