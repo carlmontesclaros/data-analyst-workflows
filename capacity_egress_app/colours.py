@@ -26,11 +26,12 @@ SELECTED = '#CFE2F5'                                   # picked row: pale blue, 
 ERROR_FG = '#B00020'                                   # a message that says something went wrong
 
 # status -> (ink, tint, mark colour). ink and tint are text on its chip and the row, mark is the shape's own colour; all
-# text pairs are above 4.5:1, marks above 3:1 on white and on their own tint. green rows stay white (the mark is enough)
+# text pairs are above 4.5:1, marks above 3:1 on white and on their own tint. green rows stay white (the mark is enough),
+# grey has no tint: its rows are muted text on white
 STATUS = {egress.GREEN: ('#1E6B3A', '#E4F4E9', '#2E8B57'),
           egress.AMBER: ('#7A4A00', '#FFF2D1', '#B87000'),
           egress.RED: ('#A31919', '#FDE3E3', '#C62828'),
-          egress.GREY: (MUTED, '#ECEEF1', '#6F767E')}
+          egress.GREY: (MUTED, None, '#6F767E')}
 # status -> a table row's own look: a tint where action is needed, red text only for over a hard limit, muted text for no data
 ROW_RULES = {egress.GREEN: {},
              egress.AMBER: {'background': STATUS[egress.AMBER][1]},

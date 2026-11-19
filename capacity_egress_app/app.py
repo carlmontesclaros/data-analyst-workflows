@@ -205,9 +205,10 @@ class App:
                           ("Room history", self.room_history), ("Open photos", self.open_photos)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
         self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12)
-        colours.colour_tags(self.room_tree)
-        # after the colours, so its text wins: amber, as red text only ever means over a hard limit
+        # before the colours: of two tags that set the same option the one made first wins, so its amber text beats grey's
+        # muted text and red's red text. red text only ever means over a hard limit
         self.room_tree.tag_configure('missing', foreground=colours.STATUS[egress.AMBER][0])
+        colours.colour_tags(self.room_tree)
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
         # the room list, the longest, gives up the most height on a small window, so zones and exits keep two rows
         panes.add(room_frame, weight=5)

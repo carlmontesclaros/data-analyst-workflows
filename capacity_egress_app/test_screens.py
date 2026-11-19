@@ -607,9 +607,10 @@ def test_only_amber_and_red_rows_are_tinted_and_green_stays_white():
 def test_status_colours_are_readable():
     for colour in STATUSES:
         ink, tint, mark = colours.STATUS[colour]
-        assert contrast(ink, tint) >= 4.5, colour                     # text on its own tint (a verdict chip, a row)
+        fill = tint or colours.SURFACE                                # a grey row is muted text on white
+        assert contrast(ink, fill) >= 4.5, colour                     # text on its own tint (a verdict chip, a row)
         assert contrast(mark, colours.SURFACE) >= 3, colour           # a shape on white
-        assert contrast(mark, tint) >= 3, colour                      # and on its own tint
+        assert contrast(mark, fill) >= 3, colour                      # and on its own tint
     assert contrast(colours.MUTED, colours.SURFACE) >= 6
     assert contrast(colours.MUTED, colours.GROUND) >= 4.5
 
@@ -621,7 +622,7 @@ def test_the_picked_row_stays_distinct_from_every_status(root):
     picked = dict(style.map('Treeview', 'background'))['selected']
     assert picked == colours.SELECTED
     for colour in STATUSES:
-        for fill in (colours.STATUS[colour][1], colours.SURFACE):
+        for fill in (colours.STATUS[colour][1] or colours.SURFACE, colours.SURFACE):
             assert hue_gap(picked, fill) >= 12                         # a different colour, not a slightly paler one
         assert colours.STATUS[colour][1] != picked
 
