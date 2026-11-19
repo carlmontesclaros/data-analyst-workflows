@@ -7,7 +7,7 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_column, fit_columns, fit_window, heading_text, initials, open_path, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
@@ -112,7 +112,7 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
-        outer = ttk.Frame(self.root, padding=(20, 10, 20, 8))
+        outer = ttk.Frame(self.root, padding=(16, 10, 16, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
         outer.rowconfigure(1, weight=1)
@@ -277,8 +277,6 @@ class CheckScreen:
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
         # the table asks the window for the room its headings and the fixed zone verdicts need. a value that needs more (a
         # long building name) makes the table scroll sideways rather than widen the window past a laptop screen
-        if columns is ZONE_COLUMNS:
-            fit_column(tree, 'Result', ZONE_VERDICTS)
         self.fit(tree, columns)
         asked = sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)

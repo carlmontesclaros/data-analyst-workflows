@@ -420,18 +420,21 @@ def test_zone_verdict_shows_in_full_at_the_smallest_size(root, conn, font_size):
 
 
 # at the Windows font no heading and no value in a check or editor table is cut: every column is as wide as the
-# widest of its heading and its values, drawn in the table's real font (typed notes may be longer, so they scroll)
+# widest of its heading and its values (typed notes may be longer, so they scroll). a heading needs what Tk lays out
+# for a label in the theme's heading style, border and padding included; a cell's text fills its whole cell (text_room)
+def heading_room(tree, key):
+    label = ttk.Label(tree, style='Treeview.Heading', text=tree.heading(key, 'text'))
+    need = label.winfo_reqwidth()
+    label.destroy()
+    return need
+
 def cut_columns(tree, keys):
-    style = ttk.Style(tree)
-    cell_font = style.lookup('Treeview', 'font') or 'TkDefaultFont'
-    heading_font = style.lookup('Treeview.Heading', 'font') or 'TkDefaultFont'
-    def measure(font, text):
-        return int(tree.tk.call('font', 'measure', font, text)) + 8
+    font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
     cut = []
     for key in keys:
-        need = measure(heading_font, tree.heading(key, 'text'))
+        need = heading_room(tree, key)
         if key not in ('note', 'notes'):
-            need = max([need] + [measure(cell_font, tree.set(item, key)) for item in tree.get_children()])
+            need = max([need] + [int(tree.tk.call('font', 'measure', font, tree.set(item, key))) for item in tree.get_children()])
         if int(tree.column(key, 'width')) < need:
             cut.append((key, int(tree.column(key, 'width')), need))
     return cut
@@ -457,6 +460,31 @@ def test_editor_tables_show_every_heading_and_value_in_full_at_the_windows_font(
     assert screen.zone_tree.get_children() and screen.room_tree.get_children() and not screen.exit_tree.get_children()
     for tree in (screen.zone_tree, screen.room_tree, screen.exit_tree):
         assert cut_columns(tree, tree['columns']) == []
+
+# a user drags a column's right edge in its heading: Tk's own drag, which holds the column to its minwidth
+def drag_edge(tree, key, width):
+    tree.xview_moveto(0)
+    left = sum(int(tree.column(k, 'width')) for k in tree['columns'][:list(tree['columns']).index(key)])
+    tree.tk.call(tree, 'drag', key, left + width)
+    return int(tree.column(key, 'width'))
+
+# a column the user widened stays as wide when the lists refill (after a save, or another person's save)
+def test_editor_keeps_a_column_the_user_widened_after_a_refill(root, conn):
+    screen = editor_with_rooms(root, conn)
+    widened = {key: drag_edge(screen.room_tree, key, int(screen.room_tree.column(key, 'width')) + 150)
+               for key in ('sub_category', 'note')}
+    screen.show()
+    root.update()
+    assert {key: int(screen.room_tree.column(key, 'width')) for key in widened} == widened
+
+# a value column can be narrowed by the user, down to its heading in full but no further
+def test_editor_column_narrows_to_its_heading(root, conn):
+    screen = editor_with_rooms(root, conn)
+    tree = screen.room_tree
+    font = ttk.Style(root).lookup('Treeview', 'font') or 'TkDefaultFont'
+    longest = max(int(root.tk.call('font', 'measure', font, tree.set(item, 'sub_category'))) for item in tree.get_children())
+    assert heading_room(tree, 'sub_category') < longest
+    assert drag_edge(tree, 'sub_category', 1) == heading_room(tree, 'sub_category')
 
 def test_the_check_screen_still_fits_a_laptop_with_every_column_in_full(larger_font_root, conn):
     screen = check_screen(larger_font_root, conn)

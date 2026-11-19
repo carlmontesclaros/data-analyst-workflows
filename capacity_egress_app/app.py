@@ -40,7 +40,7 @@ EXIT_COLUMNS = [('floor', 50), ('wing', 80), ('exit_id', 180), ('exit_type', 90)
                 ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 150), ('width_check', 220),
                 ('into_wing', 80), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
 
-# typed notes can be any length: their column keeps its width and scrolls
+# typed notes can be any length: their column is fitted to its heading once, then keeps its width and scrolls
 FREE_TEXT = ('note', 'notes')
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
@@ -230,7 +230,7 @@ class App:
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
-        fit_columns(tree, columns, FREE_TEXT)
+        fit_columns(tree, columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
         tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
@@ -343,7 +343,7 @@ class App:
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
 
         for tree, columns in [(self.zone_tree, ZONE_COLUMNS), (self.room_tree, ROOM_COLUMNS), (self.exit_tree, EXIT_COLUMNS)]:
-            fit_columns(tree, columns, FREE_TEXT)
+            fit_columns(tree, [(key, least) for key, least in columns if key not in FREE_TEXT])
         self.show_counts(len(rooms), len(zones), len(exits))
 
     def show_counts(self, rooms, zones, exits):
