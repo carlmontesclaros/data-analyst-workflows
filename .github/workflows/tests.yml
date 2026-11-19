@@ -21,7 +21,28 @@ jobs:
       - run: python -m pip install ruff==0.17.4
       - run: python -m ruff check .
 
+  # on a push to main, the PR that was just merged has already passed the tests on its head commit: when the merged tree is
+  # identical to that head's tree and both test jobs were green there, running them again proves nothing. Any doubt (no PR,
+  # different tree, checks missing or red, API error) runs the tests as usual. Pull requests always run everything.
+  gate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/pr_already_tested.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
   test:
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.skip != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -52,7 +73,20 @@ jobs:
           displayplacer "id:$screen_id res:1920x1080"
       - name: check the screen holds the app's smallest window
         run: python -c "import tkinter as tk; from check_screen import MIN_WINDOW; r = tk.Tk(); m = r.wm_maxsize(); print('largest window', m); assert all(have >= need for have, need in zip(m, MIN_WINDOW)), f'screen {m} is smaller than {MIN_WINDOW}'"
-      # CI shows the windows for real; locally conftest.py makes them transparent
-      - run: python -m pytest -q --cov=. --cov-report=term-missing:skip-covered
+      # CI shows the windows for real; locally conftest.py makes them transparent. Coverage is added here only: pyproject has none.
+      # test_guard_tests.py tests the .claude/hooks/guard_tests.py hook, not the app, and gives the same answer on both systems,
+      # so the Mac job runs it (with the rest of the suite) and the Windows job runs every other test file.
+      - name: run the tests (Windows, every test file except test_guard_tests.py)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Name test_*.py | Where-Object { $_ -ne 'test_guard_tests.py' }
+          python -m pytest -q --cov=. --cov-report=term-missing:skip-covered $files
+          exit $LASTEXITCODE
+        env:
+          CAPACITY_TEST_WINDOWS: real
+      - name: run the tests (Mac, the whole suite)
+        if: runner.os == 'macOS'
+        run: python -m pytest -q --cov=. --cov-report=term-missing:skip-covered
         env:
           CAPACITY_TEST_WINDOWS: real
