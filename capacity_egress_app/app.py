@@ -226,7 +226,8 @@ class App:
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
         frame.pack(fill='both', expand=True)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height)
+        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height)
+        colours.mark_column(tree)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
@@ -317,7 +318,7 @@ class App:
             values = [z['floor'] if self.building.picked() else f"{z['property']} {z['floor']}"] + \
                      [z['zone_wing'], z['status'], z['total_load'], exit_capacity_text(z)] + \
                      [z[c] for c in ['exit_count', 'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
-            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(egress.zone_colour(z),))
+            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, **colours.row(self.zone_tree, egress.zone_colour(z)))
 
         self.room_tree.delete(*self.room_tree.get_children())
         for _, r in rooms.sort_values(['property', 'floor', 'space']).head(3000).iterrows():
@@ -330,8 +331,8 @@ class App:
             values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
                       '; '.join(flag), text_or_blank(r['note'])]
-            tags = [egress.room_colour(r)] + (['missing'] if r['in_latest_report'] == 0 else [])
-            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values, tags=[t for t in tags if t])
+            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
+                                  **colours.row(self.room_tree, egress.room_colour(r), *(['missing'] if r['in_latest_report'] == 0 else [])))
 
         self.exit_tree.delete(*self.exit_tree.get_children())
         for _, e in exits.sort_values(['floor', 'wing', 'exit_id']).iterrows():
@@ -340,7 +341,7 @@ class App:
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, stair, e['persons'], e['limited_by'],
                       'yes' if e['counts_as_exit'] else 'no', e['shares_stair'], e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
-            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
+            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
 
         for tree, columns in [(self.zone_tree, ZONE_COLUMNS), (self.room_tree, ROOM_COLUMNS), (self.exit_tree, EXIT_COLUMNS)]:
             fit_columns(tree, [(key, least) for key, least in columns if key not in FREE_TEXT])
