@@ -103,15 +103,17 @@ The look is a small flat theme built on Tk's own clam theme (`widgets.use_theme`
 
 ## Colours
 
-Same meaning on every table. One short legend sits on both screens; this table is the full meaning.
+Same meaning on every table. One short legend sits on both screens; this table is the full meaning. Each status is a **mark** in the first column of the table (so it survives colour blindness and a greyscale printout) plus, only where someone has to act, a **tint** on the row. Green rows stay white: the mark is enough. The exports keep their Excel row fills.
 
-| Colour | Rooms | Zones | Exits |
+| Mark + tint | Rooms | Zones | Exits |
 |---|---|---|---|
-| Green | visited, capacity at or under the per code load | within exit capacity | width OK |
-| Amber | capacity over the per code load: **needs justification** | REVIEW for any other flag (fewer than 2 exits, width review, link traffic both ways, ...) | width needs review |
-| Red | | occupant load **over exit capacity** | width under the minimum |
-| Grey | not visited (uses the per code load), or no per code load (excluded or unknown room type) | NOT SURVEYED (no exits measured) | not counted as an exit (open stair, unknown type) |
-| No colour | out of scope (lounges, non-assignable) | | |
+| Green: filled circle, no tint | visited, capacity at or under the per code load | within exit capacity | width OK |
+| Amber: triangle, pale amber tint | capacity over the per code load: **needs justification** | REVIEW for any other flag (fewer than 2 exits, width review, link traffic both ways, ...) | width needs review |
+| Red: square, pale red tint and red text | | occupant load **over exit capacity** | width under the minimum |
+| Grey: ring, muted grey text | not visited (uses the per code load), or no per code load (excluded or unknown room type) | NOT SURVEYED (no exits measured) | not counted as an exit (open stair, unknown type) |
+| No mark | out of scope (lounges, non-assignable) | | |
+
+The picked row is pale blue and always wins over a tint; its mark stays visible.
 
 Red only ever means over a hard limit.
 
@@ -132,7 +134,7 @@ capacity_egress_app/
   README.md
   app.py                   start-up (editor or viewer), the editor screen, the Editors screen
   check_screen.py          the capacity check screen everyone opens on
-  colours.py               row colours + legend shared by both screens
+  colours.py               status marks, row tints, palette + legend shared by both screens
   widgets.py               building box you can type in, theme loading, open a file or folder (both screens)
   excel_inputs.py          reads the space report and exits workbooks (header detection, first-import visited rule)
   capacity_db.py           schema, inserts, space report refresh, edits + audit log, editors, backup

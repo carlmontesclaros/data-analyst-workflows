@@ -112,9 +112,10 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
-        # side margins 24 -> 16 px: at the Windows font the tables' full headings ask for 1381 px at 24, 1367 at 17 and
-        # 1365 at 16, and the screen must fit a 1366 px laptop
-        outer = ttk.Frame(self.root, padding=(16, 10, 16, 8))
+        # side margins 24 -> 10 px, the gap between the two columns 16 -> 12 and the right-hand panels' side padding 16 -> 8:
+        # at the Windows font the tables' full headings and their 28 px mark column ask for 1393 px at 16, 1361 at 10,
+        # and the screen must fit a 1366 px laptop
+        outer = ttk.Frame(self.root, padding=(10, 10, 10, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
         outer.rowconfigure(1, weight=1)
@@ -141,7 +142,7 @@ class CheckScreen:
 
         # left: find a room
         left = ttk.LabelFrame(outer, text=" 1. Find a room ", padding=12)
-        left.grid(row=1, column=0, sticky='nsw', padx=(0, 16))
+        left.grid(row=1, column=0, sticky='nsw', padx=(0, 12))
         left.rowconfigure(5, weight=1)
         row = ttk.Frame(left)
         row.grid(row=0, column=0, sticky='ew')
@@ -181,7 +182,7 @@ class CheckScreen:
         right.rowconfigure(2, weight=1)
 
         # room card -> the room now, and right under it the room with the change, column by column
-        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(16, 6))
+        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(8, 6))
         card.grid(row=0, column=0, sticky='ew')
         card.columnconfigure(5, weight=1)
         self.room_title = tk.StringVar(value="Pick a room on the left")
@@ -209,7 +210,7 @@ class CheckScreen:
         self.trial_badge = tk.Label(badges, text="", padx=10, pady=3, anchor='w', fg=colours.ROW_FG)
         self.trial_badge.pack(side='left', padx=(10, 0))
 
-        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(16, 6))
+        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(8, 6))
         trial.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         line = ttk.Frame(trial)
         line.pack(fill='x')
@@ -234,7 +235,7 @@ class CheckScreen:
         self.message_var = tk.StringVar()
         self.message_var.trace_add('write', lambda *_: self.show_hint())
 
-        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(16, 6))
+        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(8, 6))
         results.grid(row=2, column=0, sticky='nsew', pady=(6, 0))
         results.columnconfigure(0, weight=1)
         # the tables ask for one row and share what the window has: on a small window they scroll, nothing else gives way
@@ -273,7 +274,8 @@ class CheckScreen:
 
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height, selectmode='browse')
+        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height, selectmode='browse')
+        colours.mark_column(tree)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
@@ -281,7 +283,7 @@ class CheckScreen:
         # long building name) makes the table scroll sideways rather than widen the window past a laptop screen. the sideways
         # bar shows only then, and takes its height from the table's rows: the window keeps the room a wrapped message needs
         self.fit(tree, columns)
-        asked = sum(int(tree.column(col, 'width')) for col, _ in columns)
+        asked = colours.MARK_COLUMN + sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
 
@@ -319,7 +321,7 @@ class CheckScreen:
         for _, r in found.head(MAX_RESULTS).iterrows():
             colour = egress.room_colour(r)
             self.found_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=[r['space'], r['floor'], r['property']],
-                                   tags=(colour,) if colour else ())
+                                   **colours.row(self.found_tree, colour))
         self.fit(self.found_tree)
         if not len(found) and not (self.search_var.get().strip() or prop):
             self.found_var.set("Type a room or building, or pick a building.")
@@ -420,7 +422,8 @@ class CheckScreen:
             verdict = egress.zone_verdict(z)
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
             name = egress.zone_name(z['floor'], z['zone_wing'])
-            self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
+            self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict],
+                                  **colours.row(self.zone_tree, egress.zone_colour(z)))
         self.fit(self.zone_tree)
 
     # the check -> nothing is saved
@@ -497,7 +500,8 @@ class CheckScreen:
                 room_type, per_code = r['room_type'] or '-', r['per_code_load']
             proposed = '-' if r['proposed'] is None else r['proposed']
             self.check_tree.insert('', 'end', iid=f"r{r['room_id']}", values=[f"Floor {r['floor']}  {r['space']}", room_type,
-                                   now, proposed, per_code, verdict], tags=(r['colour'],) if r['colour'] else ())
+                                   now, proposed, per_code, verdict],
+                                   **colours.row(self.check_tree, r['colour']))
         self.fit(self.check_tree)
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
         self.zone_tree.delete(*self.zone_tree.get_children())
@@ -506,7 +510,7 @@ class CheckScreen:
             capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
             self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
-                                  tags=(z['colour'],))
+                                  **colours.row(self.zone_tree, z['colour']))
         self.fit(self.zone_tree)
 
     def save_summary(self):

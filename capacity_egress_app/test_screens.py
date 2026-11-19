@@ -143,9 +143,9 @@ def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
 # their widgets ask for
 WINDOWS_FONT = -17
 
+# a platform font of this size (negative px) -> the body and every other size built from it, as use_theme does at startup
 def use_font(root, size):
-    for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'AppStrongFont']:
-        root.tk.call('font', 'configure', name, '-size', size)
+    widgets.set_type_scale(root, -size)
 
 @pytest.fixture
 def larger_font_root(root):
@@ -537,3 +537,212 @@ def test_change_dialog_titles_use_the_app_strong_font(root, conn):
         title = next(w for w in all_widgets(win) if isinstance(w, ttk.Label) and 'floor 3 room A120' in str(w.cget('text')))
         assert str(title.cget('font')) == 'AppStrongFont'
         win.destroy()
+
+# status marks and row rules (README "Colours"): shape and colour both carry the status, a row is tinted only where
+# someone has to act. the five fills used to sit within 8 L* of each other, so red and grey looked alike
+STATUSES = [egress.GREEN, egress.AMBER, egress.RED, egress.GREY]
+
+def luminance(hex_colour):
+    channels = [int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+def contrast(a, b):
+    high, low = sorted([luminance(a), luminance(b)], reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+def shape(image):
+    # which of the 12 x 12 pixels the mark fills, as text
+    return '\n'.join(''.join('#' if image.transparency_get(x, y) is False else '.' for x in range(image.width()))
+                     for y in range(image.height()))
+
+def status_table(root):
+    tree = ttk.Treeview(root, columns=['a'])
+    colours.mark_column(tree)
+    colours.colour_tags(tree)
+    return tree
+
+def test_each_status_has_a_12_px_mark_of_its_own_shape(root):
+    shapes = {colour: shape(colours.marks(root)[colour]) for colour in STATUSES}
+    assert all(colours.marks(root)[c].width() == colours.marks(root)[c].height() == 12 for c in STATUSES)
+    assert len(set(shapes.values())) == 4
+    assert all('#' in s for s in shapes.values())
+
+def test_marks_are_drawn_once_per_window_and_kept(root):
+    assert colours.marks(root) is colours.marks(status_table(root))
+    assert len([i for i in root.image_names() if not i.startswith('::tk::icons')]) == 4
+
+def test_each_status_row_gets_its_mark_and_rule(root):
+    tree = status_table(root)
+    for colour in STATUSES:
+        item = tree.insert('', 'end', values=['x'], **colours.row(tree, colour))
+        assert str(tree.item(item, 'image')[0]) == str(colours.marks(root)[colour])
+        assert list(tree.item(item, 'tags')) == [colour]
+    configured = {colour: {k: str(tree.tag_configure(colour, k)) for k in ('background', 'foreground')} for colour in STATUSES}
+    assert configured[egress.GREEN] == {'background': '', 'foreground': ''}
+    assert configured[egress.AMBER] == {'background': colours.STATUS[egress.AMBER][1], 'foreground': ''}
+    assert configured[egress.RED] == {'background': colours.STATUS[egress.RED][1], 'foreground': colours.STATUS[egress.RED][0]}
+    assert configured[egress.GREY] == {'background': '', 'foreground': colours.MUTED}
+
+def test_a_room_with_no_status_gets_no_mark_and_no_tag(root):
+    tree = status_table(root)
+    item = tree.insert('', 'end', values=['x'], **colours.row(tree, egress.NONE, 'missing'))
+    assert not tree.item(item, 'image')
+    assert list(tree.item(item, 'tags')) == ['missing']
+
+def test_red_and_grey_differ_in_shape_and_in_colour_or_text(root):
+    marks = colours.marks(root)
+    assert shape(marks[egress.RED]) != shape(marks[egress.GREY])
+    red, grey = colours.ROW_RULES[egress.RED], colours.ROW_RULES[egress.GREY]
+    assert red != grey and red.get('background') and not grey.get('background')
+    assert red['foreground'] != grey['foreground']
+    # and the marks' own colours are told apart too
+    assert contrast(colours.STATUS[egress.RED][2], colours.STATUS[egress.GREY][2]) > 1.2
+
+def test_only_amber_and_red_rows_are_tinted_and_green_stays_white():
+    assert [c for c, rule in colours.ROW_RULES.items() if 'background' in rule] == [egress.AMBER, egress.RED]
+    assert colours.ROW_RULES[egress.GREEN] == {}
+    assert colours.STATUS[egress.AMBER][1] == '#FFF2D1' and colours.STATUS[egress.RED][1] == '#FDE3E3'
+    assert colours.STATUS[egress.RED][0] == '#A31919' and colours.ROW_RULES[egress.GREY] == {'foreground': '#5D636B'}
+
+def test_status_colours_are_readable():
+    for colour in STATUSES:
+        ink, tint, mark = colours.STATUS[colour]
+        assert contrast(ink, tint) >= 4.5, colour                     # text on its own tint (a verdict chip, a row)
+        assert contrast(mark, colours.SURFACE) >= 3, colour           # a shape on white
+        assert contrast(mark, tint) >= 3, colour                      # and on its own tint
+    assert contrast(colours.MUTED, colours.SURFACE) >= 6
+    assert contrast(colours.MUTED, colours.GROUND) >= 4.5
+
+def hue_gap(a, b):
+    return max(abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) for i in (1, 3, 5))
+
+def test_the_picked_row_stays_distinct_from_every_status(root):
+    style = ttk.Style(root)
+    picked = dict(style.map('Treeview', 'background'))['selected']
+    assert picked == colours.SELECTED
+    for colour in STATUSES:
+        for fill in (colours.STATUS[colour][1], colours.SURFACE):
+            assert hue_gap(picked, fill) >= 12                         # a different colour, not a slightly paler one
+        assert colours.STATUS[colour][1] != picked
+    # the table's own selection beats a status tint, and the mark stays on top of it
+    tree = status_table(root)
+    tree.pack()
+    item = tree.insert('', 'end', values=['x'], **colours.row(tree, egress.AMBER))
+    tree.selection_set(item)
+    root.update()
+    assert tree.selection() == (item,)
+    assert tree.item(item, 'image')
+
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
+def test_every_status_table_has_a_mark_column(root, conn, open_screen):
+    screen = open_screen(root, conn)
+    trees = [t for t in all_widgets(root) if isinstance(t, ttk.Treeview)]
+    assert trees
+    for tree in trees:
+        assert tuple(str(s) for s in tree.cget('show')) == ('tree', 'headings')
+        assert int(tree.column('#0', 'width')) == colours.MARK_COLUMN
+        assert not tree.tk.getboolean(tree.column('#0', 'stretch'))
+    assert screen
+
+def test_check_screen_rows_carry_their_marks(root, conn):
+    screen = check_screen(root, conn)
+    screen.new_var.set('30')
+    screen.add_to_check()
+    root.update()
+    marks = {str(m): c for c, m in colours.marks(root).items()}
+    rows = [(tree, item) for tree in (screen.found_tree, screen.check_tree, screen.zone_tree) for item in tree.get_children()]
+    assert rows
+    for tree, item in rows:
+        tags = tree.item(item, 'tags')
+        assert [marks[str(i)] for i in tree.item(item, 'image')] == list(tags)
+
+def test_editor_rows_carry_their_marks(root, conn):
+    screen = editor_with_rooms(root, conn)
+    marks = {str(m): c for c, m in colours.marks(root).items()}
+    for tree in (screen.zone_tree, screen.room_tree):
+        assert tree.get_children()
+        for item in tree.get_children():
+            colour = [t for t in tree.item(item, 'tags') if t in STATUSES]
+            assert [marks[str(i)] for i in tree.item(item, 'image')] == colour
+
+def test_legend_shows_the_same_marks(root):
+    frame = colours.legend(root)
+    root.update()
+    shown = [str(w.cget('image')[0]) for w in all_widgets(frame) if isinstance(w, ttk.Label) and w.cget('image')]
+    assert shown == [str(colours.marks(root)[c]) for c in STATUSES]
+    assert [w.cget('text') for w in all_widgets(frame) if isinstance(w, ttk.Label) and w.cget('text')] == [
+        'Green: within', 'Amber: needs a look', 'Red: over a hard limit', 'Grey: no data yet']
+
+# the only images are the four marks, drawn once: not one per row, and not the theme's (see test_theme_draws_without_images)
+def test_a_full_screen_makes_only_the_four_marks(root, conn):
+    screen = editor_with_rooms(root, conn)
+    assert screen
+    assert len([i for i in root.image_names() if not i.startswith('::tk::icons')]) == 4
+
+# type scale -> every size is a step from the body, so the order holds at any platform font
+def size_of(root, name):
+    return abs(int(root.tk.call('font', 'actual', name, '-size')))      # px, whether Tk reports it as -17 or 17
+
+@pytest.mark.parametrize(('body', 'sizes'), [(17, [14, 15, 17, 20, 22, 28]), (14, [11, 12, 14, 17, 19, 25]),
+                                             (20, [17, 18, 20, 23, 25, 31])])
+def test_type_scale_is_relative_to_the_body(root, body, sizes):
+    widgets.set_type_scale(root, body)
+    names = ['AppCaptionFont', 'AppSectionFont', 'TkDefaultFont', 'AppLargeFont', 'AppSubtitleFont', 'AppTitleFont']
+    assert [size_of(root, n) for n in names] == sizes
+    assert size_of(root, 'AppStrongFont') == body
+    for bold in ('AppSectionFont', 'AppStrongFont', 'AppSubtitleFont', 'AppTitleFont'):
+        assert root.tk.call('font', 'actual', bold, '-weight') == 'bold'
+    assert [root.tk.call('font', 'actual', n, '-weight') for n in ('AppCaptionFont', 'AppLargeFont')] == ['normal', 'normal']
+
+def test_card_values_are_larger_than_the_body_at_every_platform_font(root):
+    for body in (14, 15, 17, 20):
+        widgets.set_type_scale(root, body)
+        assert size_of(root, 'AppLargeFont') > size_of(root, 'TkDefaultFont') > size_of(root, 'AppCaptionFont')
+
+@pytest.mark.parametrize(('platform', 'body'), [(-12, 14), (-14, 14), (-17, 17), (-20, 20)])
+def test_use_theme_builds_the_scale_from_the_platform_font(platform, body):
+    try:
+        r = tk.Tk()
+    except tk.TclError as e:
+        if 'display' not in str(e):
+            raise
+        pytest.skip(f"no display: {e}")
+    try:
+        r.tk.call('font', 'configure', 'TkDefaultFont', '-size', platform)
+        widgets.use_theme(r)
+        assert size_of(r, 'TkDefaultFont') == body
+        assert size_of(r, 'AppLargeFont') == body + 3
+        assert size_of(r, 'AppCaptionFont') == body - 3
+    finally:
+        r.destroy()
+
+# styles the next screens use: defined in use_theme, nothing on today's screens uses them yet
+def test_card_section_toolbutton_and_notebook_styles_are_defined(root):
+    style = ttk.Style(root)
+    assert style.lookup('Card.TFrame', 'background') == colours.SURFACE
+    assert style.lookup('Card.TFrame', 'bordercolor') == colours.CARD_BORDER
+    assert style.lookup('Card.TLabel', 'background') == colours.SURFACE
+    assert style.lookup('Section.TLabel', 'font') == 'AppSectionFont'
+    assert style.lookup('Section.TLabel', 'foreground') == colours.MUTED
+    assert style.lookup('Toolbutton', 'background') == colours.GROUND
+    assert style.lookup('Toolbutton', 'relief') == 'flat'
+    assert style.lookup('Toolbutton', 'background', ['active']) == colours.HOVER
+    assert style.lookup('Toolbutton', 'background', ['pressed']) == colours.PRESSED
+    assert style.lookup('TNotebook.Tab', 'background', ['selected']) == colours.SURFACE
+    assert style.lookup('TNotebook.Tab', 'background') == colours.GROUND
+
+def test_a_flat_tool_button_is_visible_on_hover_against_the_ground():
+    assert contrast(colours.HOVER, colours.GROUND) >= 1.05
+    assert colours.HOVER != colours.GROUND != colours.PRESSED
+
+def test_tool_buttons_and_tabs_draw(root):
+    frame = ttk.Frame(root)
+    frame.pack()
+    ttk.Button(frame, text='Refresh', style='Toolbutton').pack(side='left')
+    ttk.Separator(frame, orient='vertical').pack(side='left', fill='y', padx=6)
+    notebook = ttk.Notebook(frame)
+    notebook.add(ttk.Frame(notebook), text='Rooms')
+    notebook.pack(side='left')
+    root.update()
+    assert all(w.winfo_ismapped() for w in all_widgets(frame))
