@@ -207,6 +207,18 @@ def test_check_screen_tables_keep_every_column_at_its_width(root, conn):
     assert sum(int(screen.found_tree.column(col, 'width')) for col, _ in check_screen_module.FOUND_COLUMNS) > screen.found_tree.winfo_width()
     assert screen.found_tree.xview() != (0.0, 1.0)
 
+# a sideways bar shows only under a table with more to see sideways (Tk's own xview): an empty one would take height
+# the window keeps for a wrapped message
+def test_check_screen_shows_a_sideways_bar_only_under_a_table_that_scrolls(root, conn):
+    screen = check_screen(root, conn)
+    shown = {}
+    for tree in (screen.found_tree, screen.check_tree, screen.zone_tree):
+        bars = [w for w in tree.master.winfo_children() if isinstance(w, ttk.Scrollbar) and str(w.cget('orient')) == 'horizontal']
+        assert len(bars) == 1
+        shown[tree] = bool(bars[0].winfo_ismapped())
+        assert shown[tree] == (tree.xview() != (0.0, 1.0))
+    assert shown[screen.found_tree] and not shown[screen.check_tree]
+
 # an error can be longer than the window is wide: it wraps under the fields rather than running off the edge
 @pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
 def test_check_screen_long_message_wraps_at_the_smallest_size(root, conn, font_size):

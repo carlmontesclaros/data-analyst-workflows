@@ -278,18 +278,26 @@ class CheckScreen:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
         # the table asks the window for the room its headings and the fixed zone verdicts need. a value that needs more (a
-        # long building name) makes the table scroll sideways rather than widen the window past a laptop screen
+        # long building name) makes the table scroll sideways rather than widen the window past a laptop screen. the sideways
+        # bar shows only then, and takes its height from the table's rows: the window keeps the room a wrapped message needs
         self.fit(tree, columns)
         asked = sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
-        tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+
+        def scroll_sideways(first, last):
+            if float(first) <= 0 and float(last) >= 1:
+                xs.grid_remove()
+            else:
+                xs.grid()
+            xs.set(first, last)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=scroll_sideways)
         tree.grid(row=0, column=0, sticky='nsew')
         ys.grid(row=0, column=1, sticky='ns')
         xs.grid(row=1, column=0, sticky='ew')
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        frame.configure(width=asked + ys.winfo_reqwidth(), height=tree.winfo_reqheight() + xs.winfo_reqheight())
+        frame.configure(width=asked + ys.winfo_reqwidth(), height=tree.winfo_reqheight())
         frame.grid_propagate(False)
         return tree
 
