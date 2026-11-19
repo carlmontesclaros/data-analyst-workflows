@@ -1,5 +1,6 @@
-# every push to main and every pull request -> lint once, then the whole test suite on Windows (where the app is installed)
-# and on the Mac (where it's written). A red X on the PR = don't merge yet.
+# every push to main and every pull request -> lint once, then the tests on Windows (where the app is installed) and on the
+# Mac (where it's written): the Mac runs the whole suite, Windows every test file except test_guard_tests.py. A push to main
+# skips the tests when the merged PR's head already passed them on the same tree (see gate). A red X on the PR = don't merge yet.
 name: tests
 
 on:
