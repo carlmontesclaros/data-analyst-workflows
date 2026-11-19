@@ -101,13 +101,26 @@ def fit_window(root, size, minimum):
     root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
     root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
 
-# a table column whose words must never be cut short -> at least as wide as its longest text in the table's real font
-CELL_PADDING = 8                                                        # the theme's space around a cell's text, and a little more
-def fit_column(tree, col, texts):
-    font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
-    need = max(int(tree.tk.call('font', 'measure', font, text)) for text in texts) + CELL_PADDING
-    width = max(int(tree.column(col, 'minwidth')), need)
-    tree.column(col, width=width, minwidth=width)
+# a table cell -> its text in the table's real font, and a little room either side
+CELL_PADDING = 8
+
+# a whole table -> every column at least as wide as its heading and its values in the table's real font, and never
+# narrower than its least width. columns: [(key, least width)]. a heading needs its text and the theme's heading border
+# and padding round it, measured off a label drawn in the heading style. refit after every fill: a column only grows, so
+# a column the user widened stays wide. the user can narrow a column down to its heading, but a column that stretches
+# with the table keeps every value, or the table would squeeze it. always: {key: texts} a column holds while empty too
+def fit_columns(tree, columns, always=None):
+    cell_font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
+    heading = ttk.Label(tree, style='Treeview.Heading')
+    items = tree.get_children()
+    for key, least in columns:
+        heading.configure(text=tree.heading(key, 'text'))
+        head = heading.winfo_reqwidth()
+        texts = {str(tree.set(item, key)) for item in items} | set((always or {}).get(key, ()))
+        fitted = max([least, head] + [int(tree.tk.call('font', 'measure', cell_font, text)) + CELL_PADDING for text in texts])
+        stretch = tree.tk.getboolean(tree.column(key, 'stretch'))
+        tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
+    heading.destroy()
 
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given. its text gets that width less the label's own
