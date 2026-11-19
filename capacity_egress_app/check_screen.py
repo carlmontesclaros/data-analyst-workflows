@@ -173,7 +173,6 @@ class CheckScreen:
         self.found_tree = self.make_tree(left, FOUND_COLUMNS, height=8)
         self.found_tree.master.grid(row=5, column=0, sticky='nsew', pady=(4, 0))
         self.found_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_found())
-        colours.colour_tags(self.found_tree)
 
         # right: room, try a number, results
         right = ttk.Frame(outer)
@@ -249,12 +248,10 @@ class CheckScreen:
         ttk.Label(top, text="Attach it to your email to Mark Arrojado.", foreground=colours.MUTED).pack(side='right', padx=10)
         self.check_tree = self.make_tree(results, CHECK_COLUMNS, height=1)
         self.check_tree.master.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
-        colours.colour_tags(self.check_tree)
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
         self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
-        colours.colour_tags(self.zone_tree)
 
         # footer: legend + the screening rule
         foot = ttk.Frame(outer)
@@ -275,7 +272,7 @@ class CheckScreen:
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height, selectmode='browse')
-        colours.mark_column(tree)
+        colours.colour_tags(tree)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))

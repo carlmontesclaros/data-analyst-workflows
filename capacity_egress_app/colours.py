@@ -87,14 +87,12 @@ def marks(widget):
             root.status_marks[colour] = image
     return root.status_marks
 
-# a table that shows statuses -> a first column for the mark, then the usual headings
-def mark_column(tree):
+# a table that shows statuses -> a first column for the mark, then the usual headings, and one tag per colour: insert
+# rows with **row(tree, colour). a table without statuses keeps only its headings
+def colour_tags(tree):
     tree.configure(show=('tree', 'headings'))
     tree.column('#0', width=MARK_COLUMN, minwidth=MARK_COLUMN, stretch=False, anchor='center')
     tree.heading('#0', text='')
-
-def colour_tags(tree):
-    # one tag per colour on a Treeview -> insert rows with **row(tree, colour)
     for colour, rule in ROW_RULES.items():
         tree.tag_configure(colour, **rule)
     tree.status_marks = marks(tree)                     # row() reads them from the table: one lookup per table, not per row

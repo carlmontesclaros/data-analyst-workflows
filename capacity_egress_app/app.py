@@ -227,8 +227,7 @@ class App:
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
         frame.pack(fill='both', expand=True)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height)
-        colours.mark_column(tree)
+        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)

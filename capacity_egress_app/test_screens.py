@@ -558,7 +558,6 @@ def shape(image):
 
 def status_table(root):
     tree = ttk.Treeview(root, columns=['a'])
-    colours.mark_column(tree)
     colours.colour_tags(tree)
     return tree
 
@@ -659,6 +658,19 @@ def test_every_status_table_has_a_mark_column(root, conn, open_screen):
         assert int(tree.column('#0', 'width')) == colours.MARK_COLUMN
         assert not tree.tk.getboolean(tree.column('#0', 'stretch'))
     assert screen
+
+# a table with no statuses (a room's history, the code factors) has no empty mark column in front of its headings
+def test_tables_without_statuses_show_only_their_headings(root, conn):
+    screen = editor_screen(root, conn)
+    changes = db.history(conn, 'rooms', 0)
+    changes.loc[0] = ['2026-11-19 09:00', 'Carl', 'carl', 'capacity', '20', '24', 'surveyed', '']
+    screen.show_history("History - A120", changes)
+    screen.edit_code_factors()
+    root.update()
+    dialogs = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
+    trees = [t for w in dialogs for t in all_widgets(w) if isinstance(t, ttk.Treeview)]
+    assert len(dialogs) == 2 and len(trees) > 1
+    assert all(tuple(str(s) for s in tree.cget('show')) == ('headings',) for tree in trees)
 
 def test_check_screen_rows_carry_their_marks(root, conn):
     screen = check_screen(root, conn)
