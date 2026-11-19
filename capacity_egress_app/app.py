@@ -182,7 +182,7 @@ class App:
         self.status_var = tk.StringVar()
         # a long S: drive path wraps onto a second line rather than running off the window
         wrap_to_width(ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4),
-                                foreground=colours.MUTED_FG)).pack(fill='x', side='bottom')
+                                foreground=colours.MUTED)).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
         # the tables scroll, so they take what the window has left rather than setting its size
@@ -206,7 +206,8 @@ class App:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
         self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12)
         colours.colour_tags(self.room_tree)
-        self.room_tree.tag_configure('missing', foreground=colours.ERROR_FG)     # after the colours, so red text wins
+        # after the colours, so its text wins: amber, as red text only ever means over a hard limit
+        self.room_tree.tag_configure('missing', foreground=colours.STATUS[egress.AMBER][0])
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
         # the room list, the longest, gives up the most height on a small window, so zones and exits keep two rows
         panes.add(room_frame, weight=5)
@@ -1005,7 +1006,7 @@ def editors_dialog(parent, conn, user_login, user_name):
         tree.column(col, width=width, anchor='w')
     tree.pack(fill='both', expand=True)
     ttk.Label(frame, text="Not in the list? They open the app once, or use Add by login.",
-              foreground=colours.MUTED_FG).pack(anchor='w', pady=(6, 0))
+              foreground=colours.MUTED).pack(anchor='w', pady=(6, 0))
 
     def fill():
         tree.delete(*tree.get_children())

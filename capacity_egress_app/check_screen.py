@@ -130,7 +130,7 @@ class CheckScreen:
         titles.pack(side='left', fill='x', expand=True)
         ttk.Label(titles, text="Room capacity check", font=self.fonts['title']).pack(anchor='w')
         ttk.Label(titles, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
-                  foreground=colours.MUTED_FG, wraplength=880).pack(anchor='w')
+                  foreground=colours.MUTED, wraplength=880).pack(anchor='w')
         name = db.get_user_name(self.conn, self.user_login) or self.user_login
         role = "Editor" if self.editor else "Viewer"
         ttk.Label(who, text=f"{name}  ·  {role}", font=self.fonts['strong']).pack(side='left', padx=(0, 12))
@@ -153,7 +153,7 @@ class CheckScreen:
         entry.focus_set()
         ttk.Button(row, text="Search", command=self.search).pack(side='left', padx=(8, 0))
         ttk.Label(left, text="e.g.  DTB A120   ·   Turpin   ·   A120", font=self.fonts['caption'],
-                  foreground=colours.MUTED_FG).grid(row=1, column=0, sticky='w', pady=(4, 10))
+                  foreground=colours.MUTED).grid(row=1, column=0, sticky='w', pady=(4, 10))
 
         pick = ttk.Frame(left)
         pick.grid(row=2, column=0, sticky='ew', pady=(0, 10))
@@ -168,7 +168,7 @@ class CheckScreen:
         self.floor_box.bind('<<ComboboxSelected>>', lambda e: self.search())
 
         self.found_var = tk.StringVar()
-        ttk.Label(left, textvariable=self.found_var, font=self.fonts['caption'], foreground=colours.MUTED_FG).grid(
+        ttk.Label(left, textvariable=self.found_var, font=self.fonts['caption'], foreground=colours.MUTED).grid(
             row=4, column=0, sticky='w')
         self.found_tree = self.make_tree(left, FOUND_COLUMNS, height=8)
         self.found_tree.master.grid(row=5, column=0, sticky='nsew', pady=(4, 0))
@@ -190,13 +190,13 @@ class CheckScreen:
         title.grid(row=0, column=0, columnspan=6, sticky='w')
         ttk.Label(title, textvariable=self.room_title, font=self.fonts['subtitle']).pack(side='left')
         self.room_category = tk.StringVar()
-        ttk.Label(title, textvariable=self.room_category, foreground=colours.MUTED_FG).pack(side='left', padx=(12, 0))
+        ttk.Label(title, textvariable=self.room_category, foreground=colours.MUTED).pack(side='left', padx=(12, 0))
         ttk.Label(card, text="Now", font=self.fonts['strong']).grid(row=2, column=0, sticky='w', padx=(0, 24))
         ttk.Label(card, text="With change", font=self.fonts['strong'], foreground=colours.CHANGED_FG).grid(
             row=3, column=0, sticky='w', padx=(0, 24), pady=(2, 0))
         self.card_vars, self.trial_vars, self.trial_labels = {}, {}, {}
         for i, label in enumerate(["Room type", "Area", "Room capacity", "Per code load"], start=1):
-            ttk.Label(card, text=label, foreground=colours.MUTED_FG).grid(row=1, column=i, sticky='w', padx=(0, 20), pady=(6, 0))
+            ttk.Label(card, text=label, foreground=colours.MUTED).grid(row=1, column=i, sticky='w', padx=(0, 20), pady=(6, 0))
             self.card_vars[label] = tk.StringVar(value='-')
             ttk.Label(card, textvariable=self.card_vars[label], font=self.fonts['large']).grid(row=2, column=i, sticky='w', padx=(0, 28))
             self.trial_vars[label] = tk.StringVar(value='-')
@@ -230,7 +230,7 @@ class CheckScreen:
         ttk.Button(line, text="Remove room", command=self.remove_from_check).pack(side='left', padx=(18, 4))
         ttk.Button(line, text="Start over", command=self.start_over).pack(side='left', padx=4)
         # one label: the help, or what's wrong with the number (a long message wraps)
-        self.hint = wrap_to_width(ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED_FG))
+        self.hint = wrap_to_width(ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED))
         self.hint.pack(fill='x', pady=(4, 0))
         self.message_var = tk.StringVar()
         self.message_var.trace_add('write', lambda *_: self.show_hint())
@@ -246,7 +246,7 @@ class CheckScreen:
         top.grid(row=0, column=0, sticky='ew')
         ttk.Label(top, text="Rooms in this check", font=self.fonts['strong']).pack(side='left')
         ttk.Button(top, text="Save summary (.docx)", command=self.save_summary).pack(side='right')
-        ttk.Label(top, text="Attach it to your email to Mark Arrojado.", foreground=colours.MUTED_FG).pack(side='right', padx=10)
+        ttk.Label(top, text="Attach it to your email to Mark Arrojado.", foreground=colours.MUTED).pack(side='right', padx=10)
         self.check_tree = self.make_tree(results, CHECK_COLUMNS, height=1)
         self.check_tree.master.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
         colours.colour_tags(self.check_tree)
@@ -261,11 +261,11 @@ class CheckScreen:
         foot.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(6, 0))
         colours.legend(foot).pack(anchor='w')
         ttk.Label(foot, text="Screening only, not an approval. Nothing on this screen is saved; an editor reviews every change.",
-                  font=self.fonts['caption'], foreground=colours.MUTED_FG).pack(anchor='w', pady=(2, 0))
+                  font=self.fonts['caption'], foreground=colours.MUTED).pack(anchor='w', pady=(2, 0))
 
     def show_hint(self):
         message = self.message_var.get()
-        self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED_FG)
+        self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED)
 
     # every column as wide as its heading and values: after each fill. the zone Result column also holds every fixed verdict
     def fit(self, tree, columns=None):
@@ -402,7 +402,7 @@ class CheckScreen:
         }
         for label, (value, changed) in cells.items():
             self.trial_vars[label].set(value if changed else 'same')
-            self.trial_labels[label].configure(foreground=colours.CHANGED_FG if changed else colours.MUTED_FG)
+            self.trial_labels[label].configure(foreground=colours.CHANGED_FG if changed else colours.MUTED)
 
         if not (type_changed or cap_changed):
             self.trial_badge.configure(text="With change: pick a room type or type a new capacity in 3 below",

@@ -10,12 +10,10 @@ ROW_BG = {egress.GREEN: '#C6EFCE', egress.AMBER: '#FFEB9C', egress.RED: '#FFC7CE
 ROW_FG = '#1A1A1A'
 CHANGED_FG = '#005FB8'                                 # a value the check changed (blue, same as the theme accent)
 
-MUTED_FG = '#6A6A6A'                                   # secondary text, 4.5:1 or better on the theme's background
 GROUND = '#F3F4F6'                                     # window background: cards and tables sit on it in white
-BG = GROUND
 SURFACE = '#FFFFFF'                                    # cards, tables, fields, buttons
 CARD_BORDER = '#E1E4E8'                                # 1 px round a card
-MUTED = '#5D636B'                                      # section titles, rows with no data: 6.1:1 on white
+MUTED = '#5D636B'                                      # secondary text, section titles, rows with no data: 6.1:1 on white
 TEXT_FG = '#1A1A1A'
 BORDER = '#E3E3E3'                                     # panels and tables
 CONTROL_BORDER = '#BDBDBD'                             # buttons and fields, one step stronger
@@ -25,7 +23,7 @@ ACCENT = CHANGED_FG
 ACCENT_HOVER = '#004C94'
 ACCENT_PRESSED = '#003F7A'
 SELECTED = '#CFE2F5'                                   # picked row: pale blue, the text stays readable
-ERROR_FG = '#B00020'                                   # a message that says something went wrong, a missing room
+ERROR_FG = '#B00020'                                   # a message that says something went wrong
 
 # status -> (ink, tint, mark colour). ink and tint are text on its chip and the row, mark is the shape's own colour; all
 # text pairs are above 4.5:1, marks above 3:1 on white and on their own tint. green rows stay white (the mark is enough)

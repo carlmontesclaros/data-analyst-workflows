@@ -50,9 +50,9 @@ def use_theme(root):
 
     style = ttk.Style(root)
     style.theme_use('clam')
-    root.configure(background=c.BG)
-    root.option_add('*Toplevel.background', c.BG)
-    root.option_add('*Label.background', c.BG)
+    root.configure(background=c.GROUND)
+    root.option_add('*Toplevel.background', c.GROUND)
+    root.option_add('*Label.background', c.GROUND)
     root.option_add('*TCombobox*Listbox.background', c.SURFACE)
     root.option_add('*TCombobox*Listbox.foreground', c.TEXT_FG)
     root.option_add('*TCombobox*Listbox.selectBackground', c.SELECTED)
@@ -60,8 +60,8 @@ def use_theme(root):
     root.option_add('*TCombobox*Listbox.font', 'TkDefaultFont')
     root.option_add('*TCombobox*Listbox.relief', 'flat')
 
-    style.configure('.', background=c.BG, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.BG, darkcolor=c.BG,
-                    troughcolor=c.BG, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
+    style.configure('.', background=c.GROUND, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.GROUND, darkcolor=c.GROUND,
+                    troughcolor=c.GROUND, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
                     fieldbackground=c.SURFACE, insertcolor=c.TEXT_FG, font='TkDefaultFont')
     style.configure('TLabelframe.Label', font='AppStrongFont')
 
@@ -88,26 +88,27 @@ def use_theme(root):
         ('Combobox.padding', {'sticky': 'nswe', 'children': [('Combobox.textarea', {'sticky': 'nswe'})]})]})])
     for field in ['TEntry', 'TCombobox']:
         style.configure(field, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE, padding=FIELD_PADDING,
-                        arrowcolor=c.MUTED_FG, arrowsize=14, background=c.SURFACE, relief='flat', borderwidth=0)
+                        arrowcolor=c.MUTED, arrowsize=14, background=c.SURFACE, relief='flat', borderwidth=0)
         style.map(field, bordercolor=[('focus', c.ACCENT)], lightcolor=[('focus', c.ACCENT)], darkcolor=[('focus', c.ACCENT)],
                   fieldbackground=[('readonly', c.SURFACE)], selectbackground=[('readonly', c.SURFACE)],
                   selectforeground=[('readonly', c.TEXT_FG)], background=[('readonly', c.SURFACE)],
                   arrowcolor=[('active', c.TEXT_FG)])
 
-    # tables -> quiet headings, no lines between rows, the picked row in pale blue
+    # tables -> quiet headings, no lines between rows, the picked row in pale blue. every table is flat, so a row's first
+    # column holds only its status mark, centred, with no tree indicator beside it
     style.configure('Treeview', background=c.SURFACE, fieldbackground=c.SURFACE, rowheight=row_height, bordercolor=c.BORDER,
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE)
     style.map('Treeview', background=[('selected', c.SELECTED)], foreground=[('selected', c.TEXT_FG)])
-    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED_FG, relief='flat', padding=(4, 3),
+    style.layout('Item', [('Treeitem.padding', {'sticky': 'nswe', 'children': [('Treeitem.image', {'sticky': ''})]})])
+    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED, relief='flat', padding=(4, 3),
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE, bordercolor=c.SURFACE)
     style.map('Treeview.Heading', background=[('active', c.HOVER)], lightcolor=[('active', c.HOVER)], darkcolor=[('active', c.HOVER)])
 
     # cards -> white on the ground with a 1 px line, a section title above each one in small bold muted type. defined here
-    # for the screens to use; a tk.Label inside a card (a verdict chip) takes the card's white from the option database
+    # for the screens to use
     style.configure('Card.TFrame', background=c.SURFACE, bordercolor=c.CARD_BORDER, lightcolor=c.CARD_BORDER,
                     darkcolor=c.CARD_BORDER, relief='solid', borderwidth=1)
     style.configure('Card.TLabel', background=c.SURFACE)
-    root.option_add('*Card*Label.background', c.SURFACE)
     style.configure('Section.TLabel', font='AppSectionFont', foreground=c.MUTED)
 
     # tool buttons -> flat until the pointer is over them, no border, the same height as a button. primary actions keep Accent.TButton
@@ -133,7 +134,7 @@ def use_theme(root):
     for bar, name, stick in [('Vertical.TScrollbar', 'Vertical', 'ns'), ('Horizontal.TScrollbar', 'Horizontal', 'we')]:
         style.layout(bar, [(f'{name}.Scrollbar.trough', {'sticky': stick, 'children': [
             (f'{name}.Scrollbar.thumb', {'expand': '1', 'sticky': 'nswe'})]})])
-        style.configure(bar, background=c.PRESSED, troughcolor=c.BG, bordercolor=c.BG, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
+        style.configure(bar, background=c.PRESSED, troughcolor=c.GROUND, bordercolor=c.GROUND, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
                         arrowsize=10, gripcount=0)
         style.map(bar, background=[('active', c.CONTROL_BORDER)], lightcolor=[('active', c.CONTROL_BORDER)],
                   darkcolor=[('active', c.CONTROL_BORDER)])

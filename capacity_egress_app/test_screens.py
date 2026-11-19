@@ -408,7 +408,7 @@ def test_error_takes_the_place_of_the_help_line(root, conn):
     assert str(screen.hint.cget('foreground')) == colours.ERROR_FG
     screen.new_var.set('30')
     assert screen.hint.cget('text') == help_text
-    assert str(screen.hint.cget('foreground')) == colours.MUTED_FG
+    assert str(screen.hint.cget('foreground')) == colours.MUTED
 
 # the width a cell gives its text, read off the drawn cell: its padding is the theme's, not a number copied from the code
 def text_room(tree, item, col):
@@ -625,14 +625,29 @@ def test_the_picked_row_stays_distinct_from_every_status(root):
         for fill in (colours.STATUS[colour][1], colours.SURFACE):
             assert hue_gap(picked, fill) >= 12                         # a different colour, not a slightly paler one
         assert colours.STATUS[colour][1] != picked
-    # the table's own selection beats a status tint, and the mark stays on top of it
+
+# the mark is drawn whole and centred in its 28 px column: no tree indicator takes the left of the cell and clips it
+def test_each_mark_is_drawn_whole_and_centred_in_its_column(root):
     tree = status_table(root)
     tree.pack()
-    item = tree.insert('', 'end', values=['x'], **colours.row(tree, egress.AMBER))
-    tree.selection_set(item)
+    items = [tree.insert('', 'end', values=['x'], **colours.row(tree, colour)) for colour in STATUSES]
     root.update()
-    assert tree.selection() == (item,)
-    assert tree.item(item, 'image')
+    for item in items:
+        x, y, width, height = tree.bbox(item, '#0')
+        assert width == colours.MARK_COLUMN
+        middle = y + height // 2
+        image = [px for px in range(x, x + width) if tree.identify_element(px, middle) == 'image']
+        assert len(image) == colours.MARK_SIZE
+        assert image == list(range(image[0], image[0] + colours.MARK_SIZE))
+        assert abs((image[0] - x) - (x + width - 1 - image[-1])) <= 1
+        assert colours.MARK_SIZE <= height
+
+# red text only ever means over a hard limit (README "Colours"): a room missing from the report says so in amber
+def test_a_missing_room_is_not_written_in_red(root, conn):
+    screen = editor_screen(root, conn)
+    ink = str(screen.room_tree.tag_configure('missing', 'foreground'))
+    assert ink == '#7A4A00'
+    assert ink not in (colours.STATUS[egress.RED][0], colours.ERROR_FG)
 
 @pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
 def test_every_status_table_has_a_mark_column(root, conn, open_screen):
