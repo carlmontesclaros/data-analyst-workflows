@@ -26,9 +26,10 @@ TYPE_STEPS = {'AppCaptionFont': (-3, 'normal'), 'AppSectionFont': (-2, 'bold'), 
               'AppLargeFont': (3, 'normal'), 'AppSubtitleFont': (5, 'bold'), 'AppTitleFont': (11, 'bold')}
 LEAST_BODY = 14
 
-# the platform's own default font size, in pixels. never smaller than the 14 px the app has always used
+# the platform's own default font size, in pixels. never smaller than the 14 px the app has always used. read as configured:
+# 'font actual' reports a size in whole points on Windows, so -14 px would come back as 11 pt and turn into 15 px
 def platform_body(root):
-    size = int(root.tk.call('font', 'actual', 'TkDefaultFont', '-size'))
+    size = int(root.tk.call('font', 'configure', 'TkDefaultFont', '-size'))
     pixels = -size if size < 0 else round(size * root.winfo_fpixels('1p'))
     return max(pixels, LEAST_BODY)
 
@@ -140,10 +141,11 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
-# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them
-def fit_window(root, size, minimum):
+# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them, and keep
+# spare_height on top for a line that can wrap longer later
+def fit_window(root, size, minimum, spare_height=0):
     root.update_idletasks()
-    need = (root.winfo_reqwidth(), root.winfo_reqheight())
+    need = (root.winfo_reqwidth(), root.winfo_reqheight() + spare_height)
     root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
     root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
 

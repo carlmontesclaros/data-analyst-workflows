@@ -710,7 +710,8 @@ def test_a_full_screen_makes_only_the_four_marks(root, conn):
 
 # type scale -> every size is a step from the body, so the order holds at any platform font
 def size_of(root, name):
-    return abs(int(root.tk.call('font', 'actual', name, '-size')))      # px, whether Tk reports it as -17 or 17
+    # px, as the font was given it ('font actual' reports whole points on Windows: -14 px comes back as 11)
+    return -int(root.tk.call('font', 'configure', name, '-size'))
 
 @pytest.mark.parametrize(('body', 'sizes'), [(17, [14, 15, 17, 20, 22, 28]), (14, [11, 12, 14, 17, 19, 25]),
                                              (20, [17, 18, 20, 23, 25, 31])])
@@ -736,13 +737,17 @@ def test_use_theme_builds_the_scale_from_the_platform_font(platform, body):
         if 'display' not in str(e):
             raise
         pytest.skip(f"no display: {e}")
+    # Windows' 96 dpi on every system, where a point is not a pixel. Tk keeps the scaling for the next window, so put it back
+    scaling = r.tk.call('tk', 'scaling')
     try:
+        r.tk.call('tk', 'scaling', 96 / 72)
         r.tk.call('font', 'configure', 'TkDefaultFont', '-size', platform)
         widgets.use_theme(r)
         assert size_of(r, 'TkDefaultFont') == body
         assert size_of(r, 'AppLargeFont') == body + 3
         assert size_of(r, 'AppCaptionFont') == body - 3
     finally:
+        r.tk.call('tk', 'scaling', scaling)
         r.destroy()
 
 # styles the next screens use: defined in use_theme, nothing on today's screens uses them yet

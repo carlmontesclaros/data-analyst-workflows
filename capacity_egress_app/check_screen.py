@@ -77,7 +77,9 @@ class CheckScreen:
         self.fonts = FONTS
         root.title("Room capacity check")
         self.build_widgets()
-        fit_window(root, OPEN_WINDOW, MIN_WINDOW)
+        # an error can wrap to a line more than the help: the smallest window keeps that line, so the result tables keep
+        # their row (at the Windows font the screen asks for more than MIN_WINDOW, so the floor leaves no room of its own)
+        fit_window(root, OPEN_WINDOW, MIN_WINDOW, int(root.tk.call('font', 'metrics', self.fonts['caption'], '-linespace')))
         self.reload()
         self.root.after(POLL_MS, self.poll)
 
