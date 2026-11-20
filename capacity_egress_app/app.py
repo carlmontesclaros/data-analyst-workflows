@@ -182,7 +182,7 @@ class App:
         self.status_var = tk.StringVar()
         # a long S: drive path wraps onto a second line rather than running off the window
         wrap_to_width(ttk.Label(self.root, textvariable=self.status_var, padding=(8, 4),
-                                foreground=colours.MUTED_FG)).pack(fill='x', side='bottom')
+                                foreground=colours.MUTED)).pack(fill='x', side='bottom')
         colours.legend(self.root).pack(fill='x', side='bottom', padx=8, pady=(0, 4))
 
         # the tables scroll, so they take what the window has left rather than setting its size
@@ -205,8 +205,10 @@ class App:
                           ("Room history", self.room_history), ("Open photos", self.open_photos)]:
             ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
         self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12)
+        # before the colours: of two tags that set the same option the one made first wins, so its amber text beats grey's
+        # muted text and red's red text. red text only ever means over a hard limit
+        self.room_tree.tag_configure('missing', foreground=colours.STATUS[egress.AMBER][0])
         colours.colour_tags(self.room_tree)
-        self.room_tree.tag_configure('missing', foreground=colours.ERROR_FG)     # after the colours, so red text wins
         self.room_tree.bind('<Double-1>', lambda e: self.change_capacity())
         # the room list, the longest, gives up the most height on a small window, so zones and exits keep two rows
         panes.add(room_frame, weight=5)
@@ -317,7 +319,7 @@ class App:
             values = [z['floor'] if self.building.picked() else f"{z['property']} {z['floor']}"] + \
                      [z['zone_wing'], z['status'], z['total_load'], exit_capacity_text(z)] + \
                      [z[c] for c in ['exit_count', 'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
-            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, tags=(egress.zone_colour(z),))
+            self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, **colours.row(self.zone_tree, egress.zone_colour(z)))
 
         self.room_tree.delete(*self.room_tree.get_children())
         for _, r in rooms.sort_values(['property', 'floor', 'space']).head(3000).iterrows():
@@ -330,8 +332,8 @@ class App:
             values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
                       '; '.join(flag), text_or_blank(r['note'])]
-            tags = [egress.room_colour(r)] + (['missing'] if r['in_latest_report'] == 0 else [])
-            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values, tags=[t for t in tags if t])
+            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
+                                  **colours.row(self.room_tree, egress.room_colour(r), *(['missing'] if r['in_latest_report'] == 0 else [])))
 
         self.exit_tree.delete(*self.exit_tree.get_children())
         for _, e in exits.sort_values(['floor', 'wing', 'exit_id']).iterrows():
@@ -340,7 +342,7 @@ class App:
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, stair, e['persons'], e['limited_by'],
                       'yes' if e['counts_as_exit'] else 'no', e['shares_stair'], e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
-            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, tags=(egress.exit_colour(e),))
+            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
 
         for tree, columns in [(self.zone_tree, ZONE_COLUMNS), (self.room_tree, ROOM_COLUMNS), (self.exit_tree, EXIT_COLUMNS)]:
             fit_columns(tree, [(key, least) for key, least in columns if key not in FREE_TEXT])
@@ -1004,7 +1006,7 @@ def editors_dialog(parent, conn, user_login, user_name):
         tree.column(col, width=width, anchor='w')
     tree.pack(fill='both', expand=True)
     ttk.Label(frame, text="Not in the list? They open the app once, or use Add by login.",
-              foreground=colours.MUTED_FG).pack(anchor='w', pady=(6, 0))
+              foreground=colours.MUTED).pack(anchor='w', pady=(6, 0))
 
     def fill():
         tree.delete(*tree.get_children())

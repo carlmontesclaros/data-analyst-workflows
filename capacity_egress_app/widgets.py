@@ -6,7 +6,7 @@ from tkinter import ttk
 import colours as c
 
 # widgets and helpers shared by the check screen and the editor screen
-FONTS = {'title': 'AppTitleFont', 'subtitle': 'AppSubtitleFont', 'strong': 'AppStrongFont',
+FONTS = {'title': 'AppTitleFont', 'subtitle': 'AppSubtitleFont', 'strong': 'AppStrongFont', 'section': 'AppSectionFont',
          'large': 'AppLargeFont', 'caption': 'AppCaptionFont'}
 
 def open_path(path):
@@ -19,22 +19,41 @@ def open_path(path):
 
 BUTTON_PADDING, BUTTON_PRESSED, FIELD_PADDING = (12, 4, 12, 4), (12, 5, 12, 3), (6, 4)
 
-# flat look built on Tk's clam theme: fills and lines, no images. image-based themes (we tried Sun Valley)
-# redraw far too slowly: 167 ms per keystroke on a Mac, against 17 ms here. sizes in pixels (negative), same on every screen
-def use_theme(root):
+# every size is a step from the body size (pixels, negative like Tk's own), so a larger platform font grows them all together
+# and a bigger body never ends up under a "large" one. at the Windows font (-17): caption -14, section title -15, card
+# values -20, subtitle -22, title -28
+TYPE_STEPS = {'AppCaptionFont': (-3, 'normal'), 'AppSectionFont': (-2, 'bold'), 'AppStrongFont': (0, 'bold'),
+              'AppLargeFont': (3, 'normal'), 'AppSubtitleFont': (5, 'bold'), 'AppTitleFont': (11, 'bold')}
+LEAST_BODY = 14
+
+# the platform's own default font size, in pixels. never smaller than the 14 px the app has always used. read as configured:
+# 'font actual' reports a size in whole points on Windows, so -14 px would come back as 11 pt and turn into 15 px
+def platform_body(root):
+    size = int(root.tk.call('font', 'configure', 'TkDefaultFont', '-size'))
+    pixels = -size if size < 0 else round(size * root.winfo_fpixels('1p'))
+    return max(pixels, LEAST_BODY)
+
+def set_type_scale(root, body):
     family = root.tk.call('font', 'actual', 'TkDefaultFont', '-family')
     for name in ['TkDefaultFont', 'TkTextFont', 'TkHeadingFont', 'TkMenuFont']:
-        root.tk.call('font', 'configure', name, '-family', family, '-size', -14)
-    for name, size, weight in [('AppTitleFont', -24, 'bold'), ('AppSubtitleFont', -18, 'bold'), ('AppStrongFont', -14, 'bold'),
-                               ('AppLargeFont', -16, 'normal'), ('AppCaptionFont', -12, 'normal')]:
-        root.tk.call('font', 'create', name, '-family', family, '-size', size, '-weight', weight)
+        root.tk.call('font', 'configure', name, '-family', family, '-size', -body)
+    existing = root.tk.splitlist(root.tk.call('font', 'names'))
+    for name, (step, weight) in TYPE_STEPS.items():
+        action = 'configure' if name in existing else 'create'
+        root.tk.call('font', action, name, '-family', family, '-size', -(body + step), '-weight', weight)
+
+# flat look built on Tk's clam theme: fills and lines, no images in the theme itself. image-based themes (we tried Sun
+# Valley) redraw far too slowly: 167 ms per keystroke on a Mac, against 17 ms here. the only images are the four 12 px
+# status marks (colours.py), drawn once. sizes in pixels (negative), same on every screen
+def use_theme(root):
+    set_type_scale(root, platform_body(root))
     row_height = int(root.tk.call('font', 'metrics', 'TkDefaultFont', '-linespace')) + 6
 
     style = ttk.Style(root)
     style.theme_use('clam')
-    root.configure(background=c.BG)
-    root.option_add('*Toplevel.background', c.BG)
-    root.option_add('*Label.background', c.BG)
+    root.configure(background=c.GROUND)
+    root.option_add('*Toplevel.background', c.GROUND)
+    root.option_add('*Label.background', c.GROUND)
     root.option_add('*TCombobox*Listbox.background', c.SURFACE)
     root.option_add('*TCombobox*Listbox.foreground', c.TEXT_FG)
     root.option_add('*TCombobox*Listbox.selectBackground', c.SELECTED)
@@ -42,8 +61,8 @@ def use_theme(root):
     root.option_add('*TCombobox*Listbox.font', 'TkDefaultFont')
     root.option_add('*TCombobox*Listbox.relief', 'flat')
 
-    style.configure('.', background=c.BG, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.BG, darkcolor=c.BG,
-                    troughcolor=c.BG, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
+    style.configure('.', background=c.GROUND, foreground=c.TEXT_FG, bordercolor=c.BORDER, lightcolor=c.GROUND, darkcolor=c.GROUND,
+                    troughcolor=c.GROUND, focuscolor=c.ACCENT, selectbackground=c.SELECTED, selectforeground=c.TEXT_FG,
                     fieldbackground=c.SURFACE, insertcolor=c.TEXT_FG, font='TkDefaultFont')
     style.configure('TLabelframe.Label', font='AppStrongFont')
 
@@ -70,34 +89,63 @@ def use_theme(root):
         ('Combobox.padding', {'sticky': 'nswe', 'children': [('Combobox.textarea', {'sticky': 'nswe'})]})]})])
     for field in ['TEntry', 'TCombobox']:
         style.configure(field, bordercolor=c.CONTROL_BORDER, lightcolor=c.SURFACE, darkcolor=c.SURFACE, padding=FIELD_PADDING,
-                        arrowcolor=c.MUTED_FG, arrowsize=14, background=c.SURFACE, relief='flat', borderwidth=0)
+                        arrowcolor=c.MUTED, arrowsize=14, background=c.SURFACE, relief='flat', borderwidth=0)
         style.map(field, bordercolor=[('focus', c.ACCENT)], lightcolor=[('focus', c.ACCENT)], darkcolor=[('focus', c.ACCENT)],
                   fieldbackground=[('readonly', c.SURFACE)], selectbackground=[('readonly', c.SURFACE)],
                   selectforeground=[('readonly', c.TEXT_FG)], background=[('readonly', c.SURFACE)],
                   arrowcolor=[('active', c.TEXT_FG)])
 
-    # tables -> quiet headings, no lines between rows, the picked row in pale blue
+    # tables -> quiet headings, no lines between rows, the picked row in pale blue. every table is flat, so a row's first
+    # column holds only its status mark, centred, with no tree indicator beside it
     style.configure('Treeview', background=c.SURFACE, fieldbackground=c.SURFACE, rowheight=row_height, bordercolor=c.BORDER,
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE)
     style.map('Treeview', background=[('selected', c.SELECTED)], foreground=[('selected', c.TEXT_FG)])
-    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED_FG, relief='flat', padding=(4, 3),
+    style.layout('Item', [('Treeitem.padding', {'sticky': 'nswe', 'children': [('Treeitem.image', {'sticky': ''})]})])
+    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED, relief='flat', padding=(4, 3),
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE, bordercolor=c.SURFACE)
     style.map('Treeview.Heading', background=[('active', c.HOVER)], lightcolor=[('active', c.HOVER)], darkcolor=[('active', c.HOVER)])
+
+    # cards -> white on the ground with a 1 px line, a section title above each one in small bold muted type. defined here
+    # for the screens to use
+    style.configure('Card.TFrame', background=c.SURFACE, bordercolor=c.CARD_BORDER, lightcolor=c.CARD_BORDER,
+                    darkcolor=c.CARD_BORDER, relief='solid', borderwidth=1)
+    style.configure('Card.TLabel', background=c.SURFACE)
+    style.configure('Section.TLabel', font='AppSectionFont', foreground=c.MUTED)
+
+    # tool buttons -> flat until the pointer is over them, no border, the same height as a button. primary actions keep Accent.TButton
+    style.layout('Toolbutton', [('Toolbutton.border', {'sticky': 'nswe', 'border': '1', 'children': [
+        ('Toolbutton.padding', {'sticky': 'nswe', 'children': [('Toolbutton.label', {'sticky': 'nswe'})]})]})])
+    style.configure('Toolbutton', background=c.GROUND, bordercolor=c.GROUND, lightcolor=c.GROUND, darkcolor=c.GROUND,
+                    relief='flat', padding=BUTTON_PADDING)
+    style.map('Toolbutton', background=[('pressed', c.PRESSED), ('active', c.HOVER)], bordercolor=[('focus', c.ACCENT)],
+              lightcolor=[('pressed', c.PRESSED), ('active', c.HOVER)], darkcolor=[('pressed', c.PRESSED), ('active', c.HOVER)],
+              padding=[('pressed', BUTTON_PRESSED)])
+    style.configure('TSeparator', background=c.CARD_BORDER)
+
+    # tabs -> flat, the picked one in white like the card under it, the others on the ground in muted type
+    style.configure('TNotebook', background=c.GROUND, bordercolor=c.CARD_BORDER, lightcolor=c.GROUND, darkcolor=c.GROUND,
+                    tabmargins=(0, 0, 0, 0), borderwidth=1)
+    style.configure('TNotebook.Tab', background=c.GROUND, foreground=c.MUTED, bordercolor=c.GROUND, lightcolor=c.GROUND,
+                    darkcolor=c.GROUND, padding=(14, 6))
+    style.map('TNotebook.Tab', background=[('selected', c.SURFACE), ('active', c.HOVER)], foreground=[('selected', c.TEXT_FG)],
+              bordercolor=[('selected', c.CARD_BORDER)], lightcolor=[('selected', c.SURFACE)], darkcolor=[('selected', c.SURFACE)],
+              padding=[('selected', (14, 6))])
 
     # scrollbars -> just the thumb
     for bar, name, stick in [('Vertical.TScrollbar', 'Vertical', 'ns'), ('Horizontal.TScrollbar', 'Horizontal', 'we')]:
         style.layout(bar, [(f'{name}.Scrollbar.trough', {'sticky': stick, 'children': [
             (f'{name}.Scrollbar.thumb', {'expand': '1', 'sticky': 'nswe'})]})])
-        style.configure(bar, background=c.PRESSED, troughcolor=c.BG, bordercolor=c.BG, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
+        style.configure(bar, background=c.PRESSED, troughcolor=c.GROUND, bordercolor=c.GROUND, lightcolor=c.PRESSED, darkcolor=c.PRESSED,
                         arrowsize=10, gripcount=0)
         style.map(bar, background=[('active', c.CONTROL_BORDER)], lightcolor=[('active', c.CONTROL_BORDER)],
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
-# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them
-def fit_window(root, size, minimum):
+# a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them, and keep
+# spare_height on top for a line that can wrap longer later
+def fit_window(root, size, minimum, spare_height=0):
     root.update_idletasks()
-    need = (root.winfo_reqwidth(), root.winfo_reqheight())
+    need = (root.winfo_reqwidth(), root.winfo_reqheight() + spare_height)
     root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
     root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
 

@@ -77,7 +77,9 @@ class CheckScreen:
         self.fonts = FONTS
         root.title("Room capacity check")
         self.build_widgets()
-        fit_window(root, OPEN_WINDOW, MIN_WINDOW)
+        # an error can wrap to a line more than the help: the smallest window keeps that line, so the result tables keep
+        # their row (at the Windows font the screen asks for more than MIN_WINDOW, so the floor leaves no room of its own)
+        fit_window(root, OPEN_WINDOW, MIN_WINDOW, int(root.tk.call('font', 'metrics', self.fonts['caption'], '-linespace')))
         self.reload()
         self.root.after(POLL_MS, self.poll)
 
@@ -112,9 +114,10 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
-        # side margins 24 -> 16 px: at the Windows font the tables' full headings ask for 1381 px at 24, 1367 at 17 and
-        # 1365 at 16, and the screen must fit a 1366 px laptop
-        outer = ttk.Frame(self.root, padding=(16, 10, 16, 8))
+        # side margins 24 -> 10 px, the gap between the two columns 16 -> 12 and the right-hand panels' side padding 16 -> 8:
+        # at the Windows font the tables' full headings and their 28 px mark column ask for 1393 px at 16, 1361 at 10,
+        # and the screen must fit a 1366 px laptop
+        outer = ttk.Frame(self.root, padding=(10, 10, 10, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
         outer.rowconfigure(1, weight=1)
@@ -129,7 +132,7 @@ class CheckScreen:
         titles.pack(side='left', fill='x', expand=True)
         ttk.Label(titles, text="Room capacity check", font=self.fonts['title']).pack(anchor='w')
         ttk.Label(titles, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
-                  foreground=colours.MUTED_FG, wraplength=880).pack(anchor='w')
+                  foreground=colours.MUTED, wraplength=880).pack(anchor='w')
         name = db.get_user_name(self.conn, self.user_login) or self.user_login
         role = "Editor" if self.editor else "Viewer"
         ttk.Label(who, text=f"{name}  ·  {role}", font=self.fonts['strong']).pack(side='left', padx=(0, 12))
@@ -141,7 +144,7 @@ class CheckScreen:
 
         # left: find a room
         left = ttk.LabelFrame(outer, text=" 1. Find a room ", padding=12)
-        left.grid(row=1, column=0, sticky='nsw', padx=(0, 16))
+        left.grid(row=1, column=0, sticky='nsw', padx=(0, 12))
         left.rowconfigure(5, weight=1)
         row = ttk.Frame(left)
         row.grid(row=0, column=0, sticky='ew')
@@ -152,7 +155,7 @@ class CheckScreen:
         entry.focus_set()
         ttk.Button(row, text="Search", command=self.search).pack(side='left', padx=(8, 0))
         ttk.Label(left, text="e.g.  DTB A120   ·   Turpin   ·   A120", font=self.fonts['caption'],
-                  foreground=colours.MUTED_FG).grid(row=1, column=0, sticky='w', pady=(4, 10))
+                  foreground=colours.MUTED).grid(row=1, column=0, sticky='w', pady=(4, 10))
 
         pick = ttk.Frame(left)
         pick.grid(row=2, column=0, sticky='ew', pady=(0, 10))
@@ -167,12 +170,11 @@ class CheckScreen:
         self.floor_box.bind('<<ComboboxSelected>>', lambda e: self.search())
 
         self.found_var = tk.StringVar()
-        ttk.Label(left, textvariable=self.found_var, font=self.fonts['caption'], foreground=colours.MUTED_FG).grid(
+        ttk.Label(left, textvariable=self.found_var, font=self.fonts['caption'], foreground=colours.MUTED).grid(
             row=4, column=0, sticky='w')
         self.found_tree = self.make_tree(left, FOUND_COLUMNS, height=8)
         self.found_tree.master.grid(row=5, column=0, sticky='nsew', pady=(4, 0))
         self.found_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_found())
-        colours.colour_tags(self.found_tree)
 
         # right: room, try a number, results
         right = ttk.Frame(outer)
@@ -181,7 +183,7 @@ class CheckScreen:
         right.rowconfigure(2, weight=1)
 
         # room card -> the room now, and right under it the room with the change, column by column
-        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(16, 6))
+        card = ttk.LabelFrame(right, text=" 2. Room ", padding=(8, 6))
         card.grid(row=0, column=0, sticky='ew')
         card.columnconfigure(5, weight=1)
         self.room_title = tk.StringVar(value="Pick a room on the left")
@@ -189,13 +191,13 @@ class CheckScreen:
         title.grid(row=0, column=0, columnspan=6, sticky='w')
         ttk.Label(title, textvariable=self.room_title, font=self.fonts['subtitle']).pack(side='left')
         self.room_category = tk.StringVar()
-        ttk.Label(title, textvariable=self.room_category, foreground=colours.MUTED_FG).pack(side='left', padx=(12, 0))
+        ttk.Label(title, textvariable=self.room_category, foreground=colours.MUTED).pack(side='left', padx=(12, 0))
         ttk.Label(card, text="Now", font=self.fonts['strong']).grid(row=2, column=0, sticky='w', padx=(0, 24))
         ttk.Label(card, text="With change", font=self.fonts['strong'], foreground=colours.CHANGED_FG).grid(
             row=3, column=0, sticky='w', padx=(0, 24), pady=(2, 0))
         self.card_vars, self.trial_vars, self.trial_labels = {}, {}, {}
         for i, label in enumerate(["Room type", "Area", "Room capacity", "Per code load"], start=1):
-            ttk.Label(card, text=label, foreground=colours.MUTED_FG).grid(row=1, column=i, sticky='w', padx=(0, 20), pady=(6, 0))
+            ttk.Label(card, text=label, foreground=colours.MUTED).grid(row=1, column=i, sticky='w', padx=(0, 20), pady=(6, 0))
             self.card_vars[label] = tk.StringVar(value='-')
             ttk.Label(card, textvariable=self.card_vars[label], font=self.fonts['large']).grid(row=2, column=i, sticky='w', padx=(0, 28))
             self.trial_vars[label] = tk.StringVar(value='-')
@@ -209,7 +211,7 @@ class CheckScreen:
         self.trial_badge = tk.Label(badges, text="", padx=10, pady=3, anchor='w', fg=colours.ROW_FG)
         self.trial_badge.pack(side='left', padx=(10, 0))
 
-        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(16, 6))
+        trial = ttk.LabelFrame(right, text=" 3. Try a new capacity or room type ", padding=(8, 6))
         trial.grid(row=1, column=0, sticky='ew', pady=(6, 0))
         line = ttk.Frame(trial)
         line.pack(fill='x')
@@ -229,12 +231,12 @@ class CheckScreen:
         ttk.Button(line, text="Remove room", command=self.remove_from_check).pack(side='left', padx=(18, 4))
         ttk.Button(line, text="Start over", command=self.start_over).pack(side='left', padx=4)
         # one label: the help, or what's wrong with the number (a long message wraps)
-        self.hint = wrap_to_width(ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED_FG))
+        self.hint = wrap_to_width(ttk.Label(trial, text=TRIAL_HELP, font=self.fonts['caption'], foreground=colours.MUTED))
         self.hint.pack(fill='x', pady=(4, 0))
         self.message_var = tk.StringVar()
         self.message_var.trace_add('write', lambda *_: self.show_hint())
 
-        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(16, 6))
+        results = ttk.LabelFrame(right, text=" 4. Result ", padding=(8, 6))
         results.grid(row=2, column=0, sticky='nsew', pady=(6, 0))
         results.columnconfigure(0, weight=1)
         # the tables ask for one row and share what the window has: on a small window they scroll, nothing else gives way
@@ -245,26 +247,24 @@ class CheckScreen:
         top.grid(row=0, column=0, sticky='ew')
         ttk.Label(top, text="Rooms in this check", font=self.fonts['strong']).pack(side='left')
         ttk.Button(top, text="Save summary (.docx)", command=self.save_summary).pack(side='right')
-        ttk.Label(top, text="Attach it to your email to Mark Arrojado.", foreground=colours.MUTED_FG).pack(side='right', padx=10)
+        ttk.Label(top, text="Attach it to your email to Mark Arrojado.", foreground=colours.MUTED).pack(side='right', padx=10)
         self.check_tree = self.make_tree(results, CHECK_COLUMNS, height=1)
         self.check_tree.master.grid(row=1, column=0, sticky='nsew', pady=(4, 6))
-        colours.colour_tags(self.check_tree)
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, font=self.fonts['strong']).grid(row=2, column=0, sticky='w')
         self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(4, 0))
-        colours.colour_tags(self.zone_tree)
 
         # footer: legend + the screening rule
         foot = ttk.Frame(outer)
         foot.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(6, 0))
         colours.legend(foot).pack(anchor='w')
         ttk.Label(foot, text="Screening only, not an approval. Nothing on this screen is saved; an editor reviews every change.",
-                  font=self.fonts['caption'], foreground=colours.MUTED_FG).pack(anchor='w', pady=(2, 0))
+                  font=self.fonts['caption'], foreground=colours.MUTED).pack(anchor='w', pady=(2, 0))
 
     def show_hint(self):
         message = self.message_var.get()
-        self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED_FG)
+        self.hint.configure(text=message or TRIAL_HELP, foreground=colours.ERROR_FG if message else colours.MUTED)
 
     # every column as wide as its heading and values: after each fill. the zone Result column also holds every fixed verdict
     def fit(self, tree, columns=None):
@@ -273,7 +273,8 @@ class CheckScreen:
 
     def make_tree(self, parent, columns, height):
         frame = ttk.Frame(parent)
-        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height, selectmode='browse')
+        tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height, selectmode='browse')
+        colours.colour_tags(tree)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
@@ -281,7 +282,7 @@ class CheckScreen:
         # long building name) makes the table scroll sideways rather than widen the window past a laptop screen. the sideways
         # bar shows only then, and takes its height from the table's rows: the window keeps the room a wrapped message needs
         self.fit(tree, columns)
-        asked = sum(int(tree.column(col, 'width')) for col, _ in columns)
+        asked = colours.MARK_COLUMN + sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
 
@@ -319,7 +320,7 @@ class CheckScreen:
         for _, r in found.head(MAX_RESULTS).iterrows():
             colour = egress.room_colour(r)
             self.found_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=[r['space'], r['floor'], r['property']],
-                                   tags=(colour,) if colour else ())
+                                   **colours.row(self.found_tree, colour))
         self.fit(self.found_tree)
         if not len(found) and not (self.search_var.get().strip() or prop):
             self.found_var.set("Type a room or building, or pick a building.")
@@ -400,7 +401,7 @@ class CheckScreen:
         }
         for label, (value, changed) in cells.items():
             self.trial_vars[label].set(value if changed else 'same')
-            self.trial_labels[label].configure(foreground=colours.CHANGED_FG if changed else colours.MUTED_FG)
+            self.trial_labels[label].configure(foreground=colours.CHANGED_FG if changed else colours.MUTED)
 
         if not (type_changed or cap_changed):
             self.trial_badge.configure(text="With change: pick a room type or type a new capacity in 3 below",
@@ -420,7 +421,8 @@ class CheckScreen:
             verdict = egress.zone_verdict(z)
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
             name = egress.zone_name(z['floor'], z['zone_wing'])
-            self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict], tags=(egress.zone_colour(z),))
+            self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict],
+                                  **colours.row(self.zone_tree, egress.zone_colour(z)))
         self.fit(self.zone_tree)
 
     # the check -> nothing is saved
@@ -497,7 +499,8 @@ class CheckScreen:
                 room_type, per_code = r['room_type'] or '-', r['per_code_load']
             proposed = '-' if r['proposed'] is None else r['proposed']
             self.check_tree.insert('', 'end', iid=f"r{r['room_id']}", values=[f"Floor {r['floor']}  {r['space']}", room_type,
-                                   now, proposed, per_code, verdict], tags=(r['colour'],) if r['colour'] else ())
+                                   now, proposed, per_code, verdict],
+                                   **colours.row(self.check_tree, r['colour']))
         self.fit(self.check_tree)
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
         self.zone_tree.delete(*self.zone_tree.get_children())
@@ -506,7 +509,7 @@ class CheckScreen:
             capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
             self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
-                                  tags=(z['colour'],))
+                                  **colours.row(self.zone_tree, z['colour']))
         self.fit(self.zone_tree)
 
     def save_summary(self):
