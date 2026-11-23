@@ -825,6 +825,19 @@ def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root
     for tree in editor_tables(screen):
         assert tree.xview() == (0.0, 1.0), tree['columns']
 
+# the exit ids the README documents (README: Measuring exits): a space number plus what was measured, and the outside
+# doors' E<floor> ids with a letter. each shows in full and the exits table still needs no sideways bar
+@pytest.mark.parametrize('exit_id', ['S5 - open stair', 'E3 - outside exit', 'E2A - outside exit'])
+def test_editor_exits_table_needs_no_sideways_bar_with_a_documented_exit_id(larger_font_root, conn, exit_id):
+    root = larger_font_root
+    screen = busy_editor(root, conn, exits=(exit_id,))
+    assert (root.winfo_width(), root.winfo_height()) == app.OPEN_WINDOW
+    tree = screen.exit_tree
+    assert [tree.set(item, 'exit_id') for item in tree.get_children()] == [exit_id]
+    assert cut_columns(tree, [key for key in tree['columns'] if key not in app.EXIT_LONG]) == []
+    assert tree.xview() == (0.0, 1.0)
+    assert not sideways_bar_of(tree).winfo_ismapped()
+
 # a search across buildings shows the whole campus: the zones' first column then holds the building name and the floor
 def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_font_root, conn):
     root = larger_font_root

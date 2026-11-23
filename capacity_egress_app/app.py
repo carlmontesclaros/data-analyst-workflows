@@ -37,16 +37,16 @@ ZONE_COLUMNS = [('floor', 70), ('zone_wing', 80), ('status', 300), ('total_load'
 ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 80), ('room_type', 90),
                 ('per_code_load', 115), ('capacity', 115), ('capacity_source', 125), ('load_used', 90), ('in_scope', 75),
                 ('flag', 180), ('note', 250)]
-EXIT_COLUMNS = [('floor', 50), ('wing', 64), ('exit_id', 110), ('exit_type', 74), ('clear_width_cm', 85), ('stair_width_cm', 85),
-                ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 110), ('width_check', 220),
-                ('into_wing', 80), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
+EXIT_COLUMNS = [('floor', 50), ('wing', 58), ('exit_id', 110), ('exit_type', 74), ('clear_width_cm', 85), ('stair_width_cm', 85),
+                ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 90), ('width_check', 220),
+                ('into_wing', 80), ('measured_date', 80), ('measured_by', 100), ('notes', 250)]
 
 # descriptive columns share the width the short ones leave over and show a cut text with an ellipsis (the pointer on the
 # cell shows it whole). numbers, ids, dates and every other short column always show in full. the zones table's first column
 # holds the building too when the list is not of one building
 ZONE_LONG = ('floor', 'status', 'flags')
 ROOM_LONG = ('property', 'sub_category', 'flag', 'note')
-EXIT_LONG = ('width_check', 'measured_by', 'notes')
+EXIT_LONG = ('exit_type', 'width_check', 'measured_by', 'notes')
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
 def exit_capacity_text(zone):
