@@ -448,7 +448,8 @@ def test_room_note_redoes_only_its_floor(root, campus_path, said, calculated):
         problems = when_open(screen, 'Note', write)
         screen.room_note()
         assert problems == [] and said == [] and max(calculated) < 6, calculated
-        assert screen.room_tree.item(f"r{room(conn, '101')['room_id']}", 'values')[12] == 'tables moved to the back'
+        # the note column shares the width with the others and cuts a long text with an ellipsis: the full text is what it holds
+        assert screen.room_tree.long_columns.full[f"r{room(conn, '101')['room_id']}"]['note'] == 'tables moved to the back'
         assert_shows_what_the_database_holds(screen, conn)
     finally:
         conn.close()

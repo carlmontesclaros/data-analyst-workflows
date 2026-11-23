@@ -779,3 +779,149 @@ def test_tool_buttons_and_tabs_draw(root):
     notebook.pack(side='left')
     root.update()
     assert all(w.winfo_ismapped() for w in all_widgets(frame))
+
+
+# part 3: the editor at the Windows font -> one menu row, tables that need no sideways bar, a zones pane as tall as its rows
+LONG_NOTE = 'tables and chairs moved to the back for the exam week, move them again before the first lecture on Monday morning'
+
+def busy_editor(root, conn, exits=('S1 - doorway',)):
+    rid = conn.execute("SELECT room_id FROM rooms").fetchone()[0]
+    db.set_note(conn, 'rooms', rid, LONG_NOTE, 'carl', 'Carl')
+    for exit_id in exits:
+        db.save_exit(conn, {'property': LONG_ROOM[0], 'floor': LONG_ROOM[1], 'exit_id': exit_id, 'exit_type': 'doorway',
+                            'clear_width_cm': '88', 'measured_date': '2026-11-10', 'measured_by': 'Carl Montesclaros',
+                            'notes': LONG_NOTE}, 'carl', 'Carl')
+    screen = editor_screen(root, conn)
+    screen.building_var.set(LONG_ROOM[0])
+    screen.pick_building()
+    root.update()
+    return screen
+
+def editor_tables(screen):
+    return (screen.zone_tree, screen.room_tree, screen.exit_tree)
+
+def test_editor_menu_is_one_row_at_the_windows_font(larger_font_root, conn):
+    screen = editor_screen(larger_font_root, conn)
+    menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
+    assert (larger_font_root.winfo_width(), larger_font_root.winfo_height()) == app.OPEN_WINDOW
+    assert len({g.winfo_y() for g in menu.groups}) == 1
+    assert len({b.winfo_rooty() for b in buttons(menu)}) == 1
+    assert [g.winfo_ismapped() for g in menu.lines] == [True] * 3
+
+def test_editor_menu_is_made_of_quiet_tool_buttons(larger_font_root, conn):
+    editor_screen(larger_font_root, conn)
+    menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
+    assert {b.cget('style') for b in buttons(menu)} == {'Toolbutton'}
+    # a line between the four groups: back, data, exports, people
+    assert [len(buttons(g)) for g in menu.groups] == [1, 3, 3, 2]
+    assert len(menu.lines) == 3
+
+def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    assert all(tree.get_children() for tree in editor_tables(screen))
+    for tree in editor_tables(screen):
+        assert tree.xview() == (0.0, 1.0), tree['columns']
+
+def test_editor_tables_need_no_sideways_bar_whichever_rows_they_hold(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    for search in ['', 'A120']:
+        screen.building_var.set('')
+        screen.search_var.set(search)
+        screen.search()
+        larger_font_root.update()
+        for tree in editor_tables(screen):
+            assert tree.xview() == (0.0, 1.0), (search, tree['columns'])
+
+def test_editor_short_columns_are_never_cut(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    for tree, long in [(screen.zone_tree, app.ZONE_LONG), (screen.room_tree, app.ROOM_LONG), (screen.exit_tree, app.EXIT_LONG)]:
+        assert cut_columns(tree, [key for key in tree['columns'] if key not in long]) == []
+        assert not any(widgets.ELLIPSIS in str(tree.set(item, key)) for item in tree.get_children()
+                       for key in tree['columns'] if key not in long)
+
+def test_editor_long_columns_cut_with_an_ellipsis_and_keep_their_headings(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    shown = tree.set(item, 'note')
+    assert shown.endswith(widgets.ELLIPSIS) and LONG_NOTE.startswith(shown[:-1]) and shown != LONG_NOTE
+    assert tree.long_columns.full[item]['note'] == LONG_NOTE
+    for tree in editor_tables(screen):
+        assert cut_columns(tree, tree['columns']) == []
+
+# where a column's cell is in a table: its first pixel, found the way Tk itself numbers the columns ('#0' is the mark column)
+def cell_at(tree, item, key):
+    number = f"#{list(tree['columns']).index(key) + 1}"
+    left = next(x for x in range(tree.winfo_width()) if tree.identify_column(x) == number)
+    _, y, _, height = tree.bbox(item)
+    return left + 4, y + height // 2
+
+def point_at(root, tree, item, key):
+    x, y = cell_at(tree, item, key)
+    tree.event_generate('<Motion>', x=x, y=y, rootx=tree.winfo_rootx() + x, rooty=tree.winfo_rooty() + y)
+    root.update()
+
+def test_a_cut_cell_shows_its_full_text_under_the_pointer(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    point_at(root, tree, item, 'note')
+    assert tree.long_columns.tip_text == LONG_NOTE
+    assert tree.long_columns.tip_label.cget('text') == LONG_NOTE
+    # a short cell shows nothing, and neither does leaving the table
+    point_at(root, tree, item, 'space')
+    assert tree.long_columns.tip_text is None
+    point_at(root, tree, item, 'note')
+    assert tree.long_columns.tip_text == LONG_NOTE
+    tree.event_generate('<Leave>')
+    assert tree.long_columns.tip_text is None
+
+def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
+    root = larger_font_root
+    screen = editor_with_rooms(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    screen.zone_tree.long_columns.layout()
+    zone = screen.zone_tree.get_children()[0]
+    assert screen.zone_tree.set(zone, 'status') == screen.zone_tree.long_columns.full[zone]['status'] != ''
+    point_at(root, screen.zone_tree, zone, 'status')
+    assert screen.zone_tree.long_columns.tip_text is None
+    assert tree.set(item, 'flag') == tree.long_columns.full[item]['flag']
+    point_at(root, tree, item, 'flag')
+    assert tree.long_columns.tip_text is None
+
+def test_pane_titles_carry_their_actions_as_tool_buttons(root, conn):
+    screen = editor_screen(root, conn)
+    for tree, title, actions in [(screen.zone_tree, 'Zones: occupant load vs exit capacity', []),
+                                 (screen.room_tree, 'Rooms', ['Change capacity', 'Change room type', 'Room note', 'Room history', 'Open photos']),
+                                 (screen.exit_tree, 'Exits', ['Add exit', 'Edit exit', 'Delete exit', 'Exit note', 'Exit history'])]:
+        pane = tree.master.master
+        header = pane.winfo_children()[0]
+        labels = [w.cget('text') for w in header.winfo_children() if isinstance(w, ttk.Label)]
+        assert labels == [title]
+        assert [(b.cget('text'), b.cget('style')) for b in buttons(header)] == [(a, 'Toolbutton') for a in actions]
+        assert header.winfo_rooty() < tree.winfo_rooty()
+        assert len({w.winfo_rooty() + w.winfo_height() // 2 for w in header.winfo_children()}) <= 2
+
+@pytest.mark.parametrize('zones', [1, 2, 3])
+def test_zones_pane_is_only_as_tall_as_its_zones(root, conn, zones):
+    for floor in range(1, zones + 1):
+        db.insert_rooms(conn, xi.classify_rooms(report([(LONG_ROOM[0], str(floor + 10), 'B1', 30.0, 10)])), f'floor{floor}.xlsx')
+    screen = editor_screen(root, conn)
+    screen.building_var.set(LONG_ROOM[0])
+    screen.pick_building()
+    root.update()
+    shown = len(screen.zone_tree.get_children())
+    assert shown >= zones
+    assert screen.zone_tree['height'] == max(shown, app.ZONE_ROWS_LEAST)
+    assert abs(screen.panes.sashpos(0) - screen.zone_frame.winfo_reqheight()) <= 2
+    assert abs(screen.zone_frame.winfo_height() - screen.zone_frame.winfo_reqheight()) <= 6
+
+def test_zones_pane_gives_the_rest_of_the_window_to_the_tables_below(root, conn):
+    screen = editor_screen(root, conn)
+    before = screen.zone_frame.winfo_height()
+    root.geometry(f'{root.winfo_width()}x{root.winfo_height() + 200}')
+    root.update()
+    assert screen.zone_frame.winfo_height() == before
+    assert screen.room_tree.winfo_height() > 0
