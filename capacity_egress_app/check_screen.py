@@ -7,7 +7,7 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, sideways_bar, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
@@ -285,14 +285,7 @@ class CheckScreen:
         asked = colours.MARK_COLUMN + sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
-
-        def scroll_sideways(first, last):
-            if float(first) <= 0 and float(last) >= 1:
-                xs.grid_remove()
-            else:
-                xs.grid()
-            xs.set(first, last)
-        tree.configure(yscrollcommand=ys.set, xscrollcommand=scroll_sideways)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=sideways_bar(xs))
         tree.grid(row=0, column=0, sticky='nsew')
         ys.grid(row=0, column=1, sticky='ns')
         xs.grid(row=1, column=0, sticky='ew')

@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, use_theme, wrap_to_width
+from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, sideways_bar, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -266,7 +266,7 @@ class App:
         fit_columns(tree, tree.long_columns.short)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
-        tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=sideways_bar(xs))
         tree.grid(row=0, column=0, sticky='nsew')
         ys.grid(row=0, column=1, sticky='ns')
         xs.grid(row=1, column=0, sticky='ew')

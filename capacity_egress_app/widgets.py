@@ -171,6 +171,17 @@ def fit_columns(tree, columns, always=None):
         tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
     heading.destroy()
 
+# a table's sideways bar -> the table's xscrollcommand: the bar shows only while there is more to see sideways, so an
+# unneeded bar takes no height. the bar must be gridded, so grid() puts it back where it was
+def sideways_bar(bar):
+    def scroll_sideways(first, last):
+        if float(first) <= 0 and float(last) >= 1:
+            bar.grid_remove()
+        else:
+            bar.grid()
+        bar.set(first, last)
+    return scroll_sideways
+
 ELLIPSIS = '…'
 
 # a text -> itself when it measures within width, else its start with an ellipsis, as long as still fits
@@ -240,18 +251,28 @@ class LongTextColumns:
         # the longest texts give way first: every column up to one common width, as wide as the room allows, never under its
         # heading and never past what its longest text needs
         room = tree.winfo_width() - 4 - taken
-        cap = max(natural.values(), default=0)
-        while cap > 0 and sum(max(head[key], min(natural[key], cap)) for key in free) > room:
-            cap -= 1
-        widths = {key: max(head[key], min(natural[key], cap)) for key in free}
+        low, high = 0, max(natural.values(), default=0)
+        while low < high:
+            cap = (low + high + 1) // 2
+            if sum(max(head[key], min(natural[key], cap)) for key in free) <= room:
+                low = cap
+            else:
+                high = cap - 1
+        widths = {key: max(head[key], min(natural[key], low)) for key in free}
         for key in free:
             tree.column(key, width=widths[key], minwidth=head[key])
             self.assigned[key] = widths[key]
+        rooms = {key: int(tree.column(key, 'width')) - CELL_PADDING for key in self.long}
+        cut = {}
         for item, texts in self.full.items():
             for key in self.long:
-                room = int(tree.column(key, 'width')) - CELL_PADDING
                 text = texts[key]
-                shown = text if measured[text] <= room else cut_to_width(self.measure, text, room)
+                if measured[text] <= rooms[key]:
+                    shown = text
+                elif (text, rooms[key]) in cut:
+                    shown = cut[text, rooms[key]]
+                else:
+                    shown = cut[text, rooms[key]] = cut_to_width(self.measure, text, rooms[key])
                 if tree.set(item, key) != shown:
                     tree.set(item, key, shown)
 
@@ -271,11 +292,17 @@ class LongTextColumns:
 
     def show_tip(self, text, x, y):
         self.tip = tk.Toplevel(self.tree)
+        self.tip.withdraw()
         self.tip.wm_overrideredirect(True)
         self.tip.configure(background=c.CONTROL_BORDER)
         self.tip_label = ttk.Label(self.tip, text=text, background=c.SURFACE, padding=(8, 4), wraplength=600)
         self.tip_label.pack(padx=1, pady=1)
-        self.tip.wm_geometry(f'+{x + 12}+{y + 18}')
+        self.tip.update_idletasks()
+        width, height = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
+        left = max(0, min(x + 12, self.tip.winfo_screenwidth() - width))
+        top = y + 18 if y + 18 + height <= self.tip.winfo_screenheight() else max(0, y - 6 - height)
+        self.tip.wm_geometry(f'+{left}+{top}')
+        self.tip.deiconify()
         self.tip_text = text
 
     def hide_tip(self, event=None):

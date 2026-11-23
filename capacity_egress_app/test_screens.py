@@ -832,6 +832,24 @@ def test_editor_tables_need_no_sideways_bar_whichever_rows_they_hold(larger_font
         for tree in editor_tables(screen):
             assert tree.xview() == (0.0, 1.0), (search, tree['columns'])
 
+def sideways_bar_of(tree):
+    bars = [w for w in tree.master.winfo_children() if isinstance(w, ttk.Scrollbar) and str(w.cget('orient')) == 'horizontal']
+    assert len(bars) == 1
+    return bars[0]
+
+# no sideways bar is drawn under a table that has nothing to scroll sideways; one that does scroll gets its bar back
+def test_editor_tables_draw_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    assert (root.winfo_width(), root.winfo_height()) == app.OPEN_WINDOW
+    for tree in editor_tables(screen):
+        assert not sideways_bar_of(tree).winfo_ismapped(), tree['columns']
+    tree = screen.room_tree
+    tree.column('space', width=tree.winfo_width() * 2)
+    root.update()
+    assert tree.xview() != (0.0, 1.0)
+    assert sideways_bar_of(tree).winfo_ismapped()
+
 def test_editor_short_columns_are_never_cut(larger_font_root, conn):
     screen = busy_editor(larger_font_root, conn)
     for tree, long in [(screen.zone_tree, app.ZONE_LONG), (screen.room_tree, app.ROOM_LONG), (screen.exit_tree, app.EXIT_LONG)]:
@@ -876,6 +894,24 @@ def test_a_cut_cell_shows_its_full_text_under_the_pointer(larger_font_root, conn
     assert tree.long_columns.tip_text == LONG_NOTE
     tree.event_generate('<Leave>')
     assert tree.long_columns.tip_text is None
+
+# the cut notes are the rightmost columns: a pointer near the screen's right or bottom edge still shows the whole text
+@pytest.mark.parametrize('corner', ['right', 'bottom', 'bottom right'])
+def test_the_full_text_stays_on_the_screen(larger_font_root, conn, corner):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    x, y = cell_at(tree, item, 'note')
+    screen_x = root.winfo_screenwidth() - 5 if 'right' in corner else 100
+    screen_y = root.winfo_screenheight() - 5 if 'bottom' in corner else 100
+    tree.event_generate('<Motion>', x=x, y=y, rootx=screen_x, rooty=screen_y)
+    root.update()
+    tip = tree.long_columns.tip
+    assert tree.long_columns.tip_text == LONG_NOTE
+    assert tip.winfo_width() >= tree.long_columns.tip_label.winfo_reqwidth()
+    assert 0 <= tip.winfo_rootx() and tip.winfo_rootx() + tip.winfo_width() <= root.winfo_screenwidth()
+    assert 0 <= tip.winfo_rooty() and tip.winfo_rooty() + tip.winfo_height() <= root.winfo_screenheight()
 
 def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
     root = larger_font_root
