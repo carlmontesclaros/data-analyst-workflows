@@ -299,8 +299,10 @@ class LongTextColumns:
         self.tip_label.pack(padx=1, pady=1)
         self.tip.update_idletasks()
         width, height = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
-        left = max(0, min(x + 12, self.tip.winfo_screenwidth() - width))
-        top = y + 18 if y + 18 + height <= self.tip.winfo_screenheight() else max(0, y - 6 - height)
+        window = self.tree.winfo_toplevel()
+        right, bottom = window.winfo_rootx() + window.winfo_width(), window.winfo_rooty() + window.winfo_height()
+        left = max(window.winfo_rootx(), min(x + 12, right - width))
+        top = y + 18 if y + 18 + height <= bottom else max(window.winfo_rooty(), y - 6 - height)
         self.tip.wm_geometry(f'+{left}+{top}')
         self.tip.deiconify()
         self.tip_text = text

@@ -822,15 +822,36 @@ def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root
     for tree in editor_tables(screen):
         assert tree.xview() == (0.0, 1.0), tree['columns']
 
-def test_editor_tables_need_no_sideways_bar_whichever_rows_they_hold(larger_font_root, conn):
-    screen = busy_editor(larger_font_root, conn)
-    for search in ['', 'A120']:
-        screen.building_var.set('')
-        screen.search_var.set(search)
-        screen.search()
-        larger_font_root.update()
-        for tree in editor_tables(screen):
-            assert tree.xview() == (0.0, 1.0), (search, tree['columns'])
+# a search across buildings shows the whole campus: the zones' first column then holds the building name and the floor
+def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_font_root, conn):
+    root = larger_font_root
+    db.insert_rooms(conn, xi.classify_rooms(report([LONG_ROOM, ('Turpin Hall', '1', 'A121', 30.0, 10)])), 'second.xlsx')
+    screen = busy_editor(root, conn)
+    screen.building_var.set('')
+    screen.search_var.set('a12')
+    screen.search()
+    root.update()
+    assert screen.building_var.get() == ''
+    assert {texts['property'] for texts in screen.room_tree.long_columns.full.values()} == {LONG_ROOM[0], 'Turpin Hall'}
+    zone_names = {screen.zone_tree.long_columns.full[item]['floor'] for item in screen.zone_tree.get_children()}
+    assert f"{LONG_ROOM[0]} {LONG_ROOM[1]}" in zone_names
+    for tree in editor_tables(screen):
+        assert tree.xview() == (0.0, 1.0), tree['columns']
+        assert not sideways_bar_of(tree).winfo_ismapped(), tree['columns']
+
+# a search that finds nothing empties the tables; the window can still change size afterwards without an error
+def test_editor_window_resizes_after_a_search_that_finds_nothing(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    errors = []
+    root.report_callback_exception = lambda kind, value, trace: errors.append(value)
+    screen.search_var.set('no such room anywhere')
+    screen.search()
+    root.update()
+    assert all(not tree.get_children() for tree in editor_tables(screen))
+    root.geometry(f'{root.winfo_width() + 120}x{root.winfo_height()}')
+    root.update()
+    assert errors == []
 
 def sideways_bar_of(tree):
     bars = [w for w in tree.master.winfo_children() if isinstance(w, ttk.Scrollbar) and str(w.cget('orient')) == 'horizontal']
@@ -895,23 +916,29 @@ def test_a_cut_cell_shows_its_full_text_under_the_pointer(larger_font_root, conn
     tree.event_generate('<Leave>')
     assert tree.long_columns.tip_text is None
 
-# the cut notes are the rightmost columns: a pointer near the screen's right or bottom edge still shows the whole text
+# the cut notes are the rightmost columns: a pointer near the window's right or bottom edge still shows the whole text,
+# inside the app's own window, so it stays on the monitor that window is on
 @pytest.mark.parametrize('corner', ['right', 'bottom', 'bottom right'])
-def test_the_full_text_stays_on_the_screen(larger_font_root, conn, corner):
+def test_the_full_text_stays_inside_the_window(larger_font_root, conn, corner):
     root = larger_font_root
     screen = busy_editor(root, conn)
     tree = screen.room_tree
     item = tree.get_children()[0]
     x, y = cell_at(tree, item, 'note')
-    screen_x = root.winfo_screenwidth() - 5 if 'right' in corner else 100
-    screen_y = root.winfo_screenheight() - 5 if 'bottom' in corner else 100
-    tree.event_generate('<Motion>', x=x, y=y, rootx=screen_x, rooty=screen_y)
+    left, top = root.winfo_rootx(), root.winfo_rooty()
+    right, bottom = left + root.winfo_width(), top + root.winfo_height()
+    pointer_x = right - 5 if 'right' in corner else left + 100
+    pointer_y = bottom - 5 if 'bottom' in corner else top + 100
+    tree.event_generate('<Motion>', x=x, y=y, rootx=pointer_x, rooty=pointer_y)
     root.update()
     tip = tree.long_columns.tip
     assert tree.long_columns.tip_text == LONG_NOTE
     assert tip.winfo_width() >= tree.long_columns.tip_label.winfo_reqwidth()
-    assert 0 <= tip.winfo_rootx() and tip.winfo_rootx() + tip.winfo_width() <= root.winfo_screenwidth()
-    assert 0 <= tip.winfo_rooty() and tip.winfo_rooty() + tip.winfo_height() <= root.winfo_screenheight()
+    assert left <= tip.winfo_rootx() and tip.winfo_rootx() + tip.winfo_width() <= right
+    assert top <= tip.winfo_rooty() and tip.winfo_rooty() + tip.winfo_height() <= bottom
+    # beside the pointer, not moved off to some other edge
+    assert tip.winfo_rootx() - 30 <= pointer_x <= tip.winfo_rootx() + tip.winfo_width() + 30
+    assert tip.winfo_rooty() - 30 <= pointer_y <= tip.winfo_rooty() + tip.winfo_height() + 30
 
 def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
     root = larger_font_root

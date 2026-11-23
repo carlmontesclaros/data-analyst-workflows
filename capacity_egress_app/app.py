@@ -337,6 +337,7 @@ class App:
         if result is None:                            # nothing picked or found -> empty lists, nothing calculated
             for tree in (self.zone_tree, self.room_tree, self.exit_tree):
                 tree.delete(*tree.get_children())
+                tree.long_columns.refit()
             self.zone_wanted = ZONE_ROWS_LEAST
             self.fit_zone_pane()
             self.show_counts(0, 0, 0)
