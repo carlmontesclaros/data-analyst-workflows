@@ -378,7 +378,8 @@ class App:
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
 
-        for tree in (self.zone_tree, self.room_tree, self.exit_tree):
+        self.zone_tree.long_columns.refit(ends={f"z{i}": {'floor': str(z['floor'])} for i, z in zones.iterrows()})
+        for tree in (self.room_tree, self.exit_tree):
             tree.long_columns.refit()
         self.zone_wanted = min(max(len(zones), ZONE_ROWS_LEAST), ZONE_ROWS_MOST)
         self.fit_zone_pane()

@@ -480,14 +480,17 @@ def drag_edge(tree, key, width):
     tree.tk.call(tree, 'drag', key, left + width)
     return int(tree.column(key, 'width'))
 
-# a column the user widened stays as wide when the lists refill (after a save, or another person's save)
+# a short column the user widened stays as wide when the lists refill (after a save, or another person's save); the
+# descriptive columns give the width back, so the table still needs no sideways bar
 def test_editor_keeps_a_column_the_user_widened_after_a_refill(root, conn):
     screen = editor_with_rooms(root, conn)
-    widened = {key: drag_edge(screen.room_tree, key, int(screen.room_tree.column(key, 'width')) + 150)
-               for key in ('sub_category', 'note')}
+    tree = screen.room_tree
+    widened = {key: drag_edge(tree, key, int(tree.column(key, 'width')) + 150) for key in ('space', 'capacity_source')}
+    drag_edge(tree, 'note', int(tree.column('note', 'width')) + 150)
     screen.show()
     root.update()
-    assert {key: int(screen.room_tree.column(key, 'width')) for key in widened} == widened
+    assert {key: int(tree.column(key, 'width')) for key in widened} == widened
+    assert tree.xview() == (0.0, 1.0)
 
 # a value column can be narrowed by the user, down to its heading in full but no further
 def test_editor_column_narrows_to_its_heading(root, conn):
@@ -825,7 +828,8 @@ def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root
 # a search across buildings shows the whole campus: the zones' first column then holds the building name and the floor
 def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_font_root, conn):
     root = larger_font_root
-    db.insert_rooms(conn, xi.classify_rooms(report([LONG_ROOM, ('Turpin Hall', '1', 'A121', 30.0, 10)])), 'second.xlsx')
+    db.insert_rooms(conn, xi.classify_rooms(report([LONG_ROOM, (LONG_ROOM[0], '4', 'A124', 30.0, 10),
+                                                    ('Turpin Hall', '1', 'A121', 30.0, 10)])), 'second.xlsx')
     screen = busy_editor(root, conn)
     screen.building_var.set('')
     screen.search_var.set('a12')
@@ -833,8 +837,17 @@ def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_
     root.update()
     assert screen.building_var.get() == ''
     assert {texts['property'] for texts in screen.room_tree.long_columns.full.values()} == {LONG_ROOM[0], 'Turpin Hall'}
-    zone_names = {screen.zone_tree.long_columns.full[item]['floor'] for item in screen.zone_tree.get_children()}
-    assert f"{LONG_ROOM[0]} {LONG_ROOM[1]}" in zone_names
+    zones = screen.zone_tree
+    full = {zones.long_columns.full[item]['floor']: zones.set(item, 'floor') for item in zones.get_children()}
+    engineering = [f"{LONG_ROOM[0]} 3", f"{LONG_ROOM[0]} 4"]
+    assert set(engineering) <= set(full)
+    # the building's name gives way, its floor never does: two floors of one building still read differently
+    for name, floor in zip(engineering, ['3', '4'], strict=True):
+        assert full[name].endswith(f"{widgets.ELLIPSIS} {floor}") and LONG_ROOM[0].startswith(full[name][:-len(floor) - 2])
+    assert full[engineering[0]] != full[engineering[1]]
+    item = next(item for item in zones.get_children() if zones.long_columns.full[item]['floor'] == engineering[1])
+    point_at(root, zones, item, 'floor')
+    assert zones.long_columns.tip_text == engineering[1]
     for tree in editor_tables(screen):
         assert tree.xview() == (0.0, 1.0), tree['columns']
         assert not sideways_bar_of(tree).winfo_ismapped(), tree['columns']

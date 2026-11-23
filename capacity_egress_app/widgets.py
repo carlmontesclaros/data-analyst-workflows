@@ -184,41 +184,46 @@ def sideways_bar(bar):
 
 ELLIPSIS = '…'
 
-# a text -> itself when it measures within width, else its start with an ellipsis, as long as still fits
-def cut_to_width(measure, text, width):
+# a text -> itself when it measures within width, else its start with an ellipsis, as long as still fits. keep: the
+# words the text ends with that are never cut (a floor after its building's name), shown whole after the ellipsis
+def cut_to_width(measure, text, width, keep=''):
     if measure(text) <= width:
         return text
-    low, high = 0, len(text)
+    body = text[:len(text) - len(keep)]
+    if not body.strip():
+        return text
+    end = ELLIPSIS + (' ' + keep if keep else '')
+    low, high = 0, len(body)
     while low < high:
         mid = (low + high + 1) // 2
-        if measure(text[:mid].rstrip() + ELLIPSIS) <= width:
+        if measure(body[:mid].rstrip() + end) <= width:
             low = mid
         else:
             high = mid - 1
-    return text[:low].rstrip() + ELLIPSIS
+    return body[:low].rstrip() + end
 
 # a table whose descriptive columns (status, flags, building, notes ...) share the width the short columns leave over, and
 # show a cut text with an ellipsis; resting the pointer on a cut cell shows its full text. the short columns (numbers, ids,
 # dates) are fitted to their values by fit_columns and never cut. so the table never needs a sideways bar unless the short
-# columns and the headings alone are wider than the window. a column the user dragged keeps the width they gave it
+# columns and the headings alone are wider than the window
 class LongTextColumns:
     def __init__(self, tree, columns, long_keys):
         self.tree = tree
         self.long = [key for key, _ in columns if key in long_keys]
         self.short = [(key, least) for key, least in columns if key not in long_keys]
         self.font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
-        self.full, self.pinned, self.shown_width = {}, {}, None
-        self.assigned = {key: int(tree.column(key, 'width')) for key in self.long}
+        self.full, self.ends, self.shown_width = {}, {}, None
         self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
         tree.bind('<Configure>', lambda e: self.layout(on_resize=True), add='+')
         tree.bind('<Motion>', self.point_at, add='+')
         for sequence in ('<Leave>', '<ButtonPress>', '<MouseWheel>', '<KeyPress>'):
             tree.bind(sequence, self.hide_tip, add='+')
 
-    # after every fill: the rows hold their full texts
-    def refit(self):
+    # after every fill: the rows hold their full texts. ends: {item: {key: the words its text ends with, never cut}}
+    def refit(self, ends=None):
         tree = self.tree
         self.full = {item: {key: str(tree.set(item, key)) for key in self.long} for item in tree.get_children()}
+        self.ends = ends or {}
         fit_columns(tree, self.short)
         self.layout()
 
@@ -231,14 +236,10 @@ class LongTextColumns:
         if tree.winfo_width() <= 1 or (on_resize and tree.winfo_width() == self.shown_width):
             return                                       # not drawn yet: its first <Configure> comes with the real width
         self.shown_width = tree.winfo_width()
-        for key in self.long:
-            if int(tree.column(key, 'width')) != self.assigned[key]:
-                self.pinned[key] = int(tree.column(key, 'width'))
-        free = [key for key in self.long if key not in self.pinned]
-        taken = sum(int(tree.column(key, 'width')) for key in ['#0', *tree['columns']] if key not in free)
+        taken = sum(int(tree.column(key, 'width')) for key in ['#0', *tree['columns']] if key not in self.long)
         heading = ttk.Label(tree, style='Treeview.Heading')
         head = {}
-        for key in free:
+        for key in self.long:
             heading.configure(text=tree.heading(key, 'text'))
             head[key] = heading.winfo_reqwidth()
         heading.destroy()
@@ -247,32 +248,32 @@ class LongTextColumns:
             for texts in self.full.values():
                 if texts[key] not in measured:
                     measured[texts[key]] = self.measure(texts[key])
-        natural = {key: max([head[key]] + [measured[t[key]] + CELL_PADDING for t in self.full.values()]) for key in free}
+        natural = {key: max([head[key]] + [measured[t[key]] + CELL_PADDING for t in self.full.values()]) for key in self.long}
         # the longest texts give way first: every column up to one common width, as wide as the room allows, never under its
         # heading and never past what its longest text needs
         room = tree.winfo_width() - 4 - taken
         low, high = 0, max(natural.values(), default=0)
         while low < high:
             cap = (low + high + 1) // 2
-            if sum(max(head[key], min(natural[key], cap)) for key in free) <= room:
+            if sum(max(head[key], min(natural[key], cap)) for key in self.long) <= room:
                 low = cap
             else:
                 high = cap - 1
-        widths = {key: max(head[key], min(natural[key], low)) for key in free}
-        for key in free:
-            tree.column(key, width=widths[key], minwidth=head[key])
-            self.assigned[key] = widths[key]
-        rooms = {key: int(tree.column(key, 'width')) - CELL_PADDING for key in self.long}
+        rooms = {}
+        for key in self.long:
+            width = max(head[key], min(natural[key], low))
+            tree.column(key, width=width, minwidth=head[key])
+            rooms[key] = width - CELL_PADDING
         cut = {}
         for item, texts in self.full.items():
             for key in self.long:
-                text = texts[key]
+                text, keep = texts[key], self.ends.get(item, {}).get(key, '')
                 if measured[text] <= rooms[key]:
                     shown = text
-                elif (text, rooms[key]) in cut:
-                    shown = cut[text, rooms[key]]
+                elif (text, keep, rooms[key]) in cut:
+                    shown = cut[text, keep, rooms[key]]
                 else:
-                    shown = cut[text, rooms[key]] = cut_to_width(self.measure, text, rooms[key])
+                    shown = cut[text, keep, rooms[key]] = cut_to_width(self.measure, text, rooms[key], keep)
                 if tree.set(item, key) != shown:
                     tree.set(item, key, shown)
 
