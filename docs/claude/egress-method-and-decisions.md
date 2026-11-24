@@ -76,13 +76,13 @@ The sheet has a `wing` column, and data validation that blocks bad entries (exit
 
 1. Room type = override, else `category_map.csv`. Rooms with no sub-category count as excluded, with a warning if the room has area.
 2. Per code load = `occupant_load(area, m²pp)` = `ceil(round(area / m²pp, 6))`.
-3. **Load used** (`LOAD_BASIS = 'counted'`, settled by Carl 2026-10-01): the count if filled in (0 stays 0); blank → per code. Rooms whose sub-category code is in `ROOM_EXCLUDE = ['14.3', '16']` (lounges, all 16.x non-assignable; a code covers its children) → 0, `out of scope`. `'area'` = per code for every room.
+3. **Load used** (`LOAD_BASIS = 'counted'`, settled by Carl 2026-10-01): the count if filled in (0 stays 0); blank → per code. Rooms whose sub-category code is in `ROOM_EXCLUDE = ['14.3', '16']` (lounges, all 16.x non-assignable; a code covers its children) → 0, `out of scope`. `'area'` = per code for every room. **SUPERSEDED 2026-10-20 (Carl): lounges (14.3) and kitchens (7.2) count at their per code load, and only 16.x is excluded (`room_exclude` = `16`); see the app README's Decisions.**
 4. Room wing = the leading letters of Space (`B303` → B).
 5. Zone = the floor, or floor + wing if any exit on that floor has a wing. On split floors, drop pseudo-zones with zero load and no exits.
 6. **Open stairs** (`OPEN_STAIRS_COUNT = False`): exit_id containing "open stair" → `counts_as_exit` False, persons 0, width_check `not an exit - open stair`, not in exit_count. Reason: 3.4.4.1.(1) requires exits to be fire separated. Pending Mark; `True` restores them. **SUPERSEDED 2026-10-20 (Carl): open stairs count, `OPEN_STAIRS_COUNT=True` (PR #11); see the app README's Decisions.**
 7. Exit persons = `exit_persons(cm, mm_pp)` = `floor(round(cm × 10 / mm_pp, 6))`. Doorway 6.1; stairs 8.0 (rise ≤ 180 mm and run ≥ 280 mm); stairs_steep 9.2.
 8. **50% rule** (3.4.3.2.(7)) = `capacity_50_rule(total, largest)` = `min(total, 2 × (total − largest))`. One exit → 0.
-9. Minimum widths (Table 3.4.3.2.-A): doorway < 800 mm fails; stairs < 900 fails, 900–1099 = review, ≥ 1100 ok.
+9. Minimum widths (Table 3.4.3.2.-A): doorway < 800 mm fails **[SUPERSEDED 2026-10-07: 850 mm per BCBC 2024]**; stairs < 900 fails, 900–1099 = review, ≥ 1100 ok.
 10. Fewer than 2 exits → review.
 11. **Wing links** (3.4.3.1.(2)) = `people_sent(load_used, exit_count, door_persons, LINK_METHOD)` = `min(ceil(load / exits), door persons)` (`even_split`) or `ceil(load / 2)` (`half_load`); any other method raises ValueError. Added to the receiving wing's load. One step only; a wing that sends and receives is flagged.
 12. Stairs are **not** cumulative across floors (3.4.3.2.(4)).
@@ -122,7 +122,7 @@ All sheets: bold frozen header, autofilter, column widths ≤ 50. `PermissionErr
 | Decision | By |
 |---|---|
 | BCBC 2024 governs | Carl |
-| Only exits count: doors to outside, doors into stairwells, open stairs. Where a stair has a door, measure the door | Carl |
+| Only exits count: doors to outside, doors into stairwells, open stairs. Where a stair has a door, measure the door **[SUPERSEDED 2026-10-20 (Carl): measure both and count the smaller of door and stair; see the app README's Decisions]** | Carl |
 | Class labs 2.1/2.2 count as classroom unless the room-type column says otherwise | supervisors |
 | Stair factor follows the rise/run test (8.0 vs 9.2) | code text |
 | Stairs not cumulative across floors | 3.4.3.2.(4) |
@@ -131,7 +131,7 @@ All sheets: bold frozen header, autofilter, column widths ≤ 50. `PermissionErr
 | A floor splits into wings only if an exit on it has a wing; room wing = leading letters of Space; pseudo-zones (split floor, 0 load, 0 exits) dropped | Carl + Claude, 2026-09-28 |
 | Zones compare `total_load` (own + link inflow) vs `exit_capacity`; a single exit gives capacity 0 and is flagged | 2026-09-28 |
 | **Load = room capacity** (`LOAD_BASIS='counted'`): a visited room uses its count (0 stays 0); an unvisited room uses per code. FMIS shows 0 by default (19,054 of 19,453 rooms), so **0 alone doesn't mean visited**. **SUPERSEDED 2026-11-05/2026-11-17: visited = the room has a count.** Visited at first import = all rooms in EOW, ELW, ECS + Turpin floors 2 and 3 wing B; other numbers above 0 (30 rooms, e.g. High Bay 20, Elliott 5) are **FMIS capacity**: stored for comparison, **not used** in the calculation (those rooms use per code). ECS 242A appears twice (0 and blank): keep the 0 row, drop the blank one. Fix lands in build step 2, not in the current script. Amends the 2026-10-01 "0 stays 0" rule | Carl, 2026-10-02 |
-| Scope = all rooms except 14.3 lounges and 16.x non-assignable (`ROOM_EXCLUDE`) | Carl, 2026-09-29 |
+| **SUPERSEDED 2026-10-20 (Carl: only 16.x is excluded; lounges and kitchens count at their per code load; see the app README's Decisions):** Scope = all rooms except 14.3 lounges and 16.x non-assignable (`ROOM_EXCLUDE`) | Carl, 2026-09-29 |
 | **SUPERSEDED 2026-10-20 (Carl: open stairs count, `OPEN_STAIRS_COUNT=True`):** Open stairs not exits until Mark rules (`OPEN_STAIRS_COUNT=False`) | 3.4.4.1.(1), 2026-09-29 |
 | 4 output sheets; picker filters output only; a selection writes its own file | Carl, 2026-09-29 |
 | Calculations live in `exit_calc.py` and are tested with pytest | Carl, 2026-10-01 |
@@ -196,10 +196,10 @@ Real inputs (23 Sept report as re-saved by Carl, 10 exits, default switches), 20
 
 - 27 `needs_review` rows in `category_map.csv`.
 - Horizontal-exit rules if a link door sits in a fire-rated wall. Not checked.
-- Open stairs (Turpin S5, curved, not enclosed): do they count as exits at all? Code text says exits must be fire separated (3.4.4.1.(1)). Ask Mark. (2026-10-19: Carl remembered "295" for Turpin 3 B with S5; that's S4 144 + S5 151 before the 50% rule, which gives 288. With S4 + E3 + S5 it'd be 439. Still not asked; Carl unsure.)
+- Open stairs (Turpin S5, curved, not enclosed): do they count as exits at all? Code text says exits must be fire separated (3.4.4.1.(1)). Ask Mark. (2026-10-19: Carl remembered "295" for Turpin 3 B with S5; that's S4 144 + S5 151 before the 50% rule, which gives 288. With S4 + E3 + S5 it'd be 439. Still not asked; Carl unsure.) **SUPERSEDED 2026-10-20 (Carl decided open stairs count; see the app README's Decisions).**
 - Clauses were checked against `bcbc_2018dbp3s34.pdf` (BCBC **2018**). Confirm in the 2024 text before quoting. **Done 2026-10-07: every clause was checked against BCBC 2024; see `docs/research/bcbc_2024_factor_check.md`.**
 - Turpin 3 B: Carl's hand count about 149 vs the script's 161; probably the 16 offices not counted yet (per code). Unconfirmed.
-- Care occupancies (13.1 health, 19.1 day care) use 18.4 mm/person (3.4.3.2.(2)); currently excluded.
+- Care occupancies (13.1 health, 19.1 day care) use 18.4 mm/person (3.4.3.2.(2)); currently excluded. **SUPERSEDED 2026-10-20 for day care: 19.1 is Group A-2, not care (3.1.2.8.(1)), so the normal factors apply; 13.1 is still open; see the app README's Decisions.**
 - The article number "3.4.3.1" for "Exit Width Based on Occupant Load" was inferred. Confirm it in Carl's BCBC PDF.
 - Ramp mm/person (3.4.3.2.(1)), likely 6.1 like doorways but not verified. After confirming, rename the dropdown value to `ramp` and add a row to width_factors.csv.
 - 9 rooms have a blank area and count as 0 people, with no warning yet.
