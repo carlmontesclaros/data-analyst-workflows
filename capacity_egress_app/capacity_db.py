@@ -12,7 +12,7 @@ import egress
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
-DB_PATH = os.path.join(DATA_DIR, "capacity.db")
+DB_PATH = os.path.join(DATA_DIR, "capacity.db")    # step 7: point this at the S: drive copy (app.py and build_database.py read it)
 
 # tables
 

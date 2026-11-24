@@ -15,7 +15,7 @@ from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_colum
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = db.DB_PATH                                   # step 7: point this at the S: drive copy
+DB_PATH = db.DB_PATH                                   # set in capacity_db.py (step 7: the S: drive copy)
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 PHOTOS_DIR_WINDOWS = (r"S:\_Buildings and Properties\BP065 - Capital Projects\Project Planning Services"
                       r"\Space Allocation Process\2026 - Room capacity project\buildings")
