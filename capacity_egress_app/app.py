@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import BuildingBox, FlowRow, anchor_for, fit_columns, fit_window, heading_text, open_path, use_theme, wrap_to_width
+from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, sideways_bar, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +24,7 @@ PHOTOS_DIR = PHOTOS_DIR_WINDOWS if sys.platform == 'win32' else PHOTOS_DIR_DEV
 BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py sanitize()
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
+ZONE_ROWS_LEAST, ZONE_ROWS_MOST = 2, 8
 OPEN_WINDOW = (1400, 820)
 
 def sanitize(name):
@@ -36,12 +37,16 @@ ZONE_COLUMNS = [('floor', 70), ('zone_wing', 80), ('status', 300), ('total_load'
 ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 80), ('room_type', 90),
                 ('per_code_load', 115), ('capacity', 115), ('capacity_source', 125), ('load_used', 90), ('in_scope', 75),
                 ('flag', 180), ('note', 250)]
-EXIT_COLUMNS = [('floor', 50), ('wing', 80), ('exit_id', 180), ('exit_type', 90), ('clear_width_cm', 85), ('stair_width_cm', 85),
-                ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 150), ('width_check', 220),
-                ('into_wing', 80), ('measured_date', 100), ('measured_by', 100), ('notes', 250)]
+EXIT_COLUMNS = [('floor', 50), ('wing', 58), ('exit_id', 110), ('exit_type', 74), ('clear_width_cm', 85), ('stair_width_cm', 85),
+                ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 90), ('width_check', 220),
+                ('into_wing', 80), ('measured_date', 80), ('measured_by', 100), ('notes', 250)]
 
-# typed notes can be any length: their column is fitted to its heading once, then keeps its width and scrolls
-FREE_TEXT = ('note', 'notes')
+# descriptive columns share the width the short ones leave over and show a cut text with an ellipsis (the pointer on the
+# cell shows it whole). numbers, ids, dates and every other short column always show in full. the zones table's first column
+# holds the building too when the list is not of one building
+ZONE_LONG = ('floor', 'status', 'flags')
+ROOM_LONG = ('property', 'sub_category', 'flag', 'note')
+EXIT_LONG = ('exit_type', 'width_check', 'measured_by', 'notes')
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
 def exit_capacity_text(zone):
@@ -162,11 +167,11 @@ class App:
         self.floor_box.pack(side='left', padx=4)
         self.floor_box.bind('<<ComboboxSelected>>', lambda e: self.show())
 
-        menu = FlowRow(self.root, gap=12)
+        menu = FlowRow(self.root, gap=14, separators=True)
         menu.pack(fill='x', padx=8, pady=(0, 8))
         if self.on_back:
-            ttk.Button(menu.group(), text="← Check screen", command=self.on_back).pack(side='left', padx=2)
-        # grouped by job, with a gap between groups: data, exports, people
+            ttk.Button(menu.group(), text="← Check screen", style='Toolbutton', command=self.on_back).pack(side='left')
+        # grouped by job, a line between groups: back, data, exports, people
         groups = [[("Refresh", self.manual_refresh), ("Code factors", self.edit_code_factors),
                    ("Refresh space report", self.refresh_report)],
                   [("Export results workbook", self.export_results), ("Export space report", self.export_space_report),
@@ -176,7 +181,7 @@ class App:
         for group in groups:
             frame = menu.group()
             for text, cmd in group:
-                ttk.Button(frame, text=text, command=cmd).pack(side='left', padx=2)
+                ttk.Button(frame, text=text, style='Toolbutton', command=cmd).pack(side='left')
 
         # packed before the tables, so they can't push the export feedback off the window
         self.status_var = tk.StringVar()
@@ -190,21 +195,19 @@ class App:
         panes.pack(fill='both', expand=True, padx=8, pady=(0, 4))
 
         # zones
-        zone_frame = ttk.LabelFrame(panes, text="Zones: occupant load vs exit capacity")
-        self.zone_tree = self.make_tree(zone_frame, ZONE_COLUMNS, height=7)
+        zone_frame = self.make_pane(panes, "Zones: occupant load vs exit capacity", [])
+        self.panes, self.zone_frame, self.zone_rows, self.zone_wanted, self.zone_pane_pending = panes, zone_frame, None, None, False
+        self.zone_tree = self.make_tree(zone_frame, ZONE_COLUMNS, height=ZONE_ROWS_LEAST, long_keys=ZONE_LONG)
         colours.colour_tags(self.zone_tree)
         self.zone_tree.bind('<<TreeviewSelect>>', lambda e: self.pick_zone())
-        panes.add(zone_frame, weight=2)
+        # only as tall as its zones: the room list and the exits take the rest of the window
+        panes.add(zone_frame, weight=0)
 
         # rooms
-        room_frame = ttk.LabelFrame(panes, text="Rooms")
-        buttons = ttk.Frame(room_frame)
-        buttons.pack(fill='x')
-        for text, cmd in [("Change capacity", self.change_capacity), ("Change room type", self.change_room_type),
-                          ("Room note", self.room_note),
-                          ("Room history", self.room_history), ("Open photos", self.open_photos)]:
-            ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
-        self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12)
+        room_frame = self.make_pane(panes, "Rooms", [("Change capacity", self.change_capacity), ("Change room type", self.change_room_type),
+                                                     ("Room note", self.room_note), ("Room history", self.room_history),
+                                                     ("Open photos", self.open_photos)])
+        self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12, long_keys=ROOM_LONG)
         # before the colours: of two tags that set the same option the one made first wins, so its amber text beats grey's
         # muted text and red's red text. red text only ever means over a hard limit
         self.room_tree.tag_configure('missing', foreground=colours.STATUS[egress.AMBER][0])
@@ -214,28 +217,56 @@ class App:
         panes.add(room_frame, weight=5)
 
         # exits
-        exit_frame = ttk.LabelFrame(panes, text="Exits")
-        buttons = ttk.Frame(exit_frame)
-        buttons.pack(fill='x')
-        for text, cmd in [("Add exit", self.add_exit), ("Edit exit", self.edit_exit), ("Delete exit", self.delete_exit),
-                          ("Exit note", self.exit_note), ("Exit history", self.exit_history)]:
-            ttk.Button(buttons, text=text, command=cmd).pack(side='left', padx=2, pady=2)
-        self.exit_tree = self.make_tree(exit_frame, EXIT_COLUMNS, height=5)
+        exit_frame = self.make_pane(panes, "Exits", [("Add exit", self.add_exit), ("Edit exit", self.edit_exit),
+                                                     ("Delete exit", self.delete_exit), ("Exit note", self.exit_note),
+                                                     ("Exit history", self.exit_history)])
+        self.exit_tree = self.make_tree(exit_frame, EXIT_COLUMNS, height=5, long_keys=EXIT_LONG)
         colours.colour_tags(self.exit_tree)
         self.exit_tree.bind('<Double-1>', lambda e: self.edit_exit())
         panes.add(exit_frame, weight=2)
+        panes.bind('<Configure>', lambda e: self.fit_zone_pane(), add='+')
 
-    def make_tree(self, parent, columns, height):
+    # a pane -> its title with the pane's own actions beside it as tool buttons, the table under them
+    def make_pane(self, panes, title, actions):
+        frame = ttk.Frame(panes)
+        header = ttk.Frame(frame)
+        header.pack(fill='x', pady=(2, 2))
+        ttk.Label(header, text=title, font='AppStrongFont', padding=(4, 0, 12, 0)).pack(side='left')
+        for text, cmd in actions:
+            ttk.Button(header, text=text, style='Toolbutton', command=cmd).pack(side='left')
+        return frame
+
+    # the zones pane is as tall as its rows (a few at least, a screenful at most: more scroll)
+    def fit_zone_pane(self):
+        if self.zone_wanted is not None and self.zone_wanted != self.zone_rows and not self.zone_pane_pending:
+            self.zone_pane_pending = True
+            self.root.after_idle(self.set_zone_pane)
+
+    # once the window has laid the new rows out: the divider goes under the last row
+    def set_zone_pane(self):
+        self.zone_pane_pending = False
+        if not self.zone_tree.winfo_exists():
+            return
+        self.zone_tree.configure(height=self.zone_wanted)
+        self.root.update_idletasks()
+        try:
+            self.panes.sashpos(0, self.zone_frame.winfo_reqheight())
+        except tk.TclError:                       # not on screen yet: the pane's first <Configure> asks again
+            return
+        self.zone_rows = self.zone_wanted
+
+    def make_tree(self, parent, columns, height, long_keys=()):
         frame = ttk.Frame(parent)
         frame.pack(fill='both', expand=True)
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
-        fit_columns(tree, columns)
+        tree.long_columns = LongTextColumns(tree, columns, long_keys)
+        fit_columns(tree, tree.long_columns.short)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
-        tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=sideways_bar(xs))
         tree.grid(row=0, column=0, sticky='nsew')
         ys.grid(row=0, column=1, sticky='ns')
         xs.grid(row=1, column=0, sticky='ew')
@@ -306,6 +337,9 @@ class App:
         if result is None:                            # nothing picked or found -> empty lists, nothing calculated
             for tree in (self.zone_tree, self.room_tree, self.exit_tree):
                 tree.delete(*tree.get_children())
+                tree.long_columns.refit()
+            self.zone_wanted = ZONE_ROWS_LEAST
+            self.fit_zone_pane()
             self.show_counts(0, 0, 0)
             return
         keys = set(zip(rooms['property'], rooms['floor'], strict=False))
@@ -344,8 +378,11 @@ class App:
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
             self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
 
-        for tree, columns in [(self.zone_tree, ZONE_COLUMNS), (self.room_tree, ROOM_COLUMNS), (self.exit_tree, EXIT_COLUMNS)]:
-            fit_columns(tree, [(key, least) for key, least in columns if key not in FREE_TEXT])
+        self.zone_tree.long_columns.refit(ends={f"z{i}": {'floor': str(z['floor'])} for i, z in zones.iterrows()})
+        for tree in (self.room_tree, self.exit_tree):
+            tree.long_columns.refit()
+        self.zone_wanted = min(max(len(zones), ZONE_ROWS_LEAST), ZONE_ROWS_MOST)
+        self.fit_zone_pane()
         self.show_counts(len(rooms), len(zones), len(exits))
 
     def show_counts(self, rooms, zones, exits):

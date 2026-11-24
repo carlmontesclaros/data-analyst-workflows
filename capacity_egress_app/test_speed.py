@@ -3,6 +3,7 @@
 # budgets leave room for slower machines (CI, the workstations, the S: drive) but catch anything 10x slower
 import time
 import tkinter as tk
+from tkinter import ttk
 import pytest
 import app
 import capacity_db as db
@@ -113,3 +114,40 @@ def test_editor_screen_open_and_save(conn):
     assert shown == '77'
     assert opened < 3.0, f"editor screen took {opened:.2f} s to open"
     assert saved < 2.0, f"Save took {saved:.2f} s to show the new numbers"
+
+# a campus-wide search fills the rooms table with 3000 rows that share a few long building names and notes: dragging the
+# window's edge lays the cut columns out again at every step, so each step must be quick
+def test_a_full_rooms_table_follows_the_window_width_quickly():
+    try:
+        root = tk.Tk()
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
+    try:
+        widgets.use_theme(root)
+        columns = [('property', 60), ('floor', 40), ('space', 50), ('note', 60)]
+        tree = ttk.Treeview(root, columns=[key for key, _ in columns], show='headings')
+        for key, width in columns:
+            tree.heading(key, text=widgets.heading_text(key))
+            tree.column(key, width=width, stretch=False)
+        tree.pack(fill='both', expand=True)
+        long_columns = widgets.LongTextColumns(tree, columns, ('property', 'note'))
+        note = 'tables and chairs moved to the back for the exam week, move them again before the first lecture on Monday morning'
+        for i in range(3000):
+            tree.insert('', 'end', values=[f'Engineering / Computer Science Building {i // 100}', i % 5, f'A{i}', note])
+        root.geometry('1300x600')
+        root.update()
+        filled = seconds(long_columns.refit)
+        widths = iter(range(1290, 900, -10))
+
+        def narrower():
+            root.geometry(f'{next(widths)}x600')
+            root.update()
+        resized = seconds(narrower, runs=5)
+        cut = tree.set(tree.get_children()[-1], 'note')
+    finally:
+        root.destroy()
+    assert cut.endswith(widgets.ELLIPSIS) and note.startswith(cut[:-1])
+    assert filled < 0.3, f"laying out 3000 rows took {filled:.2f} s"
+    assert resized < 0.15, f"one step of the window's width took {resized:.2f} s"

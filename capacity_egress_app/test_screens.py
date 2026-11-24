@@ -480,14 +480,17 @@ def drag_edge(tree, key, width):
     tree.tk.call(tree, 'drag', key, left + width)
     return int(tree.column(key, 'width'))
 
-# a column the user widened stays as wide when the lists refill (after a save, or another person's save)
+# a short column the user widened stays as wide when the lists refill (after a save, or another person's save); the
+# descriptive columns give the width back, so the table still needs no sideways bar
 def test_editor_keeps_a_column_the_user_widened_after_a_refill(root, conn):
     screen = editor_with_rooms(root, conn)
-    widened = {key: drag_edge(screen.room_tree, key, int(screen.room_tree.column(key, 'width')) + 150)
-               for key in ('sub_category', 'note')}
+    tree = screen.room_tree
+    widened = {key: drag_edge(tree, key, int(tree.column(key, 'width')) + 150) for key in ('space', 'capacity_source')}
+    drag_edge(tree, 'note', int(tree.column('note', 'width')) + 150)
     screen.show()
     root.update()
-    assert {key: int(screen.room_tree.column(key, 'width')) for key in widened} == widened
+    assert {key: int(tree.column(key, 'width')) for key in widened} == widened
+    assert tree.xview() == (0.0, 1.0)
 
 # a value column can be narrowed by the user, down to its heading in full but no further
 def test_editor_column_narrows_to_its_heading(root, conn):
@@ -779,3 +782,235 @@ def test_tool_buttons_and_tabs_draw(root):
     notebook.pack(side='left')
     root.update()
     assert all(w.winfo_ismapped() for w in all_widgets(frame))
+
+
+# part 3: the editor at the Windows font -> one menu row, tables that need no sideways bar, a zones pane as tall as its rows
+LONG_NOTE = 'tables and chairs moved to the back for the exam week, move them again before the first lecture on Monday morning'
+
+def busy_editor(root, conn, exits=('S1 - doorway',)):
+    rid = conn.execute("SELECT room_id FROM rooms").fetchone()[0]
+    db.set_note(conn, 'rooms', rid, LONG_NOTE, 'carl', 'Carl')
+    for exit_id in exits:
+        db.save_exit(conn, {'property': LONG_ROOM[0], 'floor': LONG_ROOM[1], 'exit_id': exit_id, 'exit_type': 'doorway',
+                            'clear_width_cm': '88', 'measured_date': '2026-11-10', 'measured_by': 'Carl Montesclaros',
+                            'notes': LONG_NOTE}, 'carl', 'Carl')
+    screen = editor_screen(root, conn)
+    screen.building_var.set(LONG_ROOM[0])
+    screen.pick_building()
+    root.update()
+    return screen
+
+def editor_tables(screen):
+    return (screen.zone_tree, screen.room_tree, screen.exit_tree)
+
+def test_editor_menu_is_one_row_at_the_windows_font(larger_font_root, conn):
+    editor_screen(larger_font_root, conn)
+    menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
+    assert (larger_font_root.winfo_width(), larger_font_root.winfo_height()) == app.OPEN_WINDOW
+    assert len({g.winfo_y() for g in menu.groups}) == 1
+    assert len({b.winfo_rooty() for b in buttons(menu)}) == 1
+    assert [g.winfo_ismapped() for g in menu.lines] == [True] * 3
+
+def test_editor_menu_is_made_of_quiet_tool_buttons(larger_font_root, conn):
+    editor_screen(larger_font_root, conn)
+    menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
+    assert {b.cget('style') for b in buttons(menu)} == {'Toolbutton'}
+    # a line between the four groups: back, data, exports, people
+    assert [len(buttons(g)) for g in menu.groups] == [1, 3, 3, 2]
+    assert len(menu.lines) == 3
+
+def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    assert all(tree.get_children() for tree in editor_tables(screen))
+    for tree in editor_tables(screen):
+        assert tree.xview() == (0.0, 1.0), tree['columns']
+
+# the exit ids the README documents (README: Measuring exits): a space number plus what was measured, and the outside
+# doors' E<floor> ids with a letter. each shows in full and the exits table still needs no sideways bar
+@pytest.mark.parametrize('exit_id', ['S5 - open stair', 'E3 - outside exit', 'E2A - outside exit'])
+def test_editor_exits_table_needs_no_sideways_bar_with_a_documented_exit_id(larger_font_root, conn, exit_id):
+    root = larger_font_root
+    screen = busy_editor(root, conn, exits=(exit_id,))
+    assert (root.winfo_width(), root.winfo_height()) == app.OPEN_WINDOW
+    tree = screen.exit_tree
+    assert [tree.set(item, 'exit_id') for item in tree.get_children()] == [exit_id]
+    assert cut_columns(tree, [key for key in tree['columns'] if key not in app.EXIT_LONG]) == []
+    assert tree.xview() == (0.0, 1.0)
+    assert not sideways_bar_of(tree).winfo_ismapped()
+
+# a search across buildings shows the whole campus: the zones' first column then holds the building name and the floor
+def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_font_root, conn):
+    root = larger_font_root
+    db.insert_rooms(conn, xi.classify_rooms(report([LONG_ROOM, (LONG_ROOM[0], '4', 'A124', 30.0, 10),
+                                                    ('Turpin Hall', '1', 'A121', 30.0, 10)])), 'second.xlsx')
+    screen = busy_editor(root, conn)
+    screen.building_var.set('')
+    screen.search_var.set('a12')
+    screen.search()
+    root.update()
+    assert screen.building_var.get() == ''
+    assert {texts['property'] for texts in screen.room_tree.long_columns.full.values()} == {LONG_ROOM[0], 'Turpin Hall'}
+    zones = screen.zone_tree
+    full = {zones.long_columns.full[item]['floor']: zones.set(item, 'floor') for item in zones.get_children()}
+    engineering = [f"{LONG_ROOM[0]} 3", f"{LONG_ROOM[0]} 4"]
+    assert set(engineering) <= set(full)
+    # the building's name gives way, its floor never does: two floors of one building still read differently
+    for name, floor in zip(engineering, ['3', '4'], strict=True):
+        assert full[name].endswith(f"{widgets.ELLIPSIS} {floor}") and LONG_ROOM[0].startswith(full[name][:-len(floor) - 2])
+    assert full[engineering[0]] != full[engineering[1]]
+    item = next(item for item in zones.get_children() if zones.long_columns.full[item]['floor'] == engineering[1])
+    point_at(root, zones, item, 'floor')
+    assert zones.long_columns.tip_text == engineering[1]
+    for tree in editor_tables(screen):
+        assert tree.xview() == (0.0, 1.0), tree['columns']
+        assert not sideways_bar_of(tree).winfo_ismapped(), tree['columns']
+
+# a search that finds nothing empties the tables; the window can still change size afterwards without an error
+def test_editor_window_resizes_after_a_search_that_finds_nothing(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    errors = []
+    root.report_callback_exception = lambda kind, value, trace: errors.append(value)
+    screen.search_var.set('no such room anywhere')
+    screen.search()
+    root.update()
+    assert all(not tree.get_children() for tree in editor_tables(screen))
+    root.geometry(f'{root.winfo_width() + 120}x{root.winfo_height()}')
+    root.update()
+    assert errors == []
+
+def sideways_bar_of(tree):
+    bars = [w for w in tree.master.winfo_children() if isinstance(w, ttk.Scrollbar) and str(w.cget('orient')) == 'horizontal']
+    assert len(bars) == 1
+    return bars[0]
+
+# no sideways bar is drawn under a table that has nothing to scroll sideways; one that does scroll gets its bar back
+def test_editor_tables_draw_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    assert (root.winfo_width(), root.winfo_height()) == app.OPEN_WINDOW
+    for tree in editor_tables(screen):
+        assert not sideways_bar_of(tree).winfo_ismapped(), tree['columns']
+    tree = screen.room_tree
+    tree.column('space', width=tree.winfo_width() * 2)
+    root.update()
+    assert tree.xview() != (0.0, 1.0)
+    assert sideways_bar_of(tree).winfo_ismapped()
+
+def test_editor_short_columns_are_never_cut(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    for tree, long in [(screen.zone_tree, app.ZONE_LONG), (screen.room_tree, app.ROOM_LONG), (screen.exit_tree, app.EXIT_LONG)]:
+        assert cut_columns(tree, [key for key in tree['columns'] if key not in long]) == []
+        assert not any(widgets.ELLIPSIS in str(tree.set(item, key)) for item in tree.get_children()
+                       for key in tree['columns'] if key not in long)
+
+def test_editor_long_columns_cut_with_an_ellipsis_and_keep_their_headings(larger_font_root, conn):
+    screen = busy_editor(larger_font_root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    shown = tree.set(item, 'note')
+    assert shown.endswith(widgets.ELLIPSIS) and LONG_NOTE.startswith(shown[:-1]) and shown != LONG_NOTE
+    assert tree.long_columns.full[item]['note'] == LONG_NOTE
+    for tree in editor_tables(screen):
+        assert cut_columns(tree, tree['columns']) == []
+
+# where a column's cell is in a table: its first pixel, found the way Tk itself numbers the columns ('#0' is the mark column)
+def cell_at(tree, item, key):
+    number = f"#{list(tree['columns']).index(key) + 1}"
+    left = next(x for x in range(tree.winfo_width()) if tree.identify_column(x) == number)
+    _, y, _, height = tree.bbox(item)
+    return left + 4, y + height // 2
+
+def point_at(root, tree, item, key):
+    x, y = cell_at(tree, item, key)
+    tree.event_generate('<Motion>', x=x, y=y, rootx=tree.winfo_rootx() + x, rooty=tree.winfo_rooty() + y)
+    root.update()
+
+def test_a_cut_cell_shows_its_full_text_under_the_pointer(larger_font_root, conn):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    point_at(root, tree, item, 'note')
+    assert tree.long_columns.tip_text == LONG_NOTE
+    assert tree.long_columns.tip_label.cget('text') == LONG_NOTE
+    # a short cell shows nothing, and neither does leaving the table
+    point_at(root, tree, item, 'space')
+    assert tree.long_columns.tip_text is None
+    point_at(root, tree, item, 'note')
+    assert tree.long_columns.tip_text == LONG_NOTE
+    tree.event_generate('<Leave>')
+    assert tree.long_columns.tip_text is None
+
+# the cut notes are the rightmost columns: a pointer near the window's right or bottom edge still shows the whole text,
+# inside the app's own window, so it stays on the monitor that window is on
+@pytest.mark.parametrize('corner', ['right', 'bottom', 'bottom right'])
+def test_the_full_text_stays_inside_the_window(larger_font_root, conn, corner):
+    root = larger_font_root
+    screen = busy_editor(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    x, y = cell_at(tree, item, 'note')
+    left, top = root.winfo_rootx(), root.winfo_rooty()
+    right, bottom = left + root.winfo_width(), top + root.winfo_height()
+    pointer_x = right - 5 if 'right' in corner else left + 100
+    pointer_y = bottom - 5 if 'bottom' in corner else top + 100
+    tree.event_generate('<Motion>', x=x, y=y, rootx=pointer_x, rooty=pointer_y)
+    root.update()
+    tip = tree.long_columns.tip
+    assert tree.long_columns.tip_text == LONG_NOTE
+    assert tip.winfo_width() >= tree.long_columns.tip_label.winfo_reqwidth()
+    assert left <= tip.winfo_rootx() and tip.winfo_rootx() + tip.winfo_width() <= right
+    assert top <= tip.winfo_rooty() and tip.winfo_rooty() + tip.winfo_height() <= bottom
+    # beside the pointer, not moved off to some other edge
+    assert tip.winfo_rootx() - 30 <= pointer_x <= tip.winfo_rootx() + tip.winfo_width() + 30
+    assert tip.winfo_rooty() - 30 <= pointer_y <= tip.winfo_rooty() + tip.winfo_height() + 30
+
+def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
+    root = larger_font_root
+    screen = editor_with_rooms(root, conn)
+    tree = screen.room_tree
+    item = tree.get_children()[0]
+    screen.zone_tree.long_columns.layout()
+    zone = screen.zone_tree.get_children()[0]
+    assert screen.zone_tree.set(zone, 'status') == screen.zone_tree.long_columns.full[zone]['status'] != ''
+    point_at(root, screen.zone_tree, zone, 'status')
+    assert screen.zone_tree.long_columns.tip_text is None
+    assert tree.set(item, 'flag') == tree.long_columns.full[item]['flag']
+    point_at(root, tree, item, 'flag')
+    assert tree.long_columns.tip_text is None
+
+def test_pane_titles_carry_their_actions_as_tool_buttons(root, conn):
+    screen = editor_screen(root, conn)
+    for tree, title, actions in [(screen.zone_tree, 'Zones: occupant load vs exit capacity', []),
+                                 (screen.room_tree, 'Rooms', ['Change capacity', 'Change room type', 'Room note', 'Room history', 'Open photos']),
+                                 (screen.exit_tree, 'Exits', ['Add exit', 'Edit exit', 'Delete exit', 'Exit note', 'Exit history'])]:
+        pane = tree.master.master
+        header = pane.winfo_children()[0]
+        labels = [w.cget('text') for w in header.winfo_children() if isinstance(w, ttk.Label)]
+        assert labels == [title]
+        assert [(b.cget('text'), b.cget('style')) for b in buttons(header)] == [(a, 'Toolbutton') for a in actions]
+        assert header.winfo_rooty() < tree.winfo_rooty()
+        assert len({w.winfo_rooty() + w.winfo_height() // 2 for w in header.winfo_children()}) <= 2
+
+@pytest.mark.parametrize('zones', [1, 2, 3])
+def test_zones_pane_is_only_as_tall_as_its_zones(root, conn, zones):
+    for floor in range(1, zones + 1):
+        db.insert_rooms(conn, xi.classify_rooms(report([(LONG_ROOM[0], str(floor + 10), 'B1', 30.0, 10)])), f'floor{floor}.xlsx')
+    screen = editor_screen(root, conn)
+    screen.building_var.set(LONG_ROOM[0])
+    screen.pick_building()
+    root.update()
+    shown = len(screen.zone_tree.get_children())
+    assert shown >= zones
+    assert screen.zone_tree['height'] == max(shown, app.ZONE_ROWS_LEAST)
+    assert abs(screen.panes.sashpos(0) - screen.zone_frame.winfo_reqheight()) <= 2
+    assert abs(screen.zone_frame.winfo_height() - screen.zone_frame.winfo_reqheight()) <= 6
+
+def test_zones_pane_gives_the_rest_of_the_window_to_the_tables_below(root, conn):
+    screen = editor_screen(root, conn)
+    before = screen.zone_frame.winfo_height()
+    root.geometry(f'{root.winfo_width()}x{root.winfo_height() + 200}')
+    root.update()
+    assert screen.zone_frame.winfo_height() == before
+    assert screen.room_tree.winfo_height() > 0

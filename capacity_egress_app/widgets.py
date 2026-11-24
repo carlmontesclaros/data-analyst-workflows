@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import subprocess
+import tkinter as tk
 from tkinter import ttk
 import colours as c
 
@@ -101,7 +102,7 @@ def use_theme(root):
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE)
     style.map('Treeview', background=[('selected', c.SELECTED)], foreground=[('selected', c.TEXT_FG)])
     style.layout('Item', [('Treeitem.padding', {'sticky': 'nswe', 'children': [('Treeitem.image', {'sticky': ''})]})])
-    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED, relief='flat', padding=(4, 3),
+    style.configure('Treeview.Heading', background=c.SURFACE, foreground=c.MUTED, relief='flat', padding=(3, 3),
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE, bordercolor=c.SURFACE)
     style.map('Treeview.Heading', background=[('active', c.HOVER)], lightcolor=[('active', c.HOVER)], darkcolor=[('active', c.HOVER)])
 
@@ -170,6 +171,148 @@ def fit_columns(tree, columns, always=None):
         tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
     heading.destroy()
 
+# a table's sideways bar -> the table's xscrollcommand: the bar shows only while there is more to see sideways, so an
+# unneeded bar takes no height. the bar must be gridded, so grid() puts it back where it was
+def sideways_bar(bar):
+    def scroll_sideways(first, last):
+        if float(first) <= 0 and float(last) >= 1:
+            bar.grid_remove()
+        else:
+            bar.grid()
+        bar.set(first, last)
+    return scroll_sideways
+
+ELLIPSIS = '…'
+
+# a text -> itself when it measures within width, else its start with an ellipsis, as long as still fits. keep: the
+# words the text ends with that are never cut (a floor after its building's name), shown whole after the ellipsis
+def cut_to_width(measure, text, width, keep=''):
+    if measure(text) <= width:
+        return text
+    body = text[:len(text) - len(keep)]
+    if not body.strip():
+        return text
+    end = ELLIPSIS + (' ' + keep if keep else '')
+    low, high = 0, len(body)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if measure(body[:mid].rstrip() + end) <= width:
+            low = mid
+        else:
+            high = mid - 1
+    return body[:low].rstrip() + end
+
+# a table whose descriptive columns (status, flags, building, notes ...) share the width the short columns leave over, and
+# show a cut text with an ellipsis; resting the pointer on a cut cell shows its full text. the short columns (numbers, ids,
+# dates) are fitted to their values by fit_columns and never cut. so the table never needs a sideways bar unless the short
+# columns and the headings alone are wider than the window
+class LongTextColumns:
+    def __init__(self, tree, columns, long_keys):
+        self.tree = tree
+        self.long = [key for key, _ in columns if key in long_keys]
+        self.short = [(key, least) for key, least in columns if key not in long_keys]
+        self.font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
+        self.full, self.ends, self.shown_width = {}, {}, None
+        self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
+        tree.bind('<Configure>', lambda e: self.layout(on_resize=True), add='+')
+        tree.bind('<Motion>', self.point_at, add='+')
+        for sequence in ('<Leave>', '<ButtonPress>', '<MouseWheel>', '<KeyPress>'):
+            tree.bind(sequence, self.hide_tip, add='+')
+
+    # after every fill: the rows hold their full texts. ends: {item: {key: the words its text ends with, never cut}}
+    def refit(self, ends=None):
+        tree = self.tree
+        self.full = {item: {key: str(tree.set(item, key)) for key in self.long} for item in tree.get_children()}
+        self.ends = ends or {}
+        fit_columns(tree, self.short)
+        self.layout()
+
+    def measure(self, text):
+        return int(self.tree.tk.call('font', 'measure', self.font, text))
+
+    # the width the columns share is the table's: a change of height alone leaves them as they are
+    def layout(self, on_resize=False):
+        tree = self.tree
+        if tree.winfo_width() <= 1 or (on_resize and tree.winfo_width() == self.shown_width):
+            return                                       # not drawn yet: its first <Configure> comes with the real width
+        self.shown_width = tree.winfo_width()
+        taken = sum(int(tree.column(key, 'width')) for key in ['#0', *tree['columns']] if key not in self.long)
+        heading = ttk.Label(tree, style='Treeview.Heading')
+        head = {}
+        for key in self.long:
+            heading.configure(text=tree.heading(key, 'text'))
+            head[key] = heading.winfo_reqwidth()
+        heading.destroy()
+        measured = {}
+        for key in self.long:
+            for texts in self.full.values():
+                if texts[key] not in measured:
+                    measured[texts[key]] = self.measure(texts[key])
+        natural = {key: max([head[key]] + [measured[t[key]] + CELL_PADDING for t in self.full.values()]) for key in self.long}
+        # the longest texts give way first: every column up to one common width, as wide as the room allows, never under its
+        # heading and never past what its longest text needs
+        room = tree.winfo_width() - 4 - taken
+        low, high = 0, max(natural.values(), default=0)
+        while low < high:
+            cap = (low + high + 1) // 2
+            if sum(max(head[key], min(natural[key], cap)) for key in self.long) <= room:
+                low = cap
+            else:
+                high = cap - 1
+        rooms = {}
+        for key in self.long:
+            width = max(head[key], min(natural[key], low))
+            tree.column(key, width=width, minwidth=head[key])
+            rooms[key] = width - CELL_PADDING
+        cut = {}
+        for item, texts in self.full.items():
+            for key in self.long:
+                text, keep = texts[key], self.ends.get(item, {}).get(key, '')
+                if measured[text] <= rooms[key]:
+                    shown = text
+                elif (text, keep, rooms[key]) in cut:
+                    shown = cut[text, keep, rooms[key]]
+                else:
+                    shown = cut[text, keep, rooms[key]] = cut_to_width(self.measure, text, rooms[key], keep)
+                if tree.set(item, key) != shown:
+                    tree.set(item, key, shown)
+
+    # the pointer rests on a cell whose text was cut -> a small window with the whole text beside it
+    def point_at(self, event):
+        tree = self.tree
+        item, column = tree.identify_row(event.y), tree.identify_column(event.x)
+        keys = [None, *tree['columns']]
+        key = keys[int(column[1:])] if column.startswith('#') and int(column[1:]) < len(keys) else None
+        if item not in self.full or key not in self.long or self.full[item][key] == tree.set(item, key):
+            self.hide_tip()
+            return
+        if self.tip_cell != (item, key):
+            self.hide_tip()
+            self.show_tip(self.full[item][key], event.x_root, event.y_root)
+            self.tip_cell = (item, key)
+
+    def show_tip(self, text, x, y):
+        self.tip = tk.Toplevel(self.tree)
+        self.tip.withdraw()
+        self.tip.wm_overrideredirect(True)
+        self.tip.configure(background=c.CONTROL_BORDER)
+        self.tip_label = ttk.Label(self.tip, text=text, background=c.SURFACE, padding=(8, 4), wraplength=600)
+        self.tip_label.pack(padx=1, pady=1)
+        self.tip.update_idletasks()
+        width, height = self.tip.winfo_reqwidth(), self.tip.winfo_reqheight()
+        window = self.tree.winfo_toplevel()
+        right, bottom = window.winfo_rootx() + window.winfo_width(), window.winfo_rooty() + window.winfo_height()
+        left = max(window.winfo_rootx(), min(x + 12, right - width))
+        top = y + 18 if y + 18 + height <= bottom else max(window.winfo_rooty(), y - 6 - height)
+        self.tip.wm_geometry(f'+{left}+{top}')
+        self.tip.deiconify()
+        self.tip_text = text
+
+    def hide_tip(self, event=None):
+        if self.tip is not None:
+            self.tip.destroy()
+        self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
+
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given. its text gets that width less the label's own
 # padding and the theme's border, measured off an empty label of the same style and padding
@@ -182,10 +325,11 @@ def wrap_to_width(label):
 
 # a line of groups (fields, buttons) that wraps onto more lines when the window is too narrow for one line.
 # it asks only for its widest group's width, so it never holds the window wider than that; a group stays on one line
+# separators=True draws a thin vertical line in the gap between two groups on the same line
 class FlowRow(ttk.Frame):
-    def __init__(self, parent, gap):
+    def __init__(self, parent, gap, separators=False):
         super().__init__(parent)
-        self.gap, self.groups = gap, []
+        self.gap, self.groups, self.separators, self.lines = gap, [], separators, []
         self.bind('<Configure>', lambda e: self.flow(e.width))
 
     # the next group, for the caller to fill
@@ -193,6 +337,8 @@ class FlowRow(ttk.Frame):
         if not self.groups:
             self.after_idle(self.ask)
         self.groups.append(ttk.Frame(self))
+        if self.separators and len(self.groups) > 1:
+            self.lines.append(ttk.Separator(self, orient='vertical'))       # lines[i] sits before groups[i + 1]
         return self.groups[-1]
 
     # once the groups are filled and have their sizes
@@ -210,7 +356,13 @@ class FlowRow(ttk.Frame):
         y = 0
         for row in rows:
             height, x = max(g.winfo_reqheight() for g in row), 0
-            for g in row:
+            for i, g in enumerate(row):
+                if self.lines and self.groups.index(g):
+                    line = self.lines[self.groups.index(g) - 1]
+                    if i:
+                        line.place(x=x - self.gap // 2, y=y + 2, height=height - 4)
+                    else:
+                        line.place_forget()                 # a line never starts a row
                 g.place(x=x, y=y + (height - g.winfo_reqheight()) // 2)
                 x += g.winfo_reqwidth() + self.gap
             y += height
