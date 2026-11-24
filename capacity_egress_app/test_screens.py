@@ -804,7 +804,7 @@ def editor_tables(screen):
     return (screen.zone_tree, screen.room_tree, screen.exit_tree)
 
 def test_editor_menu_is_one_row_at_the_windows_font(larger_font_root, conn):
-    screen = editor_screen(larger_font_root, conn)
+    editor_screen(larger_font_root, conn)
     menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
     assert (larger_font_root.winfo_width(), larger_font_root.winfo_height()) == app.OPEN_WINDOW
     assert len({g.winfo_y() for g in menu.groups}) == 1
