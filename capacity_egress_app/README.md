@@ -4,7 +4,7 @@ A desktop app for UVic Facilities Management that keeps the record of **room cap
 
 It replaces editing Excel by hand. A project manager who gets an OREM request ("can B303 go from 32 to 36?") opens the app, finds the room, types 36, sees whether the floor is still within its exit capacity, and saves or cancels. Every change is recorded with who made it, when and why.
 
-**Status: built and in use on the dev copy.** Build steps 1–6 are done and covered by the pytest suite. Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20).
+**Status: built and in use on the dev copy.** Build steps 1–6 are done and covered by the pytest suite. Step 7 (install on Mark's and Carolyn's workstations) waits on IT approving Python, pandas and openpyxl (requested 2026-10-20). The decision behind this project is in [`docs/adr/0001-sqlite-tkinter-system-of-record.md`](../docs/adr/0001-sqlite-tkinter-system-of-record.md), and the vocabulary is in [`GLOSSARY.md`](../GLOSSARY.md). More background (why the terminal script was retired, the requirements and UI review, the BCBC 2024 check of the factors, the original egress method) is under [`docs/`](../docs/).
 
 It's still a **screening tool, not a code determination**. Results say "within capacity, review before acting" or "review", never "approved".
 
@@ -60,13 +60,14 @@ Steps 1–6 were built by Claude at Carl's request (2026-10-05), each checked ag
 | 5 | Exits + code factors editing | | done |
 | 6 | Space report export, results workbook, daily backup | | done |
 | 7 | Install on Mark's machine + written instructions | | next |
-| 8 | Editors and viewers: editor list by Windows login, Editors screen, change log of adds/removes | a viewer can't open the editor screen; the last editor can't be removed | built 2026-10-13, not yet tried by Carl |
+| 8 | Editors and viewers: editor list by Windows login, Editors screen, change log of adds/removes ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)) | a viewer can't open the editor screen; the last editor can't be removed | built 2026-10-13, not yet tried by Carl |
 | 9 | Capacity check screen for everyone: search, try a number, floor result, summary .docx | DTB A120 → 300: needs justification (+117 over 183), Turpin 1 "can't check egress"; Turpin B303 24 → 160: wing B 161 → 297 vs 288, over by 9 | built 2026-10-13, not yet tried by Carl |
 | 10 | Colours on rooms, zones and exits + one legend | campus: zones 787 grey / 3 green; rooms 664 green, 54 amber, 13,734 grey | built 2026-10-13 |
+| 11 | Quiet-ledger look: flat theme, a status mark (shape + colour) on every table row, an editor screen that fits the Windows font with no sideways bar | the test suite, including the screen tests at the Windows font size | built 2026-11-20 and 2026-11-24 (#40, #41) |
 
 ## Editors and viewers
 
-Decided 2026-10-13 from Mark's answers.
+Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-windows-login.md)).
 
 | | Editor | Viewer |
 |---|---|---|
@@ -78,7 +79,7 @@ Decided 2026-10-13 from Mark's answers.
 | Add or remove editors | yes, on the **Editors** screen | no |
 
 - **Who you are** comes from your Windows login (your own UVic account, on any PC). No password, nothing to type.
-- **Adding an editor:** they open the app once (they show up on the Editors screen), then any editor ticks **Editor** beside their name. A login can also be typed in for someone who hasn't opened it yet. Every add and remove goes in the change log. The last editor can't be removed.
+- **Adding an editor:** they open the app once (they show up on the Editors screen), then any editor picks their name and presses **Make editor** (**Remove editor** takes it away). **Add by login** types in a login for someone who hasn't opened the app yet, and **Set name** changes the name shown for a login. Every add and remove goes in the change log. The last editor can't be removed.
 - **Never tick a shared or generic Windows account.** Everyone using it would be an editor.
 - **First editor:** if the editor list is empty (a new database), the first person to open the app is asked to become the first editor. Carl opens it first after installing.
 - **Who you are is asked from Windows**, not read from the `USERNAME` variable, so typing `set USERNAME=<an editor>` before starting the app doesn't work (`capacity_db.current_login`).
@@ -168,7 +169,7 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 
 1. **Once:** `python3 build_database.py`. Reads the space report and `floor_exits.xlsx` from `data/input/` and the CSVs from `config/`, and writes `data/capacity.db`. It refuses to run if the database already exists.
 2. `python3 app.py`. The first time on a computer, it asks for the name to show in the change log.
-3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` and `python3 -m ruff check .` (lint).
+3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` (496 tests) and `python3 -m ruff check .` (lint).
    The test windows are transparent by default so they don't flash on screen (same real sizes); set `CAPACITY_TEST_WINDOWS=real` to show them (CI does).
    GitHub runs them on every pull request and every push to `main`: lint once, then the tests on Windows and on the Mac. Which tests run where, and when a push to `main` skips them, is in the header of `.github/workflows/tests.yml`. A red X on a PR means something broke: don't merge until it's green.
 
@@ -240,7 +241,7 @@ Tested by `test_restore_puts_the_backup_back`. To practise on a copy, point both
 
 ## Settings that used to be constants
 
-`exit_capacity.py` kept `ROOM_EXCLUDE` and `OPEN_STAIRS_COUNT` in its config block. In the app they are rows in the `settings` table (`room_exclude` = `14.3,16`, `open_stairs_count` = `no`), so changing them goes through **Code factors** with a clause reference and is logged. When Mark rules on open stairs, set `open_stairs_count` to `yes` there.
+`exit_capacity.py` kept `ROOM_EXCLUDE` and `OPEN_STAIRS_COUNT` in its config block. In the app they are rows in the `settings` table (`room_exclude` = `16`, `open_stairs_count` = `yes`), so changing them goes through **Code factors** with a clause reference and is logged. If Mark rules that open stairs are not exits, set `open_stairs_count` to `no` there.
 
 ## When the building code changes
 
@@ -285,7 +286,7 @@ Clause numbers were checked against the BCBC **2024** text (revision 2) on 2026-
 
 1. Install Python 3.13 from python.org (tick "Add to PATH"), then from `capacity_egress_app/`: `py -m pip install -r requirements.txt` (the exact versions the tests pass with).
 2. Copy the `capacity_egress_app/` folder to the machine (`data/` only if you're bringing the database with you).
-3. Move `data/capacity.db` to the project folder on the S: drive and set `DB_PATH` at the top of `app.py` to that path. Everyone's app must point at the **same** file.
+3. Move `data/capacity.db` to the project folder on the S: drive and set `DB_PATH` in `capacity_db.py` (`app.py` reads it from there) to that path. Everyone's app must point at the **same** file.
 4. Optional launcher `Capacity app.bat` next to `app.py`: `@echo off` / `cd /d %~dp0` / `py app.py` / `pause`.
 5. Check: open the app, search `B303`, and see Turpin floor 3 wing B in the zones list.
 

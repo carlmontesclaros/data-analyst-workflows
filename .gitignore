@@ -25,8 +25,10 @@ ARCHITECTURE_PLAN.md
 exiting_capacity_results*.xlsx
 bcbc_2018dbp3s34.pdf
 .pytest_cache/
-GLOSSARY.md
-docs
+# docs/ is tracked except the private files
+docs/CLAUDE_before-*
+docs/claude/status-log.md
+docs/claude/history-working-agreement.md
 data/
 *.db
 MA notes - nfr_questions.docx
