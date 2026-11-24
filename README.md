@@ -41,7 +41,7 @@ I’m keeping everything modular. Each project or workflow gets its own separate
   9. Screening only: results say "review", never "approved".
 * **The Stack:** Python, Tkinter, SQLite, Pandas, OpenPyXL, pytest.
 * **Why it matters:** Answering "can this room go from 32 to 36?" used to mean opening the Excel files and a hand calculation per floor. Now you just find the room, type 36 and see if the floor's exits still cover it, with a record of who changed it and why.
-* **How to run:** from `capacity_egress_app/`, run `build_database.py` once (reads the space report and `floor_exits.xlsx` in `data/input/`), then `app.py` every time after. On Windows use `py` instead of `python3`. Tests: `python3 -m pip install -r requirements-dev.txt`, then `python3 -m pytest` (496 tests) and `python3 -m ruff check .`. GitHub Actions runs the lint and the tests on Windows and on the Mac for every pull request.
+* **How to run:** from `capacity_egress_app/`, run `build_database.py` once (reads the space report and `floor_exits.xlsx` in `data/input/`), then `app.py` every time after. On Windows use `py` instead of `python3`. Tests: `python3 -m pip install -r requirements-dev.txt`, then `python3 -m pytest` and `python3 -m ruff check .`. GitHub Actions runs the lint and the tests on Windows and on the Mac for every pull request.
 * **Limitations:**
     1. Built for a handful of editors and a few viewers. Two people saving at once is handled (it waits, and refuses to overwrite a change you haven't seen), but it isn't meant for dozens of people at the same time.
     2. Open stairs count as exits (screening; they lead down to an exit door), and a door into a stair counts the smaller of the door and the stair. Doors into the same stair count as one exit.

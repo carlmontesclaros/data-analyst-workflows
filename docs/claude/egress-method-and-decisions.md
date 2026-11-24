@@ -2,9 +2,9 @@
 
 # Exiting capacity: method, settled decisions, test values, field data (from CLAUDE.md sections 4, 6, 9, 10)
 
-> **Historical.** This is a snapshot of how the retired terminal script `exiting_capacity_calculation/exit_capacity.py` worked (retired 2026-10-05, see [ADR 0002](../adr/0002-retire-terminal-script.md)) plus the decisions made while it was the only calculation. The app in `capacity_egress_app/` replaced it, and where this file disagrees with `capacity_egress_app/README.md` or the code, the README and the code win. Known differences: open stairs now count as exits and `open_stairs_count` is `yes` by default; lounges (14.3) and kitchens (7.2) count at their per code load, and only 16.x is excluded by default; a door into a stair counts the smaller of the door and the stair; the doorway minimum width is 850 mm, not 800; a floor's zone can be a group of wings (`A+C+D`); the editor list and the Windows login decide who can edit; the app has 496 tests, not 15. The repo map in section 4 and the `exit_capacity.py` flags in 6.2 and 6.3 no longer exist.
+> **Historical.** This is a snapshot of how the retired terminal script `exiting_capacity_calculation/exit_capacity.py` worked (retired 2026-10-05, see [ADR 0002](../adr/0002-retire-terminal-script.md)) plus the decisions made while it was the only calculation. The app in `capacity_egress_app/` replaced it, and where this file disagrees with `capacity_egress_app/README.md` or the code, the README and the code win. Known differences: open stairs now count as exits and `open_stairs_count` is `yes` by default; lounges (14.3) and kitchens (7.2) count at their per code load, and only 16.x is excluded by default; a door into a stair counts the smaller of the door and the stair; the doorway minimum width is 850 mm, not 800; a floor's zone can be a group of wings (`A+C+D`); the editor list and the Windows login decide who can edit; the app had 496 tests as of 2026-11-24, not 15. The repo map in section 4 and the `exit_capacity.py` flags in 6.2 and 6.3 no longer exist.
 
-Read before changing the egress calculation, quoting a BCBC clause, re-checking a number, or proposing something that may already be decided (6.5 is settled: don't re-argue). Sections 4 and 6 describe the retired `exiting_capacity_calculation/` layout; where they disagree with docs/claude/status-log.md (section 11), section 11 wins.
+Read before changing the egress calculation, quoting a BCBC clause, re-checking a number, or proposing something that may already be decided (6.5 is settled: don't re-argue). Sections 4 and 6 describe the retired `exiting_capacity_calculation/` layout; where they disagree with `capacity_egress_app/README.md` (Method and Decisions), the README wins.
 
 ## 4. Repo map
 
@@ -79,7 +79,7 @@ The sheet has a `wing` column, and data validation that blocks bad entries (exit
 3. **Load used** (`LOAD_BASIS = 'counted'`, settled by Carl 2026-10-01): the count if filled in (0 stays 0); blank → per code. Rooms whose sub-category code is in `ROOM_EXCLUDE = ['14.3', '16']` (lounges, all 16.x non-assignable; a code covers its children) → 0, `out of scope`. `'area'` = per code for every room.
 4. Room wing = the leading letters of Space (`B303` → B).
 5. Zone = the floor, or floor + wing if any exit on that floor has a wing. On split floors, drop pseudo-zones with zero load and no exits.
-6. **Open stairs** (`OPEN_STAIRS_COUNT = False`): exit_id containing "open stair" → `counts_as_exit` False, persons 0, width_check `not an exit - open stair`, not in exit_count. Reason: 3.4.4.1.(1) requires exits to be fire separated. Pending Mark; `True` restores them. **SUPERSEDED 2026-10-20 (Carl): open stairs count, `OPEN_STAIRS_COUNT=True` (PR #11); see status-log.**
+6. **Open stairs** (`OPEN_STAIRS_COUNT = False`): exit_id containing "open stair" → `counts_as_exit` False, persons 0, width_check `not an exit - open stair`, not in exit_count. Reason: 3.4.4.1.(1) requires exits to be fire separated. Pending Mark; `True` restores them. **SUPERSEDED 2026-10-20 (Carl): open stairs count, `OPEN_STAIRS_COUNT=True` (PR #11); see the app README's Decisions.**
 7. Exit persons = `exit_persons(cm, mm_pp)` = `floor(round(cm × 10 / mm_pp, 6))`. Doorway 6.1; stairs 8.0 (rise ≤ 180 mm and run ≥ 280 mm); stairs_steep 9.2.
 8. **50% rule** (3.4.3.2.(7)) = `capacity_50_rule(total, largest)` = `min(total, 2 × (total − largest))`. One exit → 0.
 9. Minimum widths (Table 3.4.3.2.-A): doorway < 800 mm fails; stairs < 900 fails, 900–1099 = review, ≥ 1100 ok.
@@ -110,7 +110,7 @@ All sheets: bold frozen header, autofilter, column widths ≤ 50. `PermissionErr
 
 ### 6.4 Remaining work
 
-- **SUPERSEDED 2026-10-20 (Carl decided open stairs count; see status-log):** **Mark:** does Turpin S5 (curved open stair, not enclosed) count as an exit? Sets `OPEN_STAIRS_COUNT`. The only open question for him on this tool.
+- **SUPERSEDED 2026-10-20 (Carl decided open stairs count; see the app README's Decisions):** **Mark:** does Turpin S5 (curved open stair, not enclosed) count as an exit? Sets `OPEN_STAIRS_COUNT`. The only open question for him on this tool.
 - **Fieldwork:** Turpin wing A exits on floors 2 and 3; Turpin floor 1, including the link door B101A → A101A (row: wing B, into_wing A; every floor 1 exit row needs a wing); then the next teaching buildings. Co-op target: 5 buildings by Oct 30, 10 by Dec 18 (SUPERSEDED 2026-10-26: Carl has no building-count goal).
 - **PM walkthrough** (co-op competency 4) and feedback; revise README / output from it.
 - Windows workstation run: **done, works** (Carl, 2026-10-01).
@@ -140,7 +140,7 @@ All sheets: bold frozen header, autofilter, column widths ≤ 50. `PermissionErr
 | Every capacity / exit / code factor change is logged: old, new, who (Windows login + nickname), when, why; code factor changes **require a clause reference** and preview how many zones change status | Carl, 2026-10-02 |
 | App value wins over FMIS; a disagreement on a new space report is flagged, never overwritten. A room that disappears from the space report is kept and flagged (missing room), never dropped | Carl, 2026-10-02 |
 | Change capacity = preview the zone result, then Save/Cancel. Undo = Ctrl+Z while typing only; a saved change is fixed by changing it again | Carl, 2026-10-02 |
-| Two exports: **capacity export** (space report layout, no Pictures column, per code only for visited rooms [SUPERSEDED 2026-10-13: per code for every room, see status-log]; feeds Carl's FMIS capacity import, whose template comes from the systems admin) and the **results workbook** (4 sheets, as now) | Carl, 2026-10-02 |
+| Two exports: **capacity export** (space report layout, no Pictures column, per code only for visited rooms [SUPERSEDED 2026-10-13: per code for every room, see the app README's Export space report]; feeds Carl's FMIS capacity import, whose template comes from the systems admin) and the **results workbook** (4 sheets, as now) | Carl, 2026-10-02 |
 | Power Apps rejected for now (too much setup; the calculation can't run inside it). Supabase/Netlify: not in use for now (Carl, 2026-11-17; earlier reason: UVic data outside UVic) | Carl, 2026-10-02 |
 | Vocabulary lives in the root `GLOSSARY.md`: room capacity, capacity source, visited room, code factor, etc. | Carl, 2026-10-02 |
 | Exterior exits named `E<floor>[letter]` since the plans don't number them | Carl |
@@ -197,7 +197,7 @@ Real inputs (23 Sept report as re-saved by Carl, 10 exits, default switches), 20
 - 27 `needs_review` rows in `category_map.csv`.
 - Horizontal-exit rules if a link door sits in a fire-rated wall. Not checked.
 - Open stairs (Turpin S5, curved, not enclosed): do they count as exits at all? Code text says exits must be fire separated (3.4.4.1.(1)). Ask Mark. (2026-10-19: Carl remembered "295" for Turpin 3 B with S5; that's S4 144 + S5 151 before the 50% rule, which gives 288. With S4 + E3 + S5 it'd be 439. Still not asked; Carl unsure.)
-- Clauses were checked against `bcbc_2018dbp3s34.pdf` (BCBC **2018**). Confirm in the 2024 text before quoting. **Done 2026-10-07: every clause was checked against BCBC 2024; see status-log and `docs/research/bcbc_2024_factor_check.md`.**
+- Clauses were checked against `bcbc_2018dbp3s34.pdf` (BCBC **2018**). Confirm in the 2024 text before quoting. **Done 2026-10-07: every clause was checked against BCBC 2024; see `docs/research/bcbc_2024_factor_check.md`.**
 - Turpin 3 B: Carl's hand count about 149 vs the script's 161; probably the 16 offices not counted yet (per code). Unconfirmed.
 - Care occupancies (13.1 health, 19.1 day care) use 18.4 mm/person (3.4.3.2.(2)); currently excluded.
 - The article number "3.4.3.1" for "Exit Width Based on Occupant Load" was inferred. Confirm it in Carl's BCBC PDF.

@@ -169,7 +169,7 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
 
 1. **Once:** `python3 build_database.py`. Reads the space report and `floor_exits.xlsx` from `data/input/` and the CSVs from `config/`, and writes `data/capacity.db`. It refuses to run if the database already exists.
 2. `python3 app.py`. The first time on a computer, it asks for the name to show in the change log.
-3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` (496 tests) and `python3 -m ruff check .` (lint).
+3. Tests: `python3 -m pip install -r requirements-dev.txt` once, then `python3 -m pytest` and `python3 -m ruff check .` (lint).
    The test windows are transparent by default so they don't flash on screen (same real sizes); set `CAPACITY_TEST_WINDOWS=real` to show them (CI does).
    GitHub runs them on every pull request and every push to `main`: lint once, then the tests on Windows and on the Mac. Which tests run where, and when a push to `main` skips them, is in the header of `.github/workflows/tests.yml`. A red X on a PR means something broke: don't merge until it's green.
 
