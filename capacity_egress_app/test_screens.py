@@ -122,6 +122,13 @@ def rows_shown(tree):
 def asked_for(window):
     return window.winfo_reqwidth(), window.winfo_reqheight()
 
+# these tests are about a roomy window: the 1400x820 the editor used to open at, which a person drags it to
+ROOMY_WINDOW = (1400, 820)
+
+@pytest.fixture
+def roomy_window(monkeypatch):
+    monkeypatch.setattr(app, 'OPEN_WINDOW', ROOMY_WINDOW)
+
 def at_least(size, floor):
     return size[0] >= floor[0] and size[1] >= floor[1]
 
@@ -482,6 +489,7 @@ def drag_edge(tree, key, width):
 
 # a short column the user widened stays as wide when the lists refill (after a save, or another person's save); the
 # descriptive columns give the width back, so the table still needs no sideways bar
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_keeps_a_column_the_user_widened_after_a_refill(root, conn):
     screen = editor_with_rooms(root, conn)
     tree = screen.room_tree
@@ -803,6 +811,7 @@ def busy_editor(root, conn, exits=('S1 - doorway',)):
 def editor_tables(screen):
     return (screen.zone_tree, screen.room_tree, screen.exit_tree)
 
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_menu_is_one_row_at_the_windows_font(larger_font_root, conn):
     editor_screen(larger_font_root, conn)
     menu = [w for w in larger_font_root.winfo_children() if isinstance(w, widgets.FlowRow)][1]
@@ -819,6 +828,7 @@ def test_editor_menu_is_made_of_quiet_tool_buttons(larger_font_root, conn):
     assert [len(buttons(g)) for g in menu.groups] == [1, 3, 3, 2]
     assert len(menu.lines) == 3
 
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
     screen = busy_editor(larger_font_root, conn)
     assert all(tree.get_children() for tree in editor_tables(screen))
@@ -828,6 +838,7 @@ def test_editor_tables_need_no_sideways_bar_at_the_windows_font(larger_font_root
 # the exit ids the README documents (README: Measuring exits): a space number plus what was measured, and the outside
 # doors' E<floor> ids with a letter. each shows in full and the exits table still needs no sideways bar
 @pytest.mark.parametrize('exit_id', ['S5 - open stair', 'E3 - outside exit', 'E2A - outside exit'])
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_exits_table_needs_no_sideways_bar_with_a_documented_exit_id(larger_font_root, conn, exit_id):
     root = larger_font_root
     screen = busy_editor(root, conn, exits=(exit_id,))
@@ -839,6 +850,7 @@ def test_editor_exits_table_needs_no_sideways_bar_with_a_documented_exit_id(larg
     assert not sideways_bar_of(tree).winfo_ismapped()
 
 # a search across buildings shows the whole campus: the zones' first column then holds the building name and the floor
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_tables_need_no_sideways_bar_on_a_search_across_buildings(larger_font_root, conn):
     root = larger_font_root
     db.insert_rooms(conn, xi.classify_rooms(report([LONG_ROOM, (LONG_ROOM[0], '4', 'A124', 30.0, 10),
@@ -885,6 +897,7 @@ def sideways_bar_of(tree):
     return bars[0]
 
 # no sideways bar is drawn under a table that has nothing to scroll sideways; one that does scroll gets its bar back
+@pytest.mark.usefixtures('roomy_window')
 def test_editor_tables_draw_no_sideways_bar_at_the_windows_font(larger_font_root, conn):
     root = larger_font_root
     screen = busy_editor(root, conn)
@@ -966,6 +979,7 @@ def test_the_full_text_stays_inside_the_window(larger_font_root, conn, corner):
     assert tip.winfo_rootx() - 30 <= pointer_x <= tip.winfo_rootx() + tip.winfo_width() + 30
     assert tip.winfo_rooty() - 30 <= pointer_y <= tip.winfo_rooty() + tip.winfo_height() + 30
 
+@pytest.mark.usefixtures('roomy_window')
 def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
     root = larger_font_root
     screen = editor_with_rooms(root, conn)
@@ -1014,3 +1028,52 @@ def test_zones_pane_gives_the_rest_of_the_window_to_the_tables_below(root, conn)
     root.update()
     assert screen.zone_frame.winfo_height() == before
     assert screen.room_tree.winfo_height() > 0
+
+# the app is not DPI-aware on Windows: a 1920x1080 laptop at 150% scaling gives it a 1280x720 screen, and the taskbar
+# takes some of that. every window opens at no more than 1280x720 and no more than the usable screen (the work area),
+# is never forced bigger than that screen by its minimum size, and can still be dragged bigger
+DEFAULT_WINDOW = (1280, 720)
+BIG_WORK_AREA = (1920, 1040)
+TIGHT_WORK_AREA = (1280, 672)
+
+def within(size, area):
+    return size[0] <= area[0] and size[1] <= area[1]
+
+@pytest.fixture(params=[BIG_WORK_AREA, TIGHT_WORK_AREA], ids=['roomy_screen', 'tight_screen'])
+def work_area(request, larger_font_root, monkeypatch):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: request.param)
+    return request.param
+
+def open_code_factors_window(root, conn):
+    return open_code_factors(root, conn)
+
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen, open_code_factors_window])
+def test_windows_open_inside_the_work_area(larger_font_root, conn, work_area, open_screen):
+    open_screen(larger_font_root, conn)
+    win = larger_font_root
+    if open_screen is open_code_factors_window:
+        win = [w for w in win.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    win.update()
+    assert within((win.winfo_width(), win.winfo_height()), DEFAULT_WINDOW)
+    assert within((win.winfo_width(), win.winfo_height()), work_area)
+    assert within(win.minsize(), work_area)
+    assert win.resizable() == (True, True)
+
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
+def test_screens_show_everything_at_their_smallest_size_inside_the_work_area(larger_font_root, conn, work_area, open_screen):
+    root = larger_font_root
+    open_screen(root, conn)
+    shrink_to_minimum(root)
+    assert within(root.minsize(), work_area)
+    assert cut_off_widgets(root) == []
+    assert [b.cget('text') for b in buttons(root) if not is_inside_window(b, root) or is_cut_off(b, root)] == []
+
+@pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
+def test_screens_can_still_be_dragged_bigger(larger_font_root, conn, monkeypatch, open_screen):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    root = larger_font_root
+    open_screen(root, conn)
+    root.geometry('1360x760')
+    root.update()
+    assert (root.winfo_width(), root.winfo_height()) == (1360, 760)
+    assert cut_off_widgets(root) == []

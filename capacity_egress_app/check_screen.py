@@ -7,18 +7,19 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, sideways_bar, wrap_to_width
+from widgets import DEFAULT_WINDOW, FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, sideways_bar, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
 ANY = '(any)'
 MAX_RESULTS = 500
 MIN_WINDOW = (1280, 720)                                               # smallest window the screens are laid out for
-OPEN_WINDOW = (1320, 860)
+OPEN_WINDOW = DEFAULT_WINDOW
+TABLE_ASKS_WIDTH = 400                                              # a table asks for no more: it grows with the window and scrolls sideways when the window is smaller
 
 # table columns -> (heading, least width in px). no column is squeezed below its width; the zone Result column also
 # grows to the longest fixed zone verdict in the real font, so that verdict is never cut short (a room's may scroll)
-FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 165)]
+FOUND_COLUMNS = [('Room', 65), ('Floor', 50), ('Building', 140)]
 CHECK_COLUMNS = [('Room', 100), ('Room type', 90), ('Capacity now', 125), ('Proposed', 85), ('Per code load', 105),
                  ('Result', 300)]
 ZONE_COLUMNS = [('Zone', 175), ('Occupant load → with change', 215), ('Exit capacity', 105), ('Result', 340)]
@@ -143,13 +144,13 @@ class CheckScreen:
                        command=lambda: self.open_editor and self.open_editor(self.room)).pack(side='left', padx=4)
 
         # left: find a room
-        left = ttk.LabelFrame(outer, text=" 1. Find a room ", padding=12)
+        left = ttk.LabelFrame(outer, text=" 1. Find a room ", padding=8)
         left.grid(row=1, column=0, sticky='nsw', padx=(0, 12))
         left.rowconfigure(5, weight=1)
         row = ttk.Frame(left)
         row.grid(row=0, column=0, sticky='ew')
         self.search_var = tk.StringVar()
-        entry = ttk.Entry(row, textvariable=self.search_var, width=24)
+        entry = ttk.Entry(row, textvariable=self.search_var, width=16)
         entry.pack(side='left', fill='x', expand=True)
         entry.bind('<Return>', lambda e: self.search())
         entry.focus_set()
@@ -161,7 +162,7 @@ class CheckScreen:
         pick.grid(row=2, column=0, sticky='ew', pady=(0, 10))
         ttk.Label(pick, text="Building").grid(row=0, column=0, sticky='w')
         self.building_var = tk.StringVar(value=ANY)
-        self.building = BuildingBox(pick, self.building_var, ANY, self.pick_building, width=30)
+        self.building = BuildingBox(pick, self.building_var, ANY, self.pick_building, width=24)
         self.building.box.grid(row=1, column=0, sticky='ew', pady=(2, 8))
         ttk.Label(pick, text="Floor").grid(row=2, column=0, sticky='w')
         self.floor_var = tk.StringVar(value=ANY)
@@ -291,7 +292,7 @@ class CheckScreen:
         xs.grid(row=1, column=0, sticky='ew')
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        frame.configure(width=asked + ys.winfo_reqwidth(), height=tree.winfo_reqheight())
+        frame.configure(width=min(asked + ys.winfo_reqwidth(), TABLE_ASKS_WIDTH), height=tree.winfo_reqheight())
         frame.grid_propagate(False)
         return tree
 

@@ -142,13 +142,35 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
+# the part of the screen a window can use -> (width, height) without the taskbar. on Windows that is the work area
+# (SPI_GETWORKAREA); elsewhere the whole screen. the app is not DPI-aware, so these are the pixels the app itself sees
+def work_area(window):
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        rect = wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):      # SPI_GETWORKAREA
+            return rect.right - rect.left, rect.bottom - rect.top
+    return window.winfo_screenwidth(), window.winfo_screenheight()
+
+# room a window's own frame takes (title bar, borders) that the geometry does not count, kept off the work area
+FRAME = (16, 48)
+
+# the window a person starts with, or the usable screen where that is smaller (a 1920x1080 laptop at 150% scaling is a
+# 1280x720 screen to a program that is not DPI-aware). the person drags the edges for more
+DEFAULT_WINDOW = (1280, 720)
+
 # a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them, and keep
-# spare_height on top for a line that can wrap longer later
+# spare_height on top for a line that can wrap longer later. neither the opening size nor the smallest size goes past
+# the usable screen: a window bigger than that has its bottom under the taskbar, so the smallest size gives way (the
+# screens wrap and scroll what no longer fits) and the window can still be dragged bigger
 def fit_window(root, size, minimum, spare_height=0):
     root.update_idletasks()
     need = (root.winfo_reqwidth(), root.winfo_reqheight() + spare_height)
-    root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
-    root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
+    usable = tuple(max(a - f, 1) for a, f in zip(work_area(root), FRAME, strict=True))
+    smallest = tuple(min(max(m, n), u) for m, n, u in zip(minimum, need, usable, strict=True))
+    root.minsize(*smallest)
+    root.geometry('{}x{}'.format(*(min(max(s, m), u) for s, m, u in zip(size, smallest, usable, strict=True))))
 
 # a table cell -> its text in the table's real font, and a little room either side
 CELL_PADDING = 8
