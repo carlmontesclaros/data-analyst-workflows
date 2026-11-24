@@ -11,7 +11,7 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import DEFAULT_WINDOW, BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, sideways_bar, use_theme, wrap_to_width
+from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, sideways_bar, use_theme, wrap_to_width
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +25,7 @@ BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py s
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
 ZONE_ROWS_LEAST, ZONE_ROWS_MOST = 2, 8
-OPEN_WINDOW = DEFAULT_WINDOW
+OPEN_WINDOW = (1400, 820)
 
 def sanitize(name):
     for c in BAD_CHARS:

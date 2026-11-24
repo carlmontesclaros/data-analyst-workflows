@@ -7,14 +7,14 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import DEFAULT_WINDOW, FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, sideways_bar, wrap_to_width
+from widgets import FONTS, BuildingBox, anchor_for, fit_columns, fit_window, heading_text, initials, open_path, sideways_bar, wrap_to_width
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
 ANY = '(any)'
 MAX_RESULTS = 500
 MIN_WINDOW = (1280, 720)                                               # smallest window the screens are laid out for
-OPEN_WINDOW = DEFAULT_WINDOW
+OPEN_WINDOW = (1320, 860)
 TABLE_ASKS_WIDTH = 400                                              # a table asks for no more: it grows with the window and scrolls sideways when the window is smaller
 
 # table columns -> (heading, least width in px). no column is squeezed below its width; the zone Result column also
@@ -78,8 +78,8 @@ class CheckScreen:
         self.fonts = FONTS
         root.title("Room capacity check")
         self.build_widgets()
-        # an error can wrap to a line more than the help: the smallest window keeps that line, so the result tables keep
-        # their row (at the Windows font the screen asks for more than MIN_WINDOW, so the floor leaves no room of its own)
+        # an error can wrap to a line more than the help: the smallest window keeps that line on top of what the widgets
+        # ask for, so the result tables keep their row
         fit_window(root, OPEN_WINDOW, MIN_WINDOW, int(root.tk.call('font', 'metrics', self.fonts['caption'], '-linespace')))
         self.reload()
         self.root.after(POLL_MS, self.poll)
@@ -115,9 +115,9 @@ class CheckScreen:
 
     # layout
     def build_widgets(self):
-        # side margins 24 -> 10 px, the gap between the two columns 16 -> 12 and the right-hand panels' side padding 16 -> 8:
-        # at the Windows font the tables' full headings and their 28 px mark column ask for 1393 px at 16, 1361 at 10,
-        # and the screen must fit a 1366 px laptop
+        # narrow margins (10 px at the sides, 12 between the two columns, 8 inside the right-hand panels): the tables ask
+        # for no more than TABLE_ASKS_WIDTH and scroll sideways below their full width, so these margins and the find
+        # column decide how narrow the screen can go
         outer = ttk.Frame(self.root, padding=(10, 10, 10, 8))
         outer.pack(fill='both', expand=True)
         outer.columnconfigure(1, weight=1)
@@ -132,8 +132,9 @@ class CheckScreen:
         titles = ttk.Frame(head)
         titles.pack(side='left', fill='x', expand=True)
         ttk.Label(titles, text="Room capacity check", font=self.fonts['title']).pack(anchor='w')
-        ttk.Label(titles, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
-                  foreground=colours.MUTED, wraplength=880).pack(anchor='w')
+        # wraps to the width the name and buttons leave it, so a long name on a small screen never cuts it off
+        wrap_to_width(ttk.Label(titles, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
+                                foreground=colours.MUTED)).pack(anchor='w', fill='x')
         name = db.get_user_name(self.conn, self.user_login) or self.user_login
         role = "Editor" if self.editor else "Viewer"
         ttk.Label(who, text=f"{name}  ·  {role}", font=self.fonts['strong']).pack(side='left', padx=(0, 12))
@@ -279,9 +280,10 @@ class CheckScreen:
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
-        # the table asks the window for the room its headings and the fixed zone verdicts need. a value that needs more (a
-        # long building name) makes the table scroll sideways rather than widen the window past a laptop screen. the sideways
-        # bar shows only then, and takes its height from the table's rows: the window keeps the room a wrapped message needs
+        # the table asks the window for the room its headings and the fixed zone verdicts need, but never more than
+        # TABLE_ASKS_WIDTH: it grows with the window, and where the window is narrower than its columns (a small screen, a
+        # long building name) the table scrolls sideways. the sideways bar shows only then, and takes its height from the
+        # table's rows: the window keeps the room a wrapped message needs
         self.fit(tree, columns)
         asked = colours.MARK_COLUMN + sum(int(tree.column(col, 'width')) for col, _ in columns)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)

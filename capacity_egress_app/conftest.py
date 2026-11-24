@@ -40,4 +40,4 @@ def roomy_work_area(monkeypatch):
     """The tests measure the layout, not the machine's screen: a window is limited to a 1920x1080 screen's work area,
     whatever display the run has (a CI runner's can be much smaller). A test of a smaller screen patches this itself."""
     import widgets
-    monkeypatch.setattr(widgets, 'work_area', lambda window: (1920, 1040))
+    monkeypatch.setattr(widgets, 'work_area', lambda window: (0, 0, 1920, 1040))
