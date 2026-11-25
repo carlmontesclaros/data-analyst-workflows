@@ -905,9 +905,9 @@ def test_editor_tables_show_room_zones_at_the_windows_font(larger_font_root, con
         assert tree.xview() == (0.0, 1.0), tree['columns']
 
 # a selection across many floors -> the Change zone box names a few and stays short enough for a 150% scaled laptop,
-# with Save still on it
-def test_the_change_zone_box_stays_short_for_a_big_selection(larger_font_root, conn):
-    root = larger_font_root
+# with Save still on it (its height at the Windows font's line, as the app draws it there)
+def test_the_change_zone_box_stays_short_for_a_big_selection(root, conn):
+    use_font(root, WINDOWS_LINE_FONT)
     rows = [(LONG_ROOM[0], str(floor), f"{floor}{n:02d}", 30.0, 10) for floor in range(11, 23) for n in range(20)]
     db.insert_rooms(conn, xi.classify_rooms(report(rows)), 'floors.xlsx')
     screen = editor_screen(root, conn)
