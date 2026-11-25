@@ -88,10 +88,10 @@ Decided 2026-10-13 from Mark's answers ([ADR 0003](../docs/adr/0003-editors-by-w
 
 ## Capacity check screen
 
-The first screen everyone sees. Built for a quick question like "can DTB A120 go from 250 to 300?" before emailing Mark.
+The first screen everyone sees. Built for a quick question like "can DTB A120 go from 250 to 300?" before emailing Mark. Its four numbered steps are white cards, each under its title.
 
 1. **Search** a building, floor or room (`DTB A120`, `Turpin`, `A120`), or pick building → floor → room. The **Building** box takes typing: the list narrows to matching names (`tur`, `dtb`, `comp sci`; names that start with the text come first), **↓** opens it, **Enter** picks the top match (`match_buildings`, added 2026-10-16).
-2. **Room card:** two rows of big values, column by column: **Now** (room type, area, room capacity and its source, per code load) and **With change** (what's typed in 3: changed values in blue, the rest say "same"). Each row has its coloured verdict, side by side. It updates as you pick a room type or type a number, before Check.
+2. **Room card:** two rows of big values under small captions, column by column: **Now** (room type, area, room capacity and its source, per code load) and **With change** (what's typed in 3: changed values in blue, the rest say "same"). Each row has its verdict as a chip, side by side (one under the other when the window is too narrow for both): the status mark and colours (grey, or no status for an out-of-scope room, on the window's grey). It updates as you pick a room type or type a number, before Check.
 3. **Room type and/or new capacity → Check.** Picking another room type (supervisor feedback, 2026-10-16) shows that type's per code load next to the box; Check then judges the room against it, and an unvisited room's per code load changes the floor load (a visited room's floor load stays its count). Leave New capacity blank to try only the room type. **Add another room** checks several rooms in the same building together, so three small increases can't each look fine on their own.
 4. **Result:**
    - **Room vs per code load:** "within per code", or **"needs justification, +N over"**. Over per code isn't refused: BCBC 2024 3.1.17.1.(1)(c) lets a room be designed for more people than the table, as long as the exits carry them and a sign is posted (3.1.17.1.(2)). Amber is project policy, so an editor looks into it. (It's a count **below** per code that the code says must "be shown".)

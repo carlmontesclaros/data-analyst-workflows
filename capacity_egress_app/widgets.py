@@ -106,10 +106,12 @@ def use_theme(root):
                     lightcolor=c.SURFACE, darkcolor=c.SURFACE, bordercolor=c.SURFACE)
     style.map('Treeview.Heading', background=[('active', c.HOVER)], lightcolor=[('active', c.HOVER)], darkcolor=[('active', c.HOVER)])
 
-    # cards -> white on the ground with a 1 px line, a section title above each one in small bold muted type. defined here
-    # for the screens to use
-    style.configure('Card.TFrame', background=c.SURFACE, bordercolor=c.CARD_BORDER, lightcolor=c.CARD_BORDER,
-                    darkcolor=c.CARD_BORDER, relief='solid', borderwidth=1)
+    # cards -> white on the ground with a 1 px line, a section title above each one in small bold muted type (card_section).
+    # a frame that only lays out a card's contents is white with no line of its own. (clam draws a border as two lines:
+    # 'raised' paints the inner one in lightcolor and darkcolor, white here, where 'solid' would make the line 2 px)
+    style.configure('Card.TFrame', background=c.SURFACE, bordercolor=c.CARD_BORDER, lightcolor=c.SURFACE,
+                    darkcolor=c.SURFACE, relief='raised', borderwidth=1)
+    style.configure('Inner.Card.TFrame', relief='flat', borderwidth=0)
     style.configure('Card.TLabel', background=c.SURFACE)
     style.configure('Section.TLabel', font='AppSectionFont', foreground=c.MUTED)
 
@@ -351,6 +353,14 @@ class LongTextColumns:
         if self.tip is not None:
             self.tip.destroy()
         self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
+
+# a section of a screen -> its title above a card. returns the card to fill; its .master holds both, and is what to place
+def card_section(parent, title, padding):
+    section = ttk.Frame(parent)
+    ttk.Label(section, text=title, style='Section.TLabel').pack(anchor='w')
+    card = ttk.Frame(section, style='Card.TFrame', padding=padding)
+    card.pack(fill='both', expand=True)
+    return card
 
 # a line that can outgrow its window (an export path, an error) wraps onto the next line instead of being cut off
 # the label must be packed or gridded to fill the width it is given. its text gets that width less the label's own
