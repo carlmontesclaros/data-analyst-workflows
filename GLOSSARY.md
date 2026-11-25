@@ -84,9 +84,13 @@ _Avoid_: FMIS capacity import (for the file Carl sends)
 ## Places
 
 **Zone**:
-The area whose occupant load is checked against its own exits: a whole floor, one wing of a floor, or a group of wings (for example A+C+D) when those wings' exits are recorded separately.
+The area whose occupant load is checked against its own exits: a whole floor, one wing of a floor, or a group of wings (for example A+C+D) when those wings' exits are recorded separately. A room zone makes a zone the same way a wing does.
 _Avoid_: egress zone, section
 
 **Wing**:
-A lettered part of a building (A, B, ...), taken from the leading letters of the room number.
+A lettered part of a building (A, B, ...), taken from the leading letters of the room number. It places a room in a zone unless the room has a room zone.
 _Avoid_: block, side
+
+**Room zone**:
+A name (WEST) an editor gives a room whose part of the floor its wing doesn't describe. It wins over the wing, and exits name it as they name a wing. Most rooms have none.
+_Avoid_: zone override, sub-wing

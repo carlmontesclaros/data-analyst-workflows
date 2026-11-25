@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     capacity_source TEXT NOT NULL DEFAULT 'per code',
     visited INTEGER NOT NULL DEFAULT 0,         -- 1 = counted on a site visit at some point; stays 1 after a PM change
     room_type_override TEXT,
+    zone_override TEXT,                         -- zone typed on the room, blank = by room number; never from FMIS
     note TEXT,
     fmis_capacity INTEGER,
     in_latest_report INTEGER NOT NULL DEFAULT 1,
@@ -118,6 +119,10 @@ def create_schema(conn):
         if col not in exit_cols:
             conn.execute(f"ALTER TABLE exits ADD COLUMN {col} {kind}")
             conn.commit()
+    # databases built before rooms had zones -> add the column (blank = the room number decides, as before)
+    if 'zone_override' not in [row[1] for row in conn.execute("PRAGMA table_info(rooms)")]:
+        conn.execute("ALTER TABLE rooms ADD COLUMN zone_override TEXT")
+        conn.commit()
 
 # space report col -> rooms table col (reading the workbook is excel_inputs.py)
 ROOM_COLUMN_NAMES = {
@@ -288,7 +293,7 @@ def insert_extra_settings(conn):
     return len(EXTRA_SETTINGS)
 
 # space report refresh -> match rooms on Property + Floor + Space (+ area when a key repeats)
-# only FMIS columns change, capacity / source / visited / note / override are never touched
+# only FMIS columns change, capacity / source / visited / note / room type and zone are never touched
 FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
 ROOM_KEYS = ['property', 'floor', 'space']
 
@@ -549,6 +554,35 @@ def change_room_type(conn, room_id, new_type, user_login, user_name, why, expect
         conn.execute("UPDATE rooms SET room_type_override = ? WHERE room_id = ?", (new_type, room_id))
         log_change(conn, user_login, user_name, 'rooms', room_id, 'room_type_override', old[0], new_type, why)
     return True
+
+# zone -> typed on one room or a selection at once, wins over the room-number letters; blank = back to the letters.
+# all or nothing: one room changed by someone else refuses the whole save
+def change_zone(conn, room_ids, new_zone, user_login, user_name, why, expected=NO_CHECK):
+    # expected = {room_id: zone_override} the person saw when they opened the box
+    new_zone = egress.room_zone(new_zone) or None
+    if not room_ids:
+        raise ValueError("pick a room first")
+    if not str(why or '').strip():
+        raise ValueError("say why the zone changed")
+    changed = 0
+    with write_transaction(conn):
+        require_editor(conn, user_login)
+        changed_at = now()
+        for room_id in dict.fromkeys(int(i) for i in room_ids):
+            old = conn.execute("SELECT zone_override, space FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
+            if old is None:
+                raise ValueError(f"no room with room_id {room_id}")
+            if expected is not NO_CHECK and not same_value(old[0], expected[room_id]):
+                raise StaleDataError(f"Room {old[1]}'s zone was changed to {old[0] or 'none (by room number)'}"
+                                     f"{last_change(conn, 'rooms', room_id)} after you opened it. "
+                                     f"The screen has been refreshed; check it and try again.")
+            if same_value(old[0], new_zone):
+                continue
+            conn.execute("UPDATE rooms SET zone_override = ? WHERE room_id = ?", (new_zone, room_id))
+            log_change(conn, user_login, user_name, 'rooms', room_id, 'zone_override', old[0], new_zone, why,
+                       changed_at=changed_at)
+            changed += 1
+    return changed
 
 # notes -> one per room, one per exit
 def set_note(conn, table_name, record_id, note, user_login, user_name, expected=NO_CHECK):

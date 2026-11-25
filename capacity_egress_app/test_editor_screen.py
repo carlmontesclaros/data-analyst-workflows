@@ -695,3 +695,180 @@ def test_refresh_from_a_raw_fmis_export_does_not_ask(root, conn, said, monkeypat
     questions = refresh_with(root, conn, said, monkeypatch, rows, False)
     assert len(questions) == 1 and questions[0].startswith('2 rows in')
     assert fmis_of(conn, '101') == 33
+
+# --- room zones: the Change zone box ---------------------------------------------------------------------------------
+
+# the floor in two parts: two doors named WEST (144 each) and two named SOUTH (163 each)
+def two_parts(conn):
+    for pk, zone in [(1, 'WEST'), (2, 'WEST')]:
+        conn.execute("UPDATE exits SET wing = ? WHERE exit_pk = ?", (zone, pk))
+    conn.commit()
+    for exit_id in ('E1', 'E2'):
+        db.save_exit(conn, doorway(exit_id, 100) | {'wing': 'SOUTH'}, 'carl', 'Carl')
+
+def pick_rooms(screen, conn, *spaces):
+    open_floor(screen, conn, spaces[0])
+    screen.room_tree.selection_set([f"r{room(conn, s)['room_id']}" for s in spaces])
+    screen.change_zone()
+    win = dialog(screen, 'Change zone')
+    zone = next(w for w in all_widgets(win) if isinstance(w, ttk.Combobox))
+    why = entries(win)[0]
+    return win, zone, why
+
+def zones_shown(screen):
+    return {v[1]: (v[3], v[4]) for v in (screen.zone_tree.item(i, 'values') for i in screen.zone_tree.get_children())}
+
+def shown(screen, conn, space, column):
+    return screen.room_tree.set(f"r{room(conn, space)['room_id']}", column)
+
+# one room: preview the zones, save -> saved, logged, and its zone and the floor's zones show on screen
+def test_change_zone_for_one_room(root, conn, said):
+    two_parts(conn)
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101')
+    assert zone.get() == app.NO_ZONE and list(zone['values']) == [app.NO_ZONE, 'SOUTH', 'WEST']
+    zone.set('south')
+    type_into(why, 'walked the floor')
+    assert 'wing SOUTH: occupant load 0 -> 20 vs exit capacity 326' in label_text(win)
+    press(win, 'Save')
+
+    assert not win.winfo_exists() and said == []
+    r = room(conn, '101')
+    assert r['zone_override'] == 'SOUTH'
+    assert db.history(conn, 'rooms', r['room_id'])[['field', 'new_value', 'why']].values.tolist()[0] == \
+        ['zone_override', 'SOUTH', 'walked the floor']
+    assert shown(screen, conn, '101', 'zone_override') == 'SOUTH'
+    assert zones_shown(screen)['SOUTH'] == ('20', '326')
+    assert screen.status_var.get() == 'saved: Engineering Office Wing 101 zone - -> SOUTH'
+    assert shown(screen, conn, '102', 'flag') == ''                  # counted 0 -> nobody to put in the wrong zone
+
+# a room with people and no zone, on a floor where another room has one -> flagged in its row, as the warnings list it
+def test_a_room_with_no_zone_on_a_floor_with_zones_is_flagged(root, conn, said):
+    two_parts(conn)
+    db.change_zone(conn, [room(conn, '102')['room_id']], 'WEST', 'carl', 'Carl', 'set')
+    screen = editor_screen(root, conn)
+    open_floor(screen, conn)
+    assert (shown(screen, conn, '101', 'flag'), shown(screen, conn, '102', 'flag')) == ('no zone set', '')
+    assert screen.export_result()['warnings']['type'].tolist().count('room_without_zone') == 1
+
+# a selection of rooms at once -> one save, one log row each, the rooms stay selected
+def test_change_zone_for_a_selection_of_rooms(root, conn, said):
+    two_parts(conn)
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101', '102')
+    assert win.title() == 'Change zone - 2 rooms'
+    assert 'Engineering Office Wing floor 1: 101, 102' in label_text(win)
+    zone.set('WEST')
+    type_into(why, 'west part')
+    press(win, 'Save')
+
+    assert not win.winfo_exists() and said == []
+    assert [room(conn, s)['zone_override'] for s in ('101', '102')] == ['WEST', 'WEST']
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE field = 'zone_override' AND why = 'west part'").fetchone()[0] == 2
+    assert zones_shown(screen)['WEST'] == ('20', '288')
+    assert [shown(screen, conn, s, 'flag') for s in ('101', '102')] == ['', '']
+    assert len(screen.room_tree.selection()) == 2
+    assert screen.status_var.get() == 'saved: zone WEST on 2 rooms'
+
+# clearing is its own choice in the list -> back to the room number, logged
+def test_change_zone_back_to_the_room_number(root, conn, said):
+    two_parts(conn)
+    db.change_zone(conn, [room(conn, s)['room_id'] for s in ('101', '102')], 'WEST', 'carl', 'Carl', 'set')
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101', '102')
+    assert zone.get() == 'WEST' and 'Zone now: WEST (2 rooms)' in label_text(win)
+    zone.set(app.NO_ZONE)
+    type_into(why, 'wrong part')
+    press(win, 'Save')
+    assert said == [] and [room(conn, s)['zone_override'] for s in ('101', '102')] == [None, None]
+    assert screen.status_var.get() == 'saved: zone (by room number) on 2 rooms'
+
+# rooms in different zones -> the box starts empty, and an empty box saves nothing: clearing has to be picked
+def test_change_zone_for_rooms_in_different_zones_needs_a_choice(root, conn, said):
+    db.change_zone(conn, [room(conn, '101')['room_id']], 'WEST', 'carl', 'Carl', 'set')
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101', '102')
+    assert zone.get() == '' and 'Zone now: by room number (1 room), WEST (1 room)' in label_text(win)
+    type_into(why, 'x')
+    press(win, 'Save')
+    assert said == [('showerror', 'Not saved', f'type a zone, or pick {app.NO_ZONE} to clear it')]
+    assert win.winfo_exists()
+    assert [room(conn, s)['zone_override'] for s in ('101', '102')] == ['WEST', None]
+
+@pytest.mark.parametrize('typed, reason, message', [('SOUTH', '', 'say why the zone changed'),
+                                                    ('A+B', 'x', 'letters only')])
+def test_change_zone_refused_keeps_the_box_open(root, conn, said, typed, reason, message):
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101')
+    zone.set(typed)
+    type_into(why, reason)
+    press(win, 'Save')
+    assert said[0][:2] == ('showerror', 'Not saved') and message in said[0][2]
+    assert win.winfo_exists() and zone.get() == typed
+    assert room(conn, '101')['zone_override'] is None
+
+# zones typed before the exits name them -> the preview says the floor is still one zone
+def test_change_zone_preview_on_a_floor_whose_exits_have_no_wing(root, conn, said):
+    screen = editor_screen(root, conn)
+    win, zone, _ = pick_rooms(screen, conn, '101')
+    zone.set('WEST')
+    text = label_text(win)
+    assert 'floor 1: no exit has a wing yet, so it is still one zone' in text
+    assert 'occupant load 20 -> 20 vs exit capacity 288' in text
+    zone.set(app.NO_ZONE)
+    assert 'no exit has a wing yet' not in label_text(win)
+
+def test_change_zone_after_someone_else_saved(root, conn, db_path, said):
+    screen = editor_screen(root, conn)
+    win, zone, why = pick_rooms(screen, conn, '101', '102')
+    mark = db.connect(db_path)
+    db.change_zone(mark, [room(mark, '102')['room_id']], 'SOUTH', 'carl', 'Mark', 'mine')
+    mark.close()
+    zone.set('WEST')
+    type_into(why, 'x')
+    press(win, 'Save')
+    assert [s[1] for s in said] == ['Changed by someone else'] and not win.winfo_exists()
+    assert [room(conn, s)['zone_override'] for s in ('101', '102')] == [None, 'SOUTH']
+    assert shown(screen, conn, '102', 'zone_override') == 'SOUTH'
+
+def test_change_zone_with_no_room_picked(root, conn, said):
+    screen = editor_screen(root, conn)
+    screen.change_zone()
+    assert said == [('showinfo', 'Pick a room', 'Select a room in the Rooms list first.')]
+    assert dialog(screen, 'Change zone') is None
+
+# a zone on one floor -> only that floor is calculated again
+def test_change_zone_redoes_only_its_floor(root, campus_path, said, calculated):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        win, zone, why = pick_rooms(screen, conn, '101')
+        zone.set('WEST')
+        type_into(why, 'x')
+        calculated.clear()
+        press(win, 'Save')
+        assert said == [] and max(calculated) < 6, calculated
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
+
+# rooms on two floors picked from a search -> saved together, both floors shown right
+def test_change_zone_across_two_floors(root, campus_path, said):
+    conn = db.connect(campus_path)
+    try:
+        screen = editor_screen(root, conn)
+        screen.search_var.set('01')
+        screen.search()
+        root.update()
+        ids = [room(conn, s)['room_id'] for s in ('101', '201')]
+        screen.room_tree.selection_set([f"r{i}" for i in ids])
+        screen.change_zone()
+        win = dialog(screen, 'Change zone')
+        next(w for w in all_widgets(win) if isinstance(w, ttk.Combobox)).set('WEST')
+        type_into(entries(win)[0], 'x')
+        press(win, 'Save')
+        assert said == []
+        assert [room(conn, s)['zone_override'] for s in ('101', '201')] == ['WEST', 'WEST']
+        assert_shows_what_the_database_holds(screen, conn)
+    finally:
+        conn.close()
