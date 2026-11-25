@@ -146,6 +146,9 @@ def test_check_screen_stops_shrinking_at_its_smallest_size(root, conn):
 # Windows' Segoe UI draws taller and wider than the Mac font (about 20 px a line): the screens grow to what
 # their widgets ask for
 WINDOWS_FONT = -17
+# that 20 px line, for a test of the height a screen has: the Mac font draws it at WINDOWS_FONT, Segoe UI itself at 15 px
+# (at 17 px it draws 23 px a line, taller than the 19 px of the 14 px body the app gets from Windows' 9 pt default)
+WINDOWS_LINE_FONT = -15 if sys.platform == 'win32' else WINDOWS_FONT
 
 # a platform font of this size (negative px) -> the body and every other size built from it, as use_theme does at startup
 def use_font(root, size):
@@ -1144,15 +1147,15 @@ def test_check_screen_subtitle_shows_in_full_beside_a_long_name_on_the_tight_scr
     shrink_to_minimum(root)
     assert cut_off_widgets(root) == []
 
-# on the tightest screen at the Windows font the check screen opens at its smallest size: both result tables still show
-# a row with every column at full width (the zone verdict never scrolls out of sight), also while an error wraps under
-# the fields onto a second line
+# on the tightest screen with the Windows font's line the check screen opens at its smallest size: both result tables
+# still show a row with every column at full width (the zone verdict never scrolls out of sight), also while an error
+# wraps under the fields onto a second line
 @pytest.mark.parametrize('name', ['Carl', 'Carlos Montesclaros-Villanueva'], ids=['short_name', 'long_name'])
 @pytest.mark.parametrize('message', ['', "That room's floor has no exits measured, so " * 4], ids=['no_message', 'two_line_message'])
-def test_check_screen_tables_show_a_whole_row_on_the_tight_screen(larger_font_root, conn, monkeypatch, message, name):
+def test_check_screen_tables_show_a_whole_row_on_the_tight_screen(root, conn, monkeypatch, message, name):
     monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
     db.set_user_name(conn, 'carl', name)
-    root = larger_font_root
+    use_font(root, WINDOWS_LINE_FONT)
     screen = check_screen(root, conn)
     shrink_to_minimum(root)
     screen.message_var.set(message)
