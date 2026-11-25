@@ -309,6 +309,8 @@ def match_report(conn, df):
     report['fmis_count'] = pd.to_numeric(report['Capacity (Occupants)'], errors='coerce')
     # same room twice, one copy blank -> keep one (ECS 242A)
     report = report.sort_values('fmis_count').drop_duplicates(['property', 'floor', 'space', 'area_m2'])
+    # Excel gives a number column (42) or an all-blank float one -> object, so text can go back in
+    report['building_number'] = report['building_number'].astype(object)
     has_number = report['building_number'].notna()
     report.loc[has_number, 'building_number'] = (report.loc[has_number, 'building_number']
                                                  .astype(str).str.removesuffix('.0'))
@@ -367,7 +369,8 @@ def refresh_space_report(conn, df, report_name, user_login=None, keep_fmis_capac
     # new rooms -> per code until someone counts them
     if len(new_rooms):
         insert = new_rooms[ROOM_KEYS + FMIS_COLS + ['room_type_override', 'note']].copy()
-        insert['room_type_override'] = insert['room_type_override'].str.strip().str.lower()
+        # a raw FMIS export leaves this column blank -> Excel reads it as float, so object before .str
+        insert['room_type_override'] = insert['room_type_override'].astype(object).str.strip().str.lower()
         insert['fmis_capacity'] = new_rooms['fmis_count'].where(new_rooms['fmis_count'] > 0).astype('Int64')
         insert['in_latest_report'] = 1
         insert['last_report'] = report_name

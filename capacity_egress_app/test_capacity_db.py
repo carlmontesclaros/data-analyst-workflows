@@ -168,6 +168,38 @@ def test_refresh_repeated_key_matches_on_area(conn):
     flags = {r['area_m2']: r['in_latest_report'] for r in conn.execute("SELECT * FROM rooms WHERE space = '010'")}
     assert flags == {12.0: 0, 25.0: 1}
 
+# a real .xlsx through the app's reader -> Excel gives numbers or all-blank columns the dataframes above never have
+def write_space_report(path, rows):
+    # rows: dicts by SPACE_REPORT_COLS name, missing columns left blank in the sheet
+    wb = Workbook()
+    wb.active.append(xi.SPACE_REPORT_COLS)
+    for r in rows:
+        wb.active.append([r.get(c) for c in xi.SPACE_REPORT_COLS])
+    wb.save(path)
+    return xi.read_space_report(str(path))
+
+def base_xlsx_rows(**extra):
+    return [dict({'Property': p, 'Floor': f, 'Space': s, 'Net Space (sq m)': a, 'Capacity (Occupants)': c}, **extra)
+            for p, f, s, a, c in BASE_ROWS]
+
+@pytest.mark.parametrize('number, stored', [(42, '42'), (None, None)])
+def test_refresh_reads_numeric_or_blank_building_number_from_xlsx(conn, tmp_path, number, stored):
+    # FMIS building numbers are plain numbers in Excel (42), or the column is empty -> stored as text '42' / NULL
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows(**{'Building Number': number}))
+    result = db.refresh_space_report(conn, df, 'fmis.xlsx')
+    assert (result['matched'], result['new'], result['missing']) == (6, 0, 0)
+    assert {r[0] for r in conn.execute("SELECT building_number FROM rooms")} == {stored}
+
+def test_refresh_new_rooms_with_blank_room_type_column_from_xlsx(conn, tmp_path):
+    # a raw FMIS export has nothing in the room type column -> new rooms go in with no room type override
+    rows = base_xlsx_rows() + [{'Property': 'Clearihue Building', 'Floor': '2', 'Space': 'A203',
+                                'Net Space (sq m)': 20.0, 'Capacity (Occupants)': 0}]
+    df = write_space_report(tmp_path / 'fmis.xlsx', rows)
+    result = db.refresh_space_report(conn, df, 'fmis.xlsx')
+    assert (result['new'], result['missing']) == (1, 0)
+    new = conn.execute("SELECT room_type_override, capacity_source FROM rooms WHERE space = 'A203'").fetchone()
+    assert tuple(new) == (None, 'per code')
+
 def test_insert_exits_warnings(conn):
     exits = pd.DataFrame([
         {'Property': 'Engineering Office Wing', 'Floor': '1', 'exit_id': 'S1 - doorway', 'exit_type': 'doorway', 'clear_width_cm': 88},
