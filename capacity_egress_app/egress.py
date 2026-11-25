@@ -505,8 +505,9 @@ def exit_colour(exit_row):
     return AMBER if check.startswith('review') else GREEN
 
 # capacity check -> what if these rooms had these capacities? nothing is saved
-# kept short so the zone Result column fits a 1366 px laptop at Windows' larger font: at that font the check screen's
-# minimum is 1352 px with this wording, 1489 px with the original "Can't check egress: exits on this floor haven't been measured."
+# kept short: the zone Result column grows to the longest fixed verdict, and at Windows' larger font it must still fit the
+# check screen without a sideways scroll on a 1920x1080 laptop at 150% (test_check_screen_tables_show_a_whole_row_on_the_tight_screen).
+# the original "Can't check egress: exits on this floor haven't been measured." made the screen ask for 137 px more
 CANT_CHECK = "Can't check egress: exits not measured yet"
 
 # one rule for a zone's verdict -> the check result, the floor as it is now and the summary all use it

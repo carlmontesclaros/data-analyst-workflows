@@ -142,13 +142,52 @@ def use_theme(root):
                   darkcolor=[('active', c.CONTROL_BORDER)])
     style.configure('Sash', sashthickness=6, gripcount=0)
 
+# the part of the screen a window can use -> (left, top, width, height) without the taskbar, which can sit on any edge.
+# on Windows that is the work area of the monitor the window is on (the main monitor for a window not shown yet);
+# elsewhere the whole screen. the app is not DPI-aware, so these are the pixels the app itself sees
+def work_area(window):
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT), ('rcWork', wintypes.RECT),
+                        ('dwFlags', wintypes.DWORD)]
+
+        user32 = ctypes.WinDLL('user32')
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.MonitorFromWindow.restype = wintypes.HMONITOR
+        user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
+        info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+        monitor = user32.MonitorFromWindow(int(window.wm_frame(), 16), 1)                     # MONITOR_DEFAULTTOPRIMARY
+        if user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            rect = info.rcWork
+            return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+    return 0, 0, window.winfo_screenwidth(), window.winfo_screenheight()
+
+# room a window's own frame takes (title bar, borders) that the geometry does not count, kept off the work area
+FRAME = (16, 48)
+
 # a platform font can make the widgets ask for more than the size they were laid out at -> grow to fit them, and keep
-# spare_height on top for a line that can wrap longer later
+# spare_height on top for a line that can wrap longer later. neither the opening size nor the smallest size goes past
+# the usable screen: a window bigger than that has its bottom under the taskbar, so the smallest size gives way (the
+# screens wrap and scroll what no longer fits) and the window can still be dragged bigger. a window opens at the size it
+# is laid out at when the usable screen has room for it, and shrinks to the usable screen when it has not. the system places a new
+# window down and to the right of the last one, so a window that would reach past the usable screen there moves back in.
+# a window not shown yet (withdrawn) has no place until the system picks one, so it opens in the middle of the usable screen
 def fit_window(root, size, minimum, spare_height=0):
     root.update_idletasks()
     need = (root.winfo_reqwidth(), root.winfo_reqheight() + spare_height)
-    root.minsize(*(max(m, n) for m, n in zip(minimum, need, strict=True)))
-    root.geometry('{}x{}'.format(*(max(s, n) for s, n in zip(size, need, strict=True))))
+    left, top, *area = work_area(root)
+    usable = tuple(max(a - f, 1) for a, f in zip(area, FRAME, strict=True))
+    smallest = tuple(min(max(m, n), u) for m, n, u in zip(minimum, need, usable, strict=True))
+    root.minsize(*smallest)
+    opened = tuple(min(max(s, m), u) for s, m, u in zip(size, smallest, usable, strict=True))
+    shown = root.winfo_ismapped()
+    placed = ((root.winfo_x(), root.winfo_y()) if shown else
+              tuple(o + (u - w) // 2 for o, u, w in zip((left, top), usable, opened, strict=True)))
+    inside = tuple(min(max(p, o), o + u - w) for p, o, u, w in zip(placed, (left, top), usable, opened, strict=True))
+    root.geometry('{}x{}'.format(*opened) + ('' if shown and inside == placed else '+{}+{}'.format(*inside)))
 
 # a table cell -> its text in the table's real font, and a little room either side
 CELL_PADDING = 8
