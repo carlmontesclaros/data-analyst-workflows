@@ -200,6 +200,28 @@ def test_refresh_new_rooms_with_blank_room_type_column_from_xlsx(conn, tmp_path)
     new = conn.execute("SELECT room_type_override, capacity_source FROM rooms WHERE space = 'A203'").fetchone()
     assert tuple(new) == (None, 'per code')
 
+@pytest.fixture
+def empty_conn():
+    c = sqlite3.connect(':memory:')
+    db.create_schema(c)
+    yield c
+    c.close()
+
+@pytest.mark.parametrize('number, stored', [(42, '42'), (None, None)])
+def test_first_import_reads_numeric_or_blank_building_number_from_xlsx(empty_conn, tmp_path, number, stored):
+    # same .xlsx shapes as refresh, through build_database's first import path -> text '42' / NULL
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows(**{'Building Number': number}))
+    c = empty_conn
+    assert db.insert_rooms(c, xi.classify_rooms(df), 'fmis.xlsx') == 6
+    assert {r[0] for r in c.execute("SELECT building_number FROM rooms")} == {stored}
+
+def test_first_import_blank_room_type_column_from_xlsx(empty_conn, tmp_path):
+    # a raw FMIS export has nothing in the room type column -> rooms go in with no room type override
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows())
+    c = empty_conn
+    assert db.insert_rooms(c, xi.classify_rooms(df), 'fmis.xlsx') == 6
+    assert {r[0] for r in c.execute("SELECT room_type_override FROM rooms")} == {None}
+
 def test_insert_exits_warnings(conn):
     exits = pd.DataFrame([
         {'Property': 'Engineering Office Wing', 'Floor': '1', 'exit_id': 'S1 - doorway', 'exit_type': 'doorway', 'clear_width_cm': 88},

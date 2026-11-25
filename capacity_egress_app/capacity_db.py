@@ -142,12 +142,13 @@ def insert_rooms(conn, df, report_name):
     rooms = rooms.drop(columns=['Capacity (Occupants)'])
 
     # building number 237.0 -> 237 and blank stays blank
+    rooms['building_number'] = rooms['building_number'].astype(object)
     has_number = rooms['building_number'].notna()
     rooms.loc[has_number, 'building_number'] = (rooms.loc[has_number, 'building_number']
                                                 .astype(str).str.removesuffix('.0'))
 
     # Office and office are the same room type
-    rooms['room_type_override'] = rooms['room_type_override'].str.strip().str.lower()
+    rooms['room_type_override'] = rooms['room_type_override'].astype(object).str.strip().str.lower()
 
     rooms['in_latest_report'] = 1
     rooms['last_report'] = report_name
