@@ -760,7 +760,7 @@ def test_use_theme_builds_the_scale_from_the_platform_font(platform, body):
         r.tk.call('tk', 'scaling', scaling)
         r.destroy()
 
-# styles the next screens use: defined in use_theme, nothing on today's screens uses them yet
+# the card, section, tool button and tab styles, as use_theme defines them
 def test_card_section_toolbutton_and_notebook_styles_are_defined(root):
     style = ttk.Style(root)
     assert style.lookup('Card.TFrame', 'background') == colours.SURFACE
@@ -1175,3 +1175,145 @@ def test_screens_open_at_their_laid_out_size_when_the_work_area_has_room(larger_
     win = opened_window(larger_font_root, open_screen, conn)
     assert (win.winfo_width(), win.winfo_height()) == LAID_OUT
     assert win.resizable() == (True, True)
+
+
+# part 2: the check screen -> its four sections are white cards under their titles, and each verdict is a chip
+SECTIONS = ["1. Find a room", "2. Room", "3. Try a new capacity or room type", "4. Result"]
+
+def styled(window, kind, style):
+    return [w for w in all_widgets(window) if isinstance(w, kind) and str(w.cget('style')) == style]
+
+def test_check_screen_sections_are_cards_that_need_no_sideways_scroll(larger_font_root, conn, work_area):
+    root = larger_font_root
+    use_font(root, WINDOWS_LINE_FONT)
+    # the widest row a check usually makes: an unvisited room tried far over its per code load
+    conn.execute("UPDATE rooms SET capacity = NULL")
+    screen = check_screen(root, conn)
+    screen.new_var.set('300')
+    screen.add_to_check()
+    root.update()
+    assert [w for w in all_widgets(root) if isinstance(w, ttk.Labelframe)] == []
+    titles, cards = styled(root, ttk.Label, 'Section.TLabel'), styled(root, ttk.Frame, 'Card.TFrame')
+    assert [str(t.cget('text')) for t in titles] == SECTIONS
+    assert len(cards) == len(SECTIONS)
+    for title, card in zip(titles, cards, strict=True):
+        assert title.master is card.master
+        assert title.winfo_rootx() == card.winfo_rootx()
+        assert title.winfo_rooty() + title.winfo_height() <= card.winfo_rooty()
+    # at the size it opens at: nothing is cut off and neither result table scrolls sideways. (the room list does, by
+    # design, for a building name longer than its column)
+    assert at_least((root.winfo_width(), root.winfo_height()), asked_for(root))
+    assert cut_off_widgets(root) == []
+    assert screen.check_tree.get_children() and screen.zone_tree.get_children()
+    assert [tree.xview() for tree in (screen.check_tree, screen.zone_tree)] == [(0.0, 1.0)] * 2
+
+def test_check_screen_cards_have_no_grey_patches(root, conn):
+    check_screen(root, conn)
+    cards = styled(root, ttk.Frame, 'Card.TFrame')
+    assert cards
+    style = ttk.Style(root)
+    grey = [f"{w.winfo_class()} {w}" for card in cards for w in all_widgets(card) if isinstance(w, (ttk.Label, ttk.Frame))
+            and style.lookup(str(w.cget('style')) or w.winfo_class(), 'background') != colours.SURFACE]
+    assert grey == []
+    # only the section's own card has the 1 px line: the frames that lay out its contents draw no box of their own
+    inner = [w for card in cards for w in all_widgets(card) if isinstance(w, ttk.Frame)]
+    assert inner
+    assert [str(w) for w in inner if str(style.lookup(str(w.cget('style')), 'relief')) != 'flat'] == []
+
+# clam draws a frame's border as two lines. 'solid' paints both in bordercolor (2 px); 'raised' paints the inner one in
+# lightcolor (top, left) and darkcolor (bottom, right): in the card's own white that leaves the 1 px line a card has
+def test_a_card_has_a_1_px_line(root):
+    style = ttk.Style(root)
+    assert str(style.lookup('Card.TFrame', 'relief')) == 'raised'
+    assert [style.lookup('Card.TFrame', option) for option in ('lightcolor', 'darkcolor')] == [colours.SURFACE] * 2
+
+def test_check_screen_card_values_are_larger_than_their_captions(root, conn):
+    screen = check_screen(root, conn)
+    captions = [w for w in all_widgets(root) if isinstance(w, ttk.Label) and w.master is screen.badge.master.master
+                and str(w.cget('text')) in ('Room type', 'Area', 'Room capacity', 'Per code load')]
+    assert [str(w.cget('font')) for w in captions] == [widgets.FONTS['caption']] * 4
+    values = [str(v) for v in [*screen.card_vars.values(), *screen.trial_vars.values()]]
+    shown = [w for w in all_widgets(root) if isinstance(w, ttk.Label) and str(w.cget('textvariable')) in values]
+    assert [str(w.cget('font')) for w in shown] == [widgets.FONTS['large']] * 8
+
+def chip_look(chip):
+    return str(chip.cget('image')), str(chip.cget('bg')), str(chip.cget('fg'))
+
+def mark_chip(root, colour, fill):
+    return str(colours.marks(root)[colour]), fill, colours.STATUS[colour][0]
+
+PLAIN = ('', colours.SURFACE, colours.TEXT_FG)                   # no verdict: text (or nothing) straight on the card
+
+def test_check_screen_empty_state_shows_no_chip(root, conn):
+    screen = CheckScreen(root, conn, 'carl')
+    root.update()
+    assert screen.room_title.get() == "Pick a room on the left"
+    for chip in (screen.badge, screen.trial_badge):
+        assert (chip.cget('text'), chip_look(chip)) == ('', PLAIN)
+
+def test_check_screen_verdicts_are_chips_with_their_status_mark(root, conn):
+    screen = check_screen(root, conn)
+    green = mark_chip(root, egress.GREEN, colours.STATUS[egress.GREEN][1])
+    assert (screen.badge.cget('text'), chip_look(screen.badge)) == ("Now: within per code", green)
+    assert str(screen.badge.cget('compound')) == str(screen.trial_badge.cget('compound')) == 'left'
+    # nothing tried yet -> a line of help, not a verdict
+    assert screen.trial_badge.cget('text') == "With change: pick a room type or type a new capacity in 3 below"
+    assert chip_look(screen.trial_badge) == PLAIN
+    screen.new_var.set('300')
+    amber = mark_chip(root, egress.AMBER, colours.STATUS[egress.AMBER][1])
+    assert screen.trial_badge.cget('text').startswith("With change: needs justification, +")
+    assert chip_look(screen.trial_badge) == amber
+    screen.start_over()
+    assert chip_look(screen.trial_badge) == PLAIN
+
+# grey (no data) has no tint of its own, and a room out of scope no status: both chips sit on the window's ground colour
+@pytest.mark.parametrize(('change', 'status', 'ink'),
+                         [('capacity = NULL', egress.GREY, colours.MUTED),
+                          ("sub_category = '16.2 - Other Non-Assignable Area'", None, colours.TEXT_FG)])
+def test_check_screen_chip_without_a_tint_sits_on_the_ground(root, conn, change, status, ink):
+    conn.execute(f"UPDATE rooms SET {change}")    # noqa: S608  (the two fixed texts above)
+    screen = check_screen(root, conn)
+    mark = str(colours.marks(root)[status]) if status else ''
+    assert screen.badge.cget('text').startswith("Now: ")
+    assert chip_look(screen.badge) == (mark, colours.GROUND, ink)
+    assert contrast(ink, colours.GROUND) >= 4.5
+    assert status is None or contrast(colours.STATUS[status][2], colours.GROUND) >= 3
+
+def test_check_screen_picking_no_room_clears_the_chip(root, conn):
+    screen = check_screen(root, conn)
+    screen.new_var.set('300')
+    screen.room = None
+    screen.show_trial()
+    assert (screen.trial_badge.cget('text'), chip_look(screen.trial_badge)) == ('', PLAIN)
+
+# two long verdicts (a room out of scope says why on each) don't fit one line on the tight screen: the second chip goes
+# under the first, and the result tables keep a row
+def test_long_verdict_chips_stack_instead_of_being_cut_off(root, conn, monkeypatch):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    use_font(root, WINDOWS_LINE_FONT)
+    conn.execute("UPDATE rooms SET sub_category = '16.2 - Other Non-Assignable Area'")
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    for typed in ('', '30'):                          # the line of help beside the verdict, then both verdicts
+        screen.new_var.set(typed)
+        root.update()
+        assert 'out of scope' in screen.badge.cget('text')
+        assert cut_off_widgets(root) == []
+        assert screen.trial_badge.winfo_rooty() >= screen.badge.winfo_rooty() + screen.badge.winfo_height()
+        assert screen.trial_badge.winfo_rootx() == screen.badge.winfo_rootx()
+        assert rows_shown(screen.check_tree) >= 1
+        assert rows_shown(screen.zone_tree) >= 1
+
+# short verdicts share a line, also after long ones were stacked
+def test_short_verdict_chips_sit_side_by_side(root, conn, monkeypatch):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    use_font(root, WINDOWS_LINE_FONT)
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    short = screen.badge.cget('text')
+    for text in (short + ' and on' * 20, short):
+        screen.show_chip(screen.badge, text, colours.NO_CHIP)
+        root.update()
+        beside = screen.trial_badge.winfo_rooty() == screen.badge.winfo_rooty()
+        assert beside == (text == short)
+    assert screen.trial_badge.winfo_rootx() >= screen.badge.winfo_rootx() + screen.badge.winfo_width()

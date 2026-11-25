@@ -5,9 +5,6 @@ import egress
 # status -> same on every table, both screens and the exports (README "Colours"). on the screens a status is a mark in
 # the table's first column, so shape and colour both say it, plus a row tint only where someone has to act. the exports
 # keep their Excel fills (exports.py)
-# ROW_BG is the old whole-row fill: only the check screen's two verdict badges still use it, until they become chips
-ROW_BG = {egress.GREEN: '#C6EFCE', egress.AMBER: '#FFEB9C', egress.RED: '#FFC7CE', egress.GREY: '#E7E6E6'}
-ROW_FG = '#1A1A1A'
 CHANGED_FG = '#005FB8'                                 # a value the check changed (blue, same as the theme accent)
 
 GROUND = '#F3F4F6'                                     # window background: cards and tables sit on it in white
@@ -101,6 +98,15 @@ def colour_tags(tree):
 # the mark and tags of a row with this status (no mark and no tag for a room out of scope) + any tags of its own
 def row(tree, colour, *tags):
     return {'image': tree.status_marks[colour] if colour in STATUS else '', 'tags': tuple(t for t in (colour, *tags) if t)}
+
+# a verdict chip (a tk.Label with compound='left') -> the status mark, then the verdict in the status ink on its tint.
+# grey has no tint, and a room out of scope no status and so no mark: both sit on the ground colour, still a chip on a card
+def chip(widget, colour):
+    ink, tint, _ = STATUS.get(colour, (TEXT_FG, None, None))
+    return {'image': marks(widget)[colour] if colour in STATUS else '', 'bg': tint or GROUND, 'fg': ink}
+
+# the same label with no verdict to show: empty, or a line of help straight on the card
+NO_CHIP = {'image': '', 'bg': SURFACE, 'fg': TEXT_FG}
 
 def legend(parent):
     frame = ttk.Frame(parent)
