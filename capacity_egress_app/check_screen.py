@@ -127,15 +127,14 @@ class CheckScreen:
         # header
         head = ttk.Frame(outer)
         head.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 4))
-        # who first: the buttons keep their room, the words give way
+        # the name and buttons share the title's line; the subtitle has the whole width under both, so a long name never
+        # wraps it onto another line (it wraps only in a window narrower than itself)
+        head.columnconfigure(0, weight=1)
         who = ttk.Frame(head)
-        who.pack(side='right', anchor='n')
-        titles = ttk.Frame(head)
-        titles.pack(side='left', fill='x', expand=True)
-        ttk.Label(titles, text="Room capacity check", font=self.fonts['title']).pack(anchor='w')
-        # wraps to the width the name and buttons leave it, so a long name on a small screen never cuts it off
-        wrap_to_width(ttk.Label(titles, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
-                                foreground=colours.MUTED)).pack(anchor='w', fill='x')
+        who.grid(row=0, column=1, sticky='ne')
+        ttk.Label(head, text="Room capacity check", font=self.fonts['title']).grid(row=0, column=0, sticky='w')
+        wrap_to_width(ttk.Label(head, text="Try a new capacity: see the code's number for the room, and whether the floor's exits still carry everyone.",
+                                foreground=colours.MUTED)).grid(row=1, column=0, columnspan=2, sticky='ew')
         name = db.get_user_name(self.conn, self.user_login) or self.user_login
         role = "Editor" if self.editor else "Viewer"
         ttk.Label(who, text=f"{name}  ·  {role}", font=self.fonts['strong']).pack(side='left', padx=(0, 12))

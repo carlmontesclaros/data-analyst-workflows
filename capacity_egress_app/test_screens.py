@@ -1134,9 +1134,9 @@ def test_screens_can_still_be_dragged_bigger(larger_font_root, conn, monkeypatch
     assert (root.winfo_width(), root.winfo_height()) == (1360, 760)
     assert cut_off_widgets(root) == []
 
-# on the tightest screen at the Windows font the check screen's header is narrower than its subtitle once a long name and
-# the buttons take their room: the subtitle wraps to the width it gets, and is never cut off at the smallest size
-def test_check_screen_subtitle_wraps_beside_a_long_name_on_the_tight_screen(larger_font_root, conn, monkeypatch):
+# on the tightest screen at the Windows font a long name and the buttons take their room on the title's line: the subtitle
+# under them is never cut off at the smallest size
+def test_check_screen_subtitle_shows_in_full_beside_a_long_name_on_the_tight_screen(larger_font_root, conn, monkeypatch):
     monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
     db.set_user_name(conn, 'carl', 'Carlos Montesclaros-Villanueva')
     root = larger_font_root
@@ -1147,9 +1147,11 @@ def test_check_screen_subtitle_wraps_beside_a_long_name_on_the_tight_screen(larg
 # on the tightest screen at the Windows font the check screen opens at its smallest size: both result tables still show
 # a row with every column at full width (the zone verdict never scrolls out of sight), also while an error wraps under
 # the fields onto a second line
+@pytest.mark.parametrize('name', ['Carl', 'Carlos Montesclaros-Villanueva'], ids=['short_name', 'long_name'])
 @pytest.mark.parametrize('message', ['', "That room's floor has no exits measured, so " * 4], ids=['no_message', 'two_line_message'])
-def test_check_screen_tables_show_a_whole_row_on_the_tight_screen(larger_font_root, conn, monkeypatch, message):
+def test_check_screen_tables_show_a_whole_row_on_the_tight_screen(larger_font_root, conn, monkeypatch, message, name):
     monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    db.set_user_name(conn, 'carl', name)
     root = larger_font_root
     screen = check_screen(root, conn)
     shrink_to_minimum(root)
