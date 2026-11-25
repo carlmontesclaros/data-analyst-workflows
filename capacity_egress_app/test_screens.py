@@ -1098,19 +1098,22 @@ def test_main_window_shown_after_it_is_built_opens_in_the_middle_of_the_work_are
     assert abs(gaps[2] - gaps[3]) <= TITLE_BAR_AND_BORDERS[1]
 
 # the real work area, as the system reports it, for a window not shown yet: on Windows the main monitor's work area, elsewhere
-# the whole screen
+# the whole screen: from its top left corner, it holds the biggest window Tk lets a window grow to (wm maxsize, the screen
+# less any menu bar) and stays within the root window Tk draws on (the virtual root, the screen itself)
 def test_work_area_of_a_window_not_shown_yet_is_the_main_monitors(root):
     window = tk.Toplevel(root)
     window.withdraw()
+    area = REAL_WORK_AREA(window)
     if sys.platform == 'win32':
         import ctypes
         from ctypes import wintypes
         rect = wintypes.RECT()
         assert ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)         # SPI_GETWORKAREA
-        expected = (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+        assert area == (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
     else:
-        expected = (0, 0, window.winfo_screenwidth(), window.winfo_screenheight())
-    assert REAL_WORK_AREA(window) == expected
+        assert area[:2] == (0, 0)
+        assert at_least(area[2:], window.wm_maxsize())
+        assert within(area[2:], (window.winfo_vrootwidth(), window.winfo_vrootheight()))
 
 @pytest.mark.parametrize('open_screen', [check_screen, editor_screen])
 def test_screens_show_everything_at_their_smallest_size_inside_the_work_area(larger_font_root, conn, work_area, open_screen):
@@ -1139,6 +1142,24 @@ def test_check_screen_subtitle_wraps_beside_a_long_name_on_the_tight_screen(larg
     root = larger_font_root
     check_screen(root, conn)
     shrink_to_minimum(root)
+    assert cut_off_widgets(root) == []
+
+# on the tightest screen at the Windows font the check screen opens at its smallest size: both result tables still show
+# a row with every column at full width (the zone verdict never scrolls out of sight), also while an error wraps under
+# the fields onto a second line
+@pytest.mark.parametrize('message', ['', "That room's floor has no exits measured, so " * 4], ids=['no_message', 'two_line_message'])
+def test_check_screen_tables_show_a_whole_row_on_the_tight_screen(larger_font_root, conn, monkeypatch, message):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    root = larger_font_root
+    screen = check_screen(root, conn)
+    shrink_to_minimum(root)
+    screen.message_var.set(message)
+    root.update()
+    for tree, columns in [(screen.check_tree, check_screen_module.CHECK_COLUMNS),
+                          (screen.zone_tree, check_screen_module.ZONE_COLUMNS)]:
+        assert colours.MARK_COLUMN + sum(int(tree.column(col, 'width')) for col, _ in columns) <= tree.winfo_width()
+        assert tree.xview() == (0.0, 1.0)
+        assert rows_shown(tree) >= 1
     assert cut_off_widgets(root) == []
 
 # on a screen with room each screen opens at the size it is laid out at, not smaller
