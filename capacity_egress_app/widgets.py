@@ -212,8 +212,8 @@ def fit_columns(tree, columns, always=None):
         tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
     heading.destroy()
 
-# a table's sideways bar -> the table's xscrollcommand: the bar shows only while there is more to see sideways, so an
-# unneeded bar takes no height. the bar must be gridded, so grid() puts it back where it was
+# a scrollbar that comes and goes -> the widget's xscrollcommand (or yscrollcommand): the bar shows only while there is
+# more to see that way, so an unneeded sideways bar takes no height. the bar must be gridded, so grid() puts it back
 def sideways_bar(bar):
     def scroll_sideways(first, last):
         if float(first) <= 0 and float(last) >= 1:
@@ -353,6 +353,77 @@ class LongTextColumns:
         if self.tip is not None:
             self.tip.destroy()
         self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
+
+# a dialog -> as big as what it holds asks for, never past the usable screen (fit_window). again whenever what it holds
+# changes: an open dialog only grows, so it never jumps smaller under the person typing in it
+def fit_dialog(window):
+    size = (window.winfo_width(), window.winfo_height()) if window.winfo_ismapped() else (0, 0)
+    fit_window(window, size, (0, 0))
+
+# the widest a preview's words and statuses get before they wrap, so the dialog stays well inside a small screen
+PREVIEW_WRAP, STATUS_WRAP = 580, 360
+
+# a save preview -> a small white table: a status mark, what changes, the status. it asks for the size of its rows; given
+# less height (a long preview on a small screen) it scrolls
+class PreviewTable(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, style='Card.TFrame', padding=2)
+        self.canvas = tk.Canvas(self, background=c.SURFACE, highlightthickness=0, borderwidth=0, width=1, height=1)
+        self.bar = ttk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=sideways_bar(self.bar))
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        self.bar.grid(row=0, column=1, sticky='ns')
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.body = ttk.Frame(self.canvas, style='Inner.Card.TFrame')
+        self.body.columnconfigure(1, weight=1)
+        window = self.canvas.create_window(0, 0, window=self.body, anchor='nw')
+        self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfigure(window, width=e.width))
+
+    # rows, top to bottom: a text -> a line across the table; (colour, text, status) -> a row with the status mark, tinted
+    # where someone has to act; (colour, text, None) -> a line under that row, on the same tint
+    def show(self, rows):
+        for old in self.body.winfo_children():
+            old.destroy()
+        shapes = c.marks(self)
+        gap = (c.MARK_COLUMN - c.MARK_SIZE) // 2
+        columns, across, height = [0, 0, 0], 0, 0              # the size the rows ask for
+        for i, row in enumerate(rows):
+            cells = []                                        # (label, first column, columns it spans)
+            if isinstance(row, str):
+                cells.append((ttk.Label(self.body, text=row, style='Card.TLabel', padding=(8, 1), justify='left',
+                                        wraplength=PREVIEW_WRAP + STATUS_WRAP), 0, 3))
+            else:
+                colour, text, status = row
+                background, foreground = c.row_look(colour)
+                look = {'background': background, 'foreground': foreground, 'padding': (8, 1), 'justify': 'left', 'anchor': 'nw'}
+                words = ttk.Label(self.body, text=text, wraplength=PREVIEW_WRAP, **look)
+                if status is None:
+                    cells += [(ttk.Label(self.body, background=background), 0, 1), (words, 1, 2)]
+                else:
+                    # the mark sits level with the row's first line, in a column as wide as a table's mark column
+                    mark = ttk.Label(self.body, image=shapes.get(colour, ''), background=background, anchor='n',
+                                     padding=(gap, 6, gap, 0))
+                    cells += [(mark, 0, 1), (words, 1, 1),
+                              (ttk.Label(self.body, text=status, wraplength=STATUS_WRAP, **look), 2, 1)]
+            for label, column, span in cells:
+                label.grid(row=i, column=column, columnspan=span, sticky='nsew')
+                if span == 1:
+                    columns[column] = max(columns[column], label.winfo_reqwidth())
+            across = max([across] + [sum(columns[:column]) + label.winfo_reqwidth() for label, column, span in cells if span > 1])
+            height += max(label.winfo_reqheight() for label, _, _ in cells)
+        # added up from the labels, which know their size at once: an update here would draw the dialog half built
+        width = max(sum(columns), across)
+        line = int(self.tk.call('font', 'metrics', 'TkDefaultFont', '-linespace'))
+        # room for the scrollbar on top of the rows' own width: the rows fill it while there is no bar, and a bar takes it
+        # without cutting a row's end
+        self.canvas.configure(width=width + self.bar.winfo_reqwidth(), height=height, scrollregion=(0, 0, width, height),
+                              yscrollincrement=line)
+
+    # the mouse wheel anywhere in the dialog -> the rows scroll, when there is more of them than shows
+    def wheel(self, event):
+        if event.delta and self.canvas.yview() != (0.0, 1.0):
+            self.canvas.yview_scroll(-1 if event.delta > 0 else 1, 'units')
 
 # a section of a screen -> its title above a card. returns the card to fill; its .master holds both, and is what to place
 def card_section(parent, title, padding):

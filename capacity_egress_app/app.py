@@ -11,7 +11,8 @@ import code_factors as cf
 import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
-from widgets import BuildingBox, FlowRow, LongTextColumns, anchor_for, fit_columns, fit_window, heading_text, open_path, sideways_bar, use_theme, wrap_to_width
+from widgets import (BuildingBox, FlowRow, LongTextColumns, PreviewTable, anchor_for, fit_columns, fit_dialog, fit_window,
+                     heading_text, open_path, sideways_bar, use_theme, wrap_to_width)
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +51,7 @@ EXIT_COLUMNS = [('floor', 50), ('wing', 58), ('exit_id', 110), ('exit_type', 74)
 ZONE_LONG = ('floor', 'status', 'flags')
 ROOM_LONG = ('property', 'sub_category', 'flag', 'note')
 EXIT_LONG = ('exit_type', 'width_check', 'measured_by', 'notes')
+FACTOR_LONG = ('source', 'note')                       # the Code factors tables' free text
 
 # no exits measured -> capacity unknown, not 0 (0 would read as nobody can get out)
 def exit_capacity_text(zone):
@@ -58,13 +60,40 @@ def exit_capacity_text(zone):
 def text_or_blank(v):
     return '' if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
 
-# one zone of a save preview -> its load before and after against its exit capacity. before: the zones as they are now.
-# gap: what goes between the numbers and the status
-def zone_preview(before, z, gap='  '):
+# one zone of a save preview -> its row: the status colour, its load before and after against its exit capacity, and the
+# status. before: the zones as they are now. building: its name first, when the preview spans several
+def zone_preview(before, z, building=''):
     b = before[(before['floor_key'] == z['floor_key']) & (before['zone_wing'] == z['zone_wing'])]
     was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
-    return (f"floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
-            f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}{gap}[{z['status']}]")
+    return (egress.zone_colour(z),
+            f"{building}floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
+            f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}", f"[{z['status']}]")
+
+# a room dialog (change capacity, room type or zone) -> its window, and the grid its title, form and preview go in
+def room_dialog(parent, title):
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.transient(parent)
+    win.grab_set()
+    frame = ttk.Frame(win, padding=12)
+    frame.pack(fill='both', expand=True)
+    frame.columnconfigure(2, weight=1)
+    return win, frame
+
+# a room dialog's row under its form: the preview table, the one part that gives up height on a small screen
+def preview_table(win, frame, row):
+    table = PreviewTable(frame)
+    table.grid(row=row, column=0, columnspan=3, sticky='nsew', pady=(10, 12))
+    frame.rowconfigure(row, weight=1)
+    win.bind('<MouseWheel>', table.wheel)
+    return table
+
+# a form's last line: Save then Cancel, at its right edge
+def save_and_cancel(parent, save, cancel):
+    buttons = ttk.Frame(parent)
+    ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=(0, 8))
+    ttk.Button(buttons, text="Cancel", command=cancel).pack(side='left')
+    return buttons
 
 
 class App:
@@ -270,6 +299,7 @@ class App:
         frame = ttk.Frame(parent)
         frame.pack(fill='both', expand=True)
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], show='headings', height=height)
+        tree.column('#0', width=0, minwidth=0)       # not shown, so no width for the long columns to leave it (colour_tags shows it)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
@@ -461,12 +491,7 @@ class App:
         room = self.current_room()
         if room is None:
             return
-        win = tk.Toplevel(self.root)
-        win.title(f"Change capacity - {room['property']} {room['space']}")
-        win.transient(self.root)
-        win.grab_set()
-        frame = ttk.Frame(win, padding=10)
-        frame.pack(fill='both', expand=True)
+        win, frame = room_dialog(self.root, f"Change capacity - {room['property']} {room['space']}")
 
         current = '' if pd.isna(room['capacity']) else str(int(room['capacity']))
         ttk.Label(frame, text=f"{room['property']} floor {room['floor']} room {room['space']}",
@@ -474,10 +499,10 @@ class App:
         ttk.Label(frame, text=f"Room capacity now: {current or '-'} ({room['capacity_source']}),  "
                               f"per code load: {room['per_code_load']}").grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        ttk.Label(frame, text="New capacity:").grid(row=2, column=0, sticky='w')
+        ttk.Label(frame, text="New capacity:").grid(row=2, column=0, sticky='w', padx=(0, 12))
         cap_var = tk.StringVar(value=current)
         cap_entry = ttk.Entry(frame, textvariable=cap_var, width=10)
-        cap_entry.grid(row=2, column=1, sticky='w')
+        cap_entry.grid(row=2, column=1, sticky='w', pady=2)
         cap_entry.focus_set()
         # undo while typing -> back to the value the box opened with
         cap_entry.bind('<Control-z>', lambda e: cap_var.set(current))
@@ -486,20 +511,17 @@ class App:
         ttk.Label(frame, text="Source:").grid(row=3, column=0, sticky='w')
         source_var = tk.StringVar(value='PM change')
         src = ttk.Frame(frame)
-        src.grid(row=3, column=1, columnspan=2, sticky='w')
+        src.grid(row=3, column=1, columnspan=2, sticky='w', pady=4)
         for s in db.CAPACITY_SOURCES:
-            ttk.Radiobutton(src, text=s, value=s, variable=source_var).pack(side='left')
+            ttk.Radiobutton(src, text=s, value=s, variable=source_var).pack(side='left', padx=(0, 16))
 
         ttk.Label(frame, text="Why:").grid(row=4, column=0, sticky='w')
         why_var = tk.StringVar()
         why_entry = ttk.Entry(frame, textvariable=why_var, width=50)
-        why_entry.grid(row=4, column=1, columnspan=2, sticky='w')
+        why_entry.grid(row=4, column=1, columnspan=2, sticky='we', pady=2)
         why_entry.bind('<Control-z>', lambda e: why_var.set(''))
 
-        preview_var = tk.StringVar()
-        ttk.Label(frame, textvariable=preview_var, justify='left', wraplength=560).grid(
-            row=5, column=0, columnspan=3, sticky='w', pady=8)
-
+        table = preview_table(win, frame, row=5)
         before = self.floor_result(room['property'], room['floor'])['zones']
 
         # the number typed -> None, and the preview says so, when it isn't a whole number from 0
@@ -509,7 +531,7 @@ class App:
                 if new < 0:
                     raise ValueError
             except ValueError:
-                preview_var.set("Type a whole number (0 or more).")
+                table.show(["Type a whole number (0 or more)."])
                 return None
             return new
 
@@ -522,15 +544,19 @@ class App:
             rooms.loc[mask, 'capacity'] = new
             rooms.loc[mask, 'capacity_source'] = source_var.get()
             after = self.floor_result(room['property'], room['floor'], rooms=rooms)['zones']
-            lines = ["Preview (not saved):"]
+            rows = ["Preview (not saved):"]
             for _, z in after.iterrows():
-                lines.append(f"  {zone_preview(before, z)}")
+                rows.append(zone_preview(before, z))
                 if z['flags']:
-                    lines.append(f"     {z['flags']}")
-            preview_var.set('\n'.join(lines))
+                    rows.append((rows[-1][0], z['flags'], None))
+            table.show(rows)
 
-        cap_var.trace_add('write', preview)
-        source_var.trace_add('write', preview)
+        def typed(*_):
+            preview()
+            fit_dialog(win)
+
+        cap_var.trace_add('write', typed)
+        source_var.trace_add('write', typed)
         preview()
 
         def save():
@@ -552,11 +578,9 @@ class App:
             self.after_change(f"saved: {room['property']} {room['space']} capacity {current or '-'} -> {new}",
                               floor=(room['property'], room['floor']))
 
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=6, column=0, columnspan=3, sticky='e')
-        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
-        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        save_and_cancel(frame, save, win.destroy).grid(row=6, column=0, columnspan=3, sticky='e')
         win.bind('<Escape>', lambda e: win.destroy())
+        fit_dialog(win)
 
     # change room type -> sets the m2 per person, so the per-code load changes; preview the zone, then save or cancel
     def change_room_type(self):
@@ -568,12 +592,7 @@ class App:
         types = cf.room_types(self.factors)
         override = text_or_blank(room['room_type_override']).strip().lower()
 
-        win = tk.Toplevel(self.root)
-        win.title(f"Change room type - {room['property']} {room['space']}")
-        win.transient(self.root)
-        win.grab_set()
-        frame = ttk.Frame(win, padding=10)
-        frame.pack(fill='both', expand=True)
+        win, frame = room_dialog(self.root, f"Change room type - {room['property']} {room['space']}")
         current = '' if pd.isna(room['capacity']) else int(room['capacity'])
         ttk.Label(frame, text=f"{room['property']} floor {room['floor']} room {room['space']}",
                   font='AppStrongFont').grid(row=0, column=0, columnspan=3, sticky='w')
@@ -582,20 +601,18 @@ class App:
                               f"Per code load now: {room['per_code_load']},  room capacity: {current if current != '' else '-'} "
                               f"({room['capacity_source']})").grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        ttk.Label(frame, text="New room type:").grid(row=2, column=0, sticky='w')
+        ttk.Label(frame, text="New room type:").grid(row=2, column=0, sticky='w', padx=(0, 12))
         type_var = tk.StringVar(value=override or default_choice)
         ttk.Combobox(frame, textvariable=type_var, values=[default_choice] + types, state='readonly', width=34).grid(
-            row=2, column=1, sticky='w')
+            row=2, column=1, sticky='w', pady=2)
         ttk.Label(frame, text="Why:").grid(row=3, column=0, sticky='w')
         why_var = tk.StringVar()
         why_entry = ttk.Entry(frame, textvariable=why_var, width=50)
-        why_entry.grid(row=3, column=1, columnspan=2, sticky='w')
+        why_entry.grid(row=3, column=1, columnspan=2, sticky='we', pady=2)
         why_entry.focus_set()
         why_entry.bind('<Control-z>', lambda e: why_var.set(''))
 
-        preview_var = tk.StringVar()
-        ttk.Label(frame, textvariable=preview_var, justify='left', wraplength=560).grid(
-            row=4, column=0, columnspan=3, sticky='w', pady=8)
+        table = preview_table(win, frame, row=4)
         before = self.floor_result(room['property'], room['floor'])['zones']
 
         def chosen():
@@ -606,15 +623,18 @@ class App:
             rooms.loc[rooms['room_id'] == room['room_id'], 'room_type_override'] = chosen()
             after = self.floor_result(room['property'], room['floor'], rooms=rooms)
             r = after['rooms'].set_index('room_id').loc[room['room_id']]
-            verdict = egress.judge_room(r, egress.room_capacity(r))[0]
-            lines = [f"Preview (not saved): per code load {room['per_code_load']} -> {r['per_code_load']}, "
-                     f"load used {room['load_used']} -> {r['load_used']}",
-                     f"  room: {verdict}"]
-            for _, z in after['zones'].iterrows():
-                lines.append(f"  {zone_preview(before, z)}")
-            preview_var.set('\n'.join(lines))
+            verdict, colour, _ = egress.judge_room(r, egress.room_capacity(r))
+            rows = [f"Preview (not saved): per code load {room['per_code_load']} -> {r['per_code_load']}, "
+                    f"load used {room['load_used']} -> {r['load_used']}",
+                    (colour, f"room: {verdict}", '')]
+            rows += [zone_preview(before, z) for _, z in after['zones'].iterrows()]
+            table.show(rows)
 
-        type_var.trace_add('write', preview)
+        def picked(*_):
+            preview()
+            fit_dialog(win)
+
+        type_var.trace_add('write', picked)
         preview()
 
         def save():
@@ -634,11 +654,9 @@ class App:
                                   f"{text_or_blank(room['room_type']) or '-'} -> {chosen() or default or '-'}",
                                   floor=(room['property'], room['floor']))
 
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=5, column=0, columnspan=3, sticky='e')
-        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
-        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        save_and_cancel(frame, save, win.destroy).grid(row=5, column=0, columnspan=3, sticky='e')
         win.bind('<Escape>', lambda e: win.destroy())
+        fit_dialog(win)
 
     # the rooms picked in the list, one or many, read again first -> their rows, or None after saying why not
     def picked_rooms(self):
@@ -673,12 +691,7 @@ class App:
         names |= {str(z).strip().upper() for z in self.rooms.loc[in_buildings, 'zone_override'].dropna()}
         choices = [NO_ZONE] + sorted(n for n in names if n.isalpha())
 
-        win = tk.Toplevel(self.root)
-        win.title(f"Change zone - {name}")
-        win.transient(self.root)
-        win.grab_set()
-        frame = ttk.Frame(win, padding=10)
-        frame.pack(fill='both', expand=True)
+        win, frame = room_dialog(self.root, f"Change zone - {name}")
         if one is not None:
             heading = f"{one['property']} floor {one['floor']} room {one['space']}"
             now = f"Zone now: {current[0] or NO_ZONE}"
@@ -697,21 +710,19 @@ class App:
         ttk.Label(frame, text=heading, font='AppStrongFont').grid(row=0, column=0, columnspan=3, sticky='w')
         ttk.Label(frame, text=now, justify='left', wraplength=560).grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
 
-        ttk.Label(frame, text="New zone:").grid(row=2, column=0, sticky='w')
+        ttk.Label(frame, text="New zone:").grid(row=2, column=0, sticky='w', padx=(0, 12))
         # rooms in different zones -> nothing filled in, so a Save can't clear them without being asked to
         zone_var = tk.StringVar(value=(current[0] or NO_ZONE) if len(set(current)) == 1 else '')
         zone_box = ttk.Combobox(frame, textvariable=zone_var, values=choices, width=34)
-        zone_box.grid(row=2, column=1, sticky='w')
+        zone_box.grid(row=2, column=1, sticky='w', pady=2)
         zone_box.focus_set()
         ttk.Label(frame, text="Why:").grid(row=3, column=0, sticky='w')
         why_var = tk.StringVar()
         why_entry = ttk.Entry(frame, textvariable=why_var, width=50)
-        why_entry.grid(row=3, column=1, columnspan=2, sticky='w')
+        why_entry.grid(row=3, column=1, columnspan=2, sticky='we', pady=2)
         why_entry.bind('<Control-z>', lambda e: why_var.set(''))
 
-        preview_var = tk.StringVar()
-        ttk.Label(frame, textvariable=preview_var, justify='left', wraplength=560).grid(
-            row=4, column=0, columnspan=3, sticky='w', pady=8)
+        table = preview_table(win, frame, row=4)
 
         def on_these_floors(table):
             return table[pd.MultiIndex.from_frame(table[['property', 'floor']]).isin(floors)]
@@ -730,31 +741,34 @@ class App:
             try:
                 zone = entered()
             except ValueError as err:
-                preview_var.set(str(err))
+                table.show([str(err)])
                 return
             rooms = floor_rooms.copy()
             rooms['zone_override'] = rooms['zone_override'].astype(object)
             rooms.loc[rooms['room_id'].isin(ids), 'zone_override'] = zone or None
             result = egress.calculate(rooms, floor_exits, self.factors)
             zones = result['zones'].sort_values(['property', 'floor', 'zone_wing'])
-            lines = ["Preview (not saved):"]
+            rows = ["Preview (not saved):"]
             several = picked['property'].nunique() > 1
             for _, z in zones.head(ZONES_SHOWN).iterrows():
-                building = f"{z['property']} " if several else ''
-                lines.append(f"  {building}{zone_preview(before, z, gap=chr(10) + '      ')}")
+                rows.append(zone_preview(before, z, building=f"{z['property']} " if several else ''))
             if len(zones) > ZONES_SHOWN:
-                lines.append(f"  ... and {len(zones) - ZONES_SHOWN} more zones")
+                rows.append(f"... and {len(zones) - ZONES_SHOWN} more zones")
             split = set(result['exits'].loc[result['exits']['wing'] != '', 'floor_key'])
             whole = [(prop, floor) for prop, floor in floors if f"{prop} | {floor}" not in split]
             if zone:                                  # a zone only counts once an exit on the floor names a wing
                 for prop, floor in whole[:FLOORS_SHOWN]:
                     building = f"{prop} " if several else ''
-                    lines.append(f"  {building}floor {floor}: no exit has a wing yet, so it is still one zone")
+                    rows.append(f"{building}floor {floor}: no exit has a wing yet, so it is still one zone")
                 if len(whole) > FLOORS_SHOWN:
-                    lines.append(f"  ... and {len(whole) - FLOORS_SHOWN} more floors like that")
-            preview_var.set('\n'.join(lines))
+                    rows.append(f"... and {len(whole) - FLOORS_SHOWN} more floors like that")
+            table.show(rows)
 
-        zone_var.trace_add('write', preview)
+        def typed(*_):
+            preview()
+            fit_dialog(win)
+
+        zone_var.trace_add('write', typed)
         preview()
 
         def save():
@@ -776,11 +790,9 @@ class App:
                 # one floor -> only it is read again; rooms on several floors -> everything
                 self.after_change(message, floor=floors[0] if len(floors) == 1 else None)
 
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=5, column=0, columnspan=3, sticky='e')
-        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
-        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        save_and_cancel(frame, save, win.destroy).grid(row=5, column=0, columnspan=3, sticky='e')
         win.bind('<Escape>', lambda e: win.destroy())
+        fit_dialog(win)
 
     # notes -> one per room, one per exit
     def ask_text(self, title, text):
@@ -867,8 +879,9 @@ class App:
         win.title(title)
         win.transient(self.root)
         win.grab_set()
-        frame = ttk.Frame(win, padding=10)
-        frame.pack()
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill='both', expand=True)
+        frame.columnconfigure(1, weight=1)
         types = sorted(self.factors['width_factors']['exit_type'])
         fields = [('property', 'Property', None), ('floor', 'Floor', None), ('wing', 'Wing (B, or a group: A+C+D; blank = one zone)', None),
                   ('into_wing', 'Into wing (link door only: A or A+C+D)', None), ('exit_id', 'Exit id (e.g. S4 - doorway)', None),
@@ -879,7 +892,7 @@ class App:
                   ('narrowest_point', 'Narrowest point', None), ('photo_ref', 'Photo ref', None), ('notes', 'Notes', None)]
         vars_ = {}
         for i, (key, label, choices) in enumerate(fields):
-            ttk.Label(frame, text=label).grid(row=i, column=0, sticky='w', pady=1)
+            ttk.Label(frame, text=label).grid(row=i, column=0, sticky='w', padx=(0, 12))
             value = values.get(key)
             v = tk.StringVar(value='' if value is None or (not isinstance(value, str) and pd.isna(value)) else str(value))
             if choices:
@@ -888,17 +901,15 @@ class App:
                 w = ttk.Entry(frame, textvariable=v, width=43)
             if key in ('property', 'floor'):
                 w.configure(state='readonly')
-            w.grid(row=i, column=1, sticky='w')
+            w.grid(row=i, column=1, sticky='we', pady=1)            # one column: every box starts and ends together
             vars_[key] = v
         result = {'values': None}
 
         def ok():
             result['values'] = {k: v.get() for k, v in vars_.items()}
             win.destroy()
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=len(fields), column=0, columnspan=2, sticky='e', pady=(8, 0))
-        ttk.Button(buttons, text="Save", command=ok).pack(side='left', padx=4)
-        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        save_and_cancel(frame, ok, win.destroy).grid(row=len(fields), column=0, columnspan=2, sticky='e', pady=(10, 0))
+        fit_dialog(win)
         self.root.wait_window(win)
         return result['values']
 
@@ -958,31 +969,37 @@ class App:
         win = tk.Toplevel(self.root)
         win.title("Code factors")
         notebook = ttk.Notebook(win)
-        notebook.pack(fill='both', expand=True, padx=6, pady=6)
         trees = {}
         for table in db.CODE_FACTOR_KEYS:
             df = self.factors[table]
             tab = ttk.Frame(notebook)
             notebook.add(tab, text=table)
-            tree = self.make_tree(tab, [(c, 160) for c in df.columns], height=14)
+            tree = self.make_tree(tab, [(c, 160) for c in df.columns], height=14, long_keys=FACTOR_LONG)
             for _, row in df.iterrows():
                 tree.insert('', 'end', iid=str(row[db.CODE_FACTOR_KEYS[table]]),
                             values=['' if pd.isna(v) else v for v in row])
+            tree.long_columns.refit()
             trees[table] = tree
 
-        form = ttk.Frame(win, padding=6)
-        form.pack(fill='x')
+        # the form takes its height first: the tables above it give up rows (they scroll) when a preview needs the room
+        form = ttk.Frame(win, padding=(8, 4, 8, 8))
+        form.pack(side='bottom', fill='x')
+        form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
+        notebook.pack(fill='both', expand=True, padx=8, pady=(8, 4))
         field_var, value_var, clause_var, why_var, info_var = (tk.StringVar() for _ in range(5))
-        ttk.Label(form, text="Field:").grid(row=0, column=0, sticky='w')
         field_box = ttk.Combobox(form, textvariable=field_var, state='readonly', width=24)
-        field_box.grid(row=0, column=1, sticky='w')
-        ttk.Label(form, text="New value:").grid(row=0, column=2, sticky='w', padx=(10, 0))
-        ttk.Entry(form, textvariable=value_var, width=24).grid(row=0, column=3, sticky='w')
-        ttk.Label(form, text="Clause (required):").grid(row=1, column=0, sticky='w')
-        ttk.Entry(form, textvariable=clause_var, width=40).grid(row=1, column=1, columnspan=2, sticky='w')
-        ttk.Label(form, text="Why:").grid(row=1, column=2, sticky='e')
-        ttk.Entry(form, textvariable=why_var, width=40).grid(row=1, column=3, sticky='w')
-        ttk.Label(form, textvariable=info_var, wraplength=860, justify='left').grid(row=2, column=0, columnspan=5, sticky='w', pady=6)
+        # two label + box pairs a line, each in its own column
+        boxes = [("Field:", field_box), ("New value:", ttk.Entry(form, textvariable=value_var, width=24)),
+                 ("Clause (required):", ttk.Entry(form, textvariable=clause_var, width=36)),
+                 ("Why:", ttk.Entry(form, textvariable=why_var, width=36))]
+        for i, (text, box) in enumerate(boxes):
+            line, pair = divmod(i, 2)
+            ttk.Label(form, text=text).grid(row=line, column=2 * pair, sticky='w', padx=(16 * pair, 8))
+            box.grid(row=line, column=2 * pair + 1, sticky='we', pady=2)
+        info = wrap_to_width(ttk.Label(form, textvariable=info_var, justify='left'))
+        info.grid(row=2, column=0, columnspan=4, sticky='we', pady=6)
+        info.grid_remove()                            # takes no line until there is a preview to show
 
         def selection():
             table = notebook.tab(notebook.select(), 'text')
@@ -1046,6 +1063,11 @@ class App:
                              f"exit capacity {z['exit_capacity_before']} -> {z['exit_capacity_after']}")
             info_var.set('\n'.join(lines))
 
+        def show_preview():
+            preview()
+            info.grid()
+            fit_dialog(win)                           # the dialog grows to the preview's lines, as far as the screen goes
+
         def save():
             try:
                 table, key, value, _ = changed_factors()
@@ -1063,9 +1085,9 @@ class App:
             self.after_change(f"code factor saved: {table} {key} {field_var.get()} = {value}")
 
         buttons = ttk.Frame(form)
-        buttons.grid(row=3, column=0, columnspan=5, sticky='e')
-        ttk.Button(buttons, text="Preview", command=preview).pack(side='left', padx=4)
-        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
+        buttons.grid(row=3, column=0, columnspan=4, sticky='e', pady=(8, 0))
+        ttk.Button(buttons, text="Preview", command=show_preview).pack(side='left', padx=(0, 8))
+        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=(0, 8))
         ttk.Button(buttons, text="Close", command=win.destroy).pack(side='left')
         fit_window(win, (900, 560), (600, 400))
 

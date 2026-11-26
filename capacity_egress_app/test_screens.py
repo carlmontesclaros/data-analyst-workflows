@@ -968,10 +968,12 @@ def cell_at(tree, item, key):
     _, y, _, height = tree.bbox(item)
     return left + 4, y + height // 2
 
+# the made-up pointer is the only one: the event is handled as it is generated, and only the layout is run after it. a full
+# update() would also handle the real mouse's events, so a person moving it over the test window changed the result
 def point_at(root, tree, item, key):
     x, y = cell_at(tree, item, key)
     tree.event_generate('<Motion>', x=x, y=y, rootx=tree.winfo_rootx() + x, rooty=tree.winfo_rooty() + y)
-    root.update()
+    root.update_idletasks()
 
 def test_a_cut_cell_shows_its_full_text_under_the_pointer(larger_font_root, conn):
     root = larger_font_root
@@ -1003,7 +1005,7 @@ def test_the_full_text_stays_inside_the_window(larger_font_root, conn, corner):
     pointer_x = right - 5 if 'right' in corner else left + 100
     pointer_y = bottom - 5 if 'bottom' in corner else top + 100
     tree.event_generate('<Motion>', x=x, y=y, rootx=pointer_x, rooty=pointer_y)
-    root.update()
+    root.update_idletasks()                           # not update(): see point_at
     tip = tree.long_columns.tip
     assert tree.long_columns.tip_text == LONG_NOTE
     assert tip.winfo_width() >= tree.long_columns.tip_label.winfo_reqwidth()
@@ -1358,3 +1360,325 @@ def test_short_verdict_chips_sit_side_by_side(root, conn, monkeypatch):
         beside = screen.trial_badge.winfo_rooty() == screen.badge.winfo_rooty()
         assert beside == (text == short)
     assert screen.trial_badge.winfo_rootx() >= screen.badge.winfo_rootx() + screen.badge.winfo_width()
+
+
+# part 4: the dialogs -> save previews as small marked tables, forms on a grid, nothing clipped at the Windows font
+ANNEX = 'Engineering / Computer Science Building Annex'
+
+# a campus where every dialog has its longest content: floors with two doors each in two buildings with long names,
+# one floor of many rooms, and a wing group
+def dialog_campus(conn):
+    rows = [(building, str(floor), f"{floor}{n:02d}", 30.0, 10)
+            for building in (LONG_ROOM[0], ANNEX) for floor in range(11, 23) for n in range(14)]
+    db.insert_rooms(conn, xi.classify_rooms(report(rows)), 'campus.xlsx')
+    for floor in range(11, 23):
+        wing = 'A+C+D' if floor == 11 else ''
+        for exit_id in ('S1 - doorway', 'S2 - doorway'):
+            db.save_exit(conn, {'property': LONG_ROOM[0], 'floor': str(floor), 'wing': wing, 'exit_id': exit_id,
+                                'exit_type': 'doorway', 'clear_width_cm': '88'}, 'carl', 'Carl')
+
+# the editor screen on the room's floor (one door measured), that room picked
+def picked_room(root, conn):
+    screen = busy_editor(root, conn)
+    screen.room_tree.selection_set(screen.room_tree.get_children()[0])
+    return screen
+
+def new_dialog(root, open_it):
+    before = set(root.winfo_children())
+    open_it()
+    root.update()
+    return next(w for w in root.winfo_children() if w not in before and isinstance(w, tk.Toplevel))
+
+def boxes(win, kind):
+    return [w for w in all_widgets(win) if isinstance(w, kind)]
+
+def plain_entries(win):
+    return [w for w in boxes(win, ttk.Entry) if not isinstance(w, ttk.Combobox)]
+
+def type_over(root, entry, text):
+    entry.delete(0, 'end')
+    entry.insert(0, text)
+    root.update()
+
+def open_change_capacity(root, conn, typed=None):
+    screen = picked_room(root, conn)
+    win = new_dialog(root, screen.change_capacity)
+    if typed:
+        type_over(root, plain_entries(win)[0], typed)
+    return win
+
+def open_change_capacity_over(root, conn):
+    return open_change_capacity(root, conn, typed='100000')
+
+def open_change_room_type(root, conn):
+    screen = picked_room(root, conn)
+    return new_dialog(root, screen.change_room_type)
+
+def pick_zone_name(root, win, name):
+    boxes(win, ttk.Combobox)[0].set(name)
+    root.update()
+    return win
+
+def open_change_zone(root, conn):
+    screen = picked_room(root, conn)
+    return pick_zone_name(root, new_dialog(root, screen.change_zone), 'WEST')
+
+# the longest the box gets: every room of two buildings with long names, many floors and zones
+def open_change_zone_for_two_buildings(root, conn):
+    dialog_campus(conn)
+    screen = editor_screen(root, conn)
+    screen.search_var.set('1')
+    screen.search()
+    root.update()
+    screen.room_tree.selection_set(screen.room_tree.get_children())
+    return pick_zone_name(root, new_dialog(root, screen.change_zone), 'NORTH')
+
+# the exit forms wait for the person: don't wait, look at the form while it's open
+def open_exit_form(root, conn, which):
+    screen = busy_editor(root, conn)
+    root.wait_window = lambda window: None
+    screen.floor_var.set(LONG_ROOM[1])
+    screen.show()
+    if which == 'edit_exit':
+        screen.exit_tree.selection_set(screen.exit_tree.get_children()[0])
+    return new_dialog(root, getattr(screen, which))
+
+def open_add_exit(root, conn):
+    return open_exit_form(root, conn, 'add_exit')
+
+def open_edit_exit(root, conn):
+    return open_exit_form(root, conn, 'edit_exit')
+
+# the longest preview: more zones changing status and exit capacity than it lists
+def open_code_factors_preview(root, conn):
+    dialog_campus(conn)
+    win = open_code_factors(root, conn)
+    notebook = boxes(win, ttk.Notebook)[0]
+    notebook.select(list(db.CODE_FACTOR_KEYS).index('width_factors'))
+    root.update()
+    boxes(notebook.nametowidget(notebook.select()), ttk.Treeview)[0].selection_set('doorway')
+    root.update()
+    field = boxes(win, ttk.Combobox)[0]
+    field.set('mm_per_person')
+    field.event_generate('<<ComboboxSelected>>')
+    root.update()
+    type_over(root, plain_entries(win)[0], '100')
+    next(b for b in buttons(win) if b.cget('text') == 'Preview').invoke()
+    root.update()
+    assert 'zones that change status' in ' '.join(str(w.cget('text') or '') for w in boxes(win, ttk.Label))
+    return win
+
+ROOM_DIALOGS = [open_change_capacity, open_change_capacity_over, open_change_room_type, open_change_zone]
+DIALOGS = [*ROOM_DIALOGS, open_change_zone_for_two_buildings, open_add_exit, open_edit_exit, open_code_factors,
+           open_code_factors_preview]
+CONTROLS = (ttk.Button, ttk.Entry, ttk.Radiobutton)
+
+@pytest.mark.parametrize('open_dialog', DIALOGS)
+def test_dialogs_show_everything_at_the_windows_font(larger_font_root, conn, monkeypatch, open_dialog):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: BIG_WORK_AREA)
+    win = open_dialog(larger_font_root, conn)
+    assert at_least((win.winfo_width(), win.winfo_height()), asked_for(win))
+    assert within((win.winfo_width(), win.winfo_height()), inside_of(BIG_WORK_AREA))
+    assert cut_off_widgets(win) == []
+
+# on a 150% scaled laptop a dialog stays inside the usable screen and every field and button is still whole: only a
+# preview or a table longer than the room left gives up height, and scrolls
+@pytest.mark.parametrize('open_dialog', DIALOGS)
+def test_dialogs_keep_their_controls_on_the_tight_screen(root, conn, monkeypatch, open_dialog):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    use_font(root, WINDOWS_LINE_FONT)
+    win = open_dialog(root, conn)
+    assert within((win.winfo_width(), win.winfo_height()), inside_of(TIGHT_WORK_AREA))
+    assert within(win.minsize(), inside_of(TIGHT_WORK_AREA))
+    controls = boxes(win, CONTROLS)
+    assert controls
+    assert [f"{w.winfo_class()} {w}" for w in controls if is_cut_off(w, win)] == []
+
+@pytest.mark.parametrize('open_dialog', DIALOGS)
+def test_dialogs_placed_low_and_right_move_inside_the_work_area(larger_font_root, conn, monkeypatch, open_dialog):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: SHIFTED_WORK_AREA)
+    larger_font_root.geometry('+700+300')
+    larger_font_root.update()
+    win = open_dialog(larger_font_root, conn)
+    left, top, width, height = SHIFTED_WORK_AREA
+    assert win.winfo_x() >= left and win.winfo_y() >= top
+    assert win.winfo_x() + win.winfo_width() + TITLE_BAR_AND_BORDERS[0] <= left + width
+    assert win.winfo_y() + win.winfo_height() + TITLE_BAR_AND_BORDERS[1] <= top + height
+
+# the Code factors tables give up rows to a long preview on the tight screen, but keep their tabs and a row to pick
+def test_code_factors_preview_keeps_a_row_to_pick_on_the_tight_screen(root, conn, monkeypatch):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    use_font(root, WINDOWS_LINE_FONT)
+    win = open_code_factors_preview(root, conn)
+    notebook = boxes(win, ttk.Notebook)[0]
+    tree = boxes(notebook.nametowidget(notebook.select()), ttk.Treeview)[0]
+    assert rows_shown(tree) >= 1
+    assert all(is_inside_window(a, win) for a in [tree, *ancestors(tree, win)])
+
+# a preview longer than the room the screen leaves scrolls to its last line
+def test_a_long_preview_scrolls_to_its_end_on_the_tight_screen(root, conn, monkeypatch):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    use_font(root, WINDOWS_LINE_FONT)
+    win = open_change_zone_for_two_buildings(root, conn)
+    table = boxes(win, widgets.PreviewTable)[0]
+    assert table.canvas.yview()[1] < 1 and table.bar.winfo_ismapped()
+    last = boxes(table, ttk.Label)[-1]
+    assert is_cut_off(last, win)
+    for _ in range(100):
+        table.canvas.event_generate('<MouseWheel>', delta=-120)
+    root.update()
+    assert table.canvas.yview()[1] == 1 and not is_cut_off(last, win)
+
+# the table adds its size up from its rows: it must come to what the rows themselves ask for, or a row's end is cut
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
+@pytest.mark.parametrize('open_dialog', [*ROOM_DIALOGS, open_change_zone_for_two_buildings])
+def test_a_preview_asks_for_the_size_of_its_rows(root, conn, font_size, open_dialog):
+    if font_size:
+        use_font(root, font_size)
+    win = open_dialog(root, conn)
+    table = boxes(win, widgets.PreviewTable)[0]
+    body = (table.body.winfo_reqwidth() + table.bar.winfo_reqwidth(), table.body.winfo_reqheight())
+    assert (int(table.canvas.cget('width')), int(table.canvas.cget('height'))) == body
+
+def test_a_preview_that_fits_shows_no_scrollbar(root, conn):
+    win = open_change_capacity(root, conn)
+    table = boxes(win, widgets.PreviewTable)[0]
+    assert table.canvas.yview() == (0.0, 1.0) and not table.bar.winfo_ismapped()
+
+# the preview's rows -> {text of the row's text cell: (the status of its mark, tint behind it, its status cell)}
+def preview_rows(root, win):
+    table = boxes(win, widgets.PreviewTable)[0]
+    marks = {str(m): c for c, m in colours.marks(root).items()}
+    grid = {}
+    for label in boxes(table, ttk.Label):
+        info = label.grid_info()
+        grid.setdefault(int(info['row']), {})[int(info['column'])] = label
+    rows = {}
+    for cells in grid.values():
+        if len(cells) == 3:
+            mark, text, status = cells[0], cells[1], cells[2]
+            assert len({str(c.cget('background')) for c in cells.values()}) == 1
+            shown = marks[str(mark.cget('image')[0])] if mark.cget('image') else ''
+            rows[str(text.cget('text'))] = (shown, str(mark.cget('background')), str(status.cget('text')))
+    return rows
+
+# two doors -> within; a third that is too narrow -> review; far more people than the doors carry -> over
+@pytest.mark.parametrize(('widths', 'typed', 'status', 'words'), [
+    (('88', '88'), '24', egress.GREEN, f"[{egress.STATUS_WITHIN}]"),
+    (('88', '88', '80'), '24', egress.AMBER, f"[{egress.STATUS_REVIEW}]"),
+    (('88', '88'), '100000', egress.RED, f"[{egress.STATUS_REVIEW}]")], ids=['within', 'review', 'over'])
+def test_change_capacity_preview_is_a_table_with_status_marks(root, conn, widths, typed, status, words):
+    for number, width in enumerate(widths, start=1):
+        db.save_exit(conn, {'property': LONG_ROOM[0], 'floor': LONG_ROOM[1], 'exit_id': f'S{number} - doorway',
+                            'exit_type': 'doorway', 'clear_width_cm': width}, 'carl', 'Carl')
+    screen = editor_with_rooms(root, conn)
+    screen.room_tree.selection_set(screen.room_tree.get_children()[0])
+    win = new_dialog(root, screen.change_capacity)
+    type_over(root, plain_entries(win)[0], typed)
+    (text, row), = preview_rows(root, win).items()
+    assert text.startswith('floor 3: occupant load') and f'-> {typed} vs exit capacity' in text
+    assert row == (status, colours.STATUS[status][1] if status != egress.GREEN else colours.SURFACE, words)
+
+def test_a_zone_with_no_exits_is_a_grey_preview_row(root, conn):
+    screen = editor_with_rooms(root, conn)
+    screen.room_tree.selection_set(screen.room_tree.get_children()[0])
+    win = new_dialog(root, screen.change_capacity)
+    (row,) = preview_rows(root, win).values()
+    assert row == (egress.GREY, colours.SURFACE, f"[{egress.STATUS_NOT_SURVEYED}]")
+
+def test_change_room_type_preview_marks_the_room_and_its_zones(root, conn):
+    win = open_change_room_type(root, conn)
+    rows = preview_rows(root, win)
+    room = next(v for text, v in rows.items() if text.startswith('room: '))
+    assert room[0] in STATUSES and room[2] == ''
+    assert [v[2] for text, v in rows.items() if text.startswith('floor ')] == [f"[{egress.STATUS_REVIEW}]"]
+
+def test_change_zone_preview_rows_carry_their_marks(root, conn):
+    win = open_change_zone(root, conn)
+    rows = preview_rows(root, win)
+    assert rows and all(mark in STATUSES and status.startswith('[') for mark, _, status in rows.values())
+
+# the preview keeps the words it had before it was a table
+def test_a_preview_keeps_its_wording(root, conn):
+    win = open_change_capacity(root, conn, typed='100000')
+    shown = [str(w.cget('text')) for w in boxes(boxes(win, widgets.PreviewTable)[0], ttk.Label) if w.cget('text')]
+    assert shown[0] == 'Preview (not saved):' and 'occupant load over exiting capacity' in ' '.join(shown)
+    type_over(root, plain_entries(win)[0], 'many')
+    shown = [str(w.cget('text')) for w in boxes(boxes(win, widgets.PreviewTable)[0], ttk.Label) if w.cget('text')]
+    assert shown == ['Type a whole number (0 or more).']
+
+def edges(w):
+    return w.winfo_rootx(), w.winfo_rooty(), w.winfo_rootx() + w.winfo_width(), w.winfo_rooty() + w.winfo_height()
+
+@pytest.mark.parametrize('open_dialog', [open_add_exit, open_edit_exit])
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
+def test_exit_form_labels_and_controls_line_up(root, conn, open_dialog, font_size):
+    if font_size:
+        use_font(root, font_size)
+    win = open_dialog(root, conn)
+    controls = sorted(boxes(win, ttk.Entry), key=lambda w: w.winfo_rooty())
+    labels = sorted(boxes(win, ttk.Label), key=lambda w: w.winfo_rooty())
+    assert len(controls) == len(labels) == 14
+    assert len({edges(w)[0] for w in labels}) == 1
+    assert len({(edges(w)[0], edges(w)[2]) for w in controls}) == 1
+    for label, control in zip(labels, controls, strict=True):
+        assert abs((edges(label)[1] + edges(label)[3]) - (edges(control)[1] + edges(control)[3])) <= 2
+        assert edges(label)[2] < edges(control)[0]
+    # a gap between one field and the next, so two borders never read as one box
+    assert min(edges(b)[1] - edges(a)[3] for a, b in zip(controls, controls[1:], strict=False)) >= 2
+    save = next(b for b in buttons(win) if b.cget('text') == 'Cancel')
+    assert edges(save)[2] == edges(controls[0])[2]
+
+def overlap(a, b):
+    (left, top, right, bottom), (left2, top2, right2, bottom2) = edges(a), edges(b)
+    return left < right2 and left2 < right and top < bottom2 and top2 < bottom
+
+@pytest.mark.parametrize('font_size', [None, WINDOWS_FONT])
+def test_code_factors_form_is_a_grid_with_no_overlaps(root, conn, font_size):
+    if font_size:
+        use_font(root, font_size)
+    win = open_code_factors(root, conn)
+    field = boxes(win, ttk.Combobox)[0]
+    form = [w for w in field.master.winfo_children() if isinstance(w, (ttk.Label, ttk.Entry)) and w.winfo_ismapped()]
+    assert [f"{a} {b}" for i, a in enumerate(form) for b in form[i + 1:] if overlap(a, b)] == []
+    value, clause, why = plain_entries(win)
+    assert (edges(field)[0], edges(field)[2]) == (edges(clause)[0], edges(clause)[2])
+    assert (edges(value)[0], edges(value)[2]) == (edges(why)[0], edges(why)[2])
+
+# every factor shows in full: keys and numbers always, the free text (source, note) as far as the width goes, with the
+# rest under the pointer. no heading is cut and no tab needs a sideways bar
+def test_code_factor_tables_cut_no_value_at_the_windows_font(larger_font_root, conn):
+    root = larger_font_root
+    win = open_code_factors(root, conn)
+    notebook = boxes(win, ttk.Notebook)[0]
+    for index, table in enumerate(db.CODE_FACTOR_KEYS):
+        notebook.select(index)
+        root.update()
+        tree = boxes(notebook.nametowidget(notebook.select()), ttk.Treeview)[0]
+        assert tree.get_children(), table
+        assert cut_columns(tree, [key for key in tree['columns'] if key not in app.FACTOR_LONG]) == [], table
+        assert tree.xview() == (0.0, 1.0), table
+        for item, texts in tree.long_columns.full.items():
+            for key, full in texts.items():
+                shown = tree.set(item, key)
+                assert shown == full or (shown.endswith(widgets.ELLIPSIS) and full.startswith(shown[:-1].rstrip()))
+        # a long text gets the width the other columns leave over, up to what it needs
+        widths = sum(int(tree.column(key, 'width')) for key in tree['columns'])
+        cut = any(tree.set(item, key) != full for item, texts in tree.long_columns.full.items() for key, full in texts.items())
+        assert not cut or widths >= tree.winfo_width() - 8, (table, widths, tree.winfo_width())
+
+def test_changing_a_code_factor_still_finds_its_row_when_texts_are_cut(larger_font_root, conn):
+    root = larger_font_root
+    win = open_code_factors(root, conn)
+    notebook = boxes(win, ttk.Notebook)[0]
+    notebook.select(list(db.CODE_FACTOR_KEYS).index('category_map'))
+    root.update()
+    tree = boxes(notebook.nametowidget(notebook.select()), ttk.Treeview)[0]
+    tree.selection_set('2.2 - Unscheduled Class Lab Space')
+    root.update()
+    field = boxes(win, ttk.Combobox)[0]
+    field.set('note')
+    field.event_generate('<<ComboboxSelected>>')
+    root.update()
+    assert plain_entries(win)[0].get() == ('Supervisor ruling: class labs count as classroom. '
+                                           'Override per room if it is really a lab')
