@@ -12,7 +12,7 @@ import exports
 import colours
 from check_screen import MIN_WINDOW, CheckScreen
 from widgets import (BuildingBox, FlowRow, LongTextColumns, PreviewTable, anchor_for, fit_columns, fit_dialog, fit_window,
-                     heading_text, open_path, sideways_bar, use_theme, wrap_to_width)
+                     heading_text, hover_rows, open_path, sideways_bar, use_theme, wrap_to_width)
 
 # configs
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -304,6 +304,7 @@ class App:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, anchor=anchor_for(col), stretch=False)
         tree.long_columns = LongTextColumns(tree, columns, long_keys)
+        hover_rows(tree)
         fit_columns(tree, tree.long_columns.short)
         ys = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
         xs = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
@@ -1212,6 +1213,7 @@ def editors_dialog(parent, conn, user_login, user_name):
     for col, text, width in [('name', 'Name', 200), ('login', 'Windows login', 180), ('editor', 'Editor', 80)]:
         tree.heading(col, text=text, anchor='w')
         tree.column(col, width=width, anchor='w')
+    hover_rows(tree)
     tree.pack(fill='both', expand=True)
     ttk.Label(frame, text="Not in the list? They open the app once, or use Add by login.",
               foreground=colours.MUTED).pack(anchor='w', pady=(6, 0))

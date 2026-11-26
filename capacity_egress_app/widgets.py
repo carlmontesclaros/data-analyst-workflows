@@ -212,6 +212,66 @@ def fit_columns(tree, columns, always=None):
         tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
     heading.destroy()
 
+HOVER_TAG = 'hover'
+
+# the row under the pointer is highlighted: one tag moves with it, at once, and comes off when the pointer leaves or the
+# wheel scrolls the rows away. of two tags that set the same option Tk takes the one made first, so the tag is made at
+# the first highlight, after every tag the table was built with: a status tint wins over it, as does the picked row
+def hover_rows(tree):
+    lit, made = '', False
+
+    def light(row):
+        nonlocal lit, made
+        if lit and tree.exists(lit):                  # a refill may have taken the row away, or reused its id
+            if lit == row and tree.tag_has(HOVER_TAG, row):
+                return
+            tree.tk.call(tree, 'tag', 'remove', HOVER_TAG, (lit,))
+        if row:
+            if not made:
+                tree.tag_configure(HOVER_TAG, background=c.HOVER)
+                made = True
+            tree.tk.call(tree, 'tag', 'add', HOVER_TAG, (row,))      # a tuple: an id with spaces is one row
+        lit = row
+
+    tree.bind('<Motion>', lambda e: light(tree.identify_row(e.y)), add='+')
+    for sequence in ('<Leave>', '<MouseWheel>'):
+        tree.bind(sequence, lambda e: light(''), add='+')
+
+FADE_MS = 160
+
+# a row whose status just changed fades from a stronger step of its colour to its own look, so the eye finds it. make it
+# before the table's status tags (colours.colour_tags): the tag made first wins, and the fade covers the row's tint
+class RowFade:
+    def __init__(self, tree):
+        self.tree, self.waiting = tree, {}               # row -> its next step's after() id
+        for colour in c.FADE_FROM:
+            for tag, shade in zip(self.tags(colour), c.fade_shades(colour), strict=True):
+                tree.tag_configure(tag, background=shade)
+        tree.bind('<Destroy>', lambda e: self.cancel(), add='+')
+
+    @staticmethod
+    def tags(colour):
+        return [f'fade{step}-{colour}' for step in range(c.FADE_STEPS)]
+
+    def start(self, row, colour):
+        self.step(row, '', self.tags(colour))
+
+    # the step shown comes off, the next goes on. after the last, the row is left with its own tags
+    def step(self, row, shown, ahead):
+        if shown:
+            self.tree.tk.call(self.tree, 'tag', 'remove', shown, (row,))
+        if not ahead:
+            del self.waiting[row]
+            return
+        self.tree.tk.call(self.tree, 'tag', 'add', ahead[0], (row,))
+        self.waiting[row] = self.tree.after(FADE_MS // c.FADE_STEPS, self.step, row, ahead[0], ahead[1:])
+
+    # before the rows are filled again, and when the table closes
+    def cancel(self):
+        for job in self.waiting.values():
+            self.tree.after_cancel(job)
+        self.waiting.clear()
+
 # a scrollbar that comes and goes -> the widget's xscrollcommand (or yscrollcommand): the bar shows only while there is
 # more to see that way, so an unneeded sideways bar takes no height. the bar must be gridded, so grid() puts it back
 def sideways_bar(bar):
