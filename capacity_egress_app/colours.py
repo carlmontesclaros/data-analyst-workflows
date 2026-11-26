@@ -72,6 +72,11 @@ SHAPES = {egress.GREEN: _runs(_circle(5.8)),             # filled circle: within
           egress.RED: _runs(SQUARE),                     # square: over a hard limit
           egress.GREY: _runs(_circle(5.8, hole=3.4))}    # ring: no data
 
+# a row built from widgets (a save preview) -> the same look as a table row: (background, text colour)
+def row_look(colour):
+    rule = ROW_RULES.get(colour, {})
+    return rule.get('background', SURFACE), rule.get('foreground', TEXT_FG)
+
 # the four marks, drawn once per window and kept on it so they are not garbage collected. a transparent background lets
 # the row's own colour (tint, or the selected blue) show round the shape
 def marks(widget):
