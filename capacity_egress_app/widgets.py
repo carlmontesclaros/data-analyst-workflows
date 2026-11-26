@@ -198,15 +198,18 @@ CELL_PADDING = 8
 # narrower than its least width. columns: [(key, least width)]. a heading needs its text and the theme's heading border
 # and padding round it, measured off a label drawn in the heading style. refit after every fill: a column only grows, so
 # a column the user widened stays wide. the user can narrow a column down to its heading, but a column that stretches
-# with the table keeps every value, or the table would squeeze it. always: {key: texts} a column holds while empty too
-def fit_columns(tree, columns, always=None):
+# with the table keeps every value, or the table would squeeze it. always: {key: texts} a column holds while empty too.
+# held: {key: texts} the columns hold now, from a caller that has just filled the table; without it every cell is read
+# back from the table, which is slow on a long one
+def fit_columns(tree, columns, always=None, held=None):
     cell_font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
     heading = ttk.Label(tree, style='Treeview.Heading')
     items = tree.get_children()
     for key, least in columns:
         heading.configure(text=tree.heading(key, 'text'))
         head = heading.winfo_reqwidth()
-        texts = {str(tree.set(item, key)) for item in items} | set((always or {}).get(key, ()))
+        texts = held[key] if held is not None else {str(tree.set(item, key)) for item in items}
+        texts = texts | set((always or {}).get(key, ()))
         fitted = max([least, head] + [int(tree.tk.call('font', 'measure', cell_font, text)) + CELL_PADDING for text in texts])
         stretch = tree.tk.getboolean(tree.column(key, 'stretch'))
         tree.column(key, width=max(int(tree.column(key, 'width')), fitted), minwidth=fitted if stretch else head)
@@ -313,23 +316,38 @@ class LongTextColumns:
         self.long = [key for key, _ in columns if key in long_keys]
         self.short = [(key, least) for key, least in columns if key not in long_keys]
         self.font = ttk.Style(tree).lookup('Treeview', 'font') or 'TkDefaultFont'
-        self.full, self.ends, self.shown_width = {}, {}, None
+        # per row, the long columns' whole texts and the ones the table shows; the width in pixels of each text measured
+        # since the last fill, so dragging the window's edge doesn't ask Tk for them again
+        self.full, self.shown, self.measured = {}, {}, {}
+        self.ends, self.shown_width = {}, None
         self.tip, self.tip_label, self.tip_text, self.tip_cell = None, None, None, None
         tree.bind('<Configure>', lambda e: self.layout(on_resize=True), add='+')
         tree.bind('<Motion>', self.point_at, add='+')
         for sequence in ('<Leave>', '<ButtonPress>', '<MouseWheel>', '<KeyPress>'):
             tree.bind(sequence, self.hide_tip, add='+')
 
-    # after every fill: the rows hold their full texts. ends: {item: {key: the words its text ends with, never cut}}
-    def refit(self, ends=None):
+    # after every fill: the rows hold their full texts. rows: {item: the values it was just inserted with, one per
+    # column} -> a long table is filled without reading it back; without rows the cells are read from the table.
+    # ends: {item: {key: the words its text ends with, never cut}}
+    def refit(self, ends=None, rows=None):
         tree = self.tree
-        self.full = {item: {key: str(tree.set(item, key)) for key in self.long} for item in tree.get_children()}
+        columns = tree['columns']
+        if rows is None:
+            rows = {item: [tree.set(item, key) for key in columns] for item in tree.get_children()}
+        texts = {item: dict(zip(columns, map(str, values), strict=True)) for item, values in rows.items()}   # as Tk shows them
+        self.full = {item: {key: row[key] for key in self.long} for item, row in texts.items()}
+        self.shown = {item: dict(row) for item, row in self.full.items()}
+        self.measured = {}
         self.ends = ends or {}
-        fit_columns(tree, self.short)
+        fit_columns(tree, self.short, held={key: {row[key] for row in texts.values()} for key, _ in self.short})
         self.layout()
 
     def measure(self, text):
         return int(self.tree.tk.call('font', 'measure', self.font, text))
+
+    # a whole text's width is measured once per fill; the trial cuts of a text are not kept
+    def width_of(self, text):
+        return self.measured[text] if text in self.measured else self.measure(text)
 
     # the width the columns share is the table's: a change of height alone leaves them as they are
     def layout(self, on_resize=False):
@@ -344,7 +362,7 @@ class LongTextColumns:
             heading.configure(text=tree.heading(key, 'text'))
             head[key] = heading.winfo_reqwidth()
         heading.destroy()
-        measured = {}
+        measured = self.measured
         for key in self.long:
             for texts in self.full.values():
                 if texts[key] not in measured:
@@ -374,9 +392,10 @@ class LongTextColumns:
                 elif (text, keep, rooms[key]) in cut:
                     shown = cut[text, keep, rooms[key]]
                 else:
-                    shown = cut[text, keep, rooms[key]] = cut_to_width(self.measure, text, rooms[key], keep)
-                if tree.set(item, key) != shown:
+                    shown = cut[text, keep, rooms[key]] = cut_to_width(self.width_of, text, rooms[key], keep)
+                if self.shown[item][key] != shown:
                     tree.set(item, key, shown)
+                    self.shown[item][key] = shown
 
     # the pointer rests on a cell whose text was cut -> a small window with the whole text beside it
     def point_at(self, event):
