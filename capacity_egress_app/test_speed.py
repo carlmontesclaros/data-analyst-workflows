@@ -1,6 +1,7 @@
 # speed budgets on a campus-size database -> a change that makes the app slow fails here, not on Mark's screen.
 # real campus 2026-11: 19,451 rooms, opening the data ~0.2 s and a save ~1 ms on the Mac.
 # budgets leave room for slower machines (CI, the workstations, the S: drive) but catch anything 10x slower
+import contextlib
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -114,6 +115,113 @@ def test_editor_screen_open_and_save(conn):
     assert shown == '77'
     assert opened < 3.0, f"editor screen took {opened:.2f} s to open"
     assert saved < 2.0, f"Save took {saved:.2f} s to show the new numbers"
+
+# the speed of a big table is in how often Python asks Tk for something, which doesn't change from one machine to the
+# next -> count those calls on the three editor tables instead of timing them
+class TkCalls:
+    def __init__(self, tk):
+        self.tk, self.calls = tk, []
+
+    def call(self, *args):
+        self.calls.append(args)
+        return self.tk.call(*args)
+
+    def __getattr__(self, name):
+        return getattr(self.tk, name)
+
+@contextlib.contextmanager
+def counted(*trees):
+    tk_calls = TkCalls(trees[0].tk)
+    for tree in trees:
+        tree.tk = tk_calls
+    try:
+        yield tk_calls.calls
+    finally:
+        for tree in trees:
+            tree.tk = tk_calls.tk
+
+# a value read back from a table: Treeview.set(item, column) or Treeview.item(item, 'values')
+def cells_read(calls):
+    return [c for c in calls if (c[1:2] == ('set',) and (len(c) < 5 or c[4] is None)) or (c[1:2] == ('item',) and c[3:] == ('-values',))]
+
+def cells_written(calls):
+    return [c for c in calls if c[1:2] == ('set',) and len(c) == 5 and c[4] is not None]
+
+def texts_measured(calls):
+    return [c[-1] for c in calls if c[:2] == ('font', 'measure')]
+
+def shown_texts(trees):
+    return {(str(tree), item, key): str(tree.set(item, key)) for tree in trees for item in tree.get_children() for key in tree['columns']}
+
+# the editor screen showing a campus-wide search: 3000 rooms, their zones and exits, in a window just too narrow for
+# the rooms table's longest texts, so some are cut (the width is worked out from the columns: fonts differ by system)
+@pytest.fixture
+def full_editor(conn):
+    try:
+        root = tk.Tk()
+    except tk.TclError as e:
+        if 'display' not in str(e):       # only a missing screen is a reason to skip, any other Tk error fails
+            raise
+        pytest.skip(f"no display: {e}")
+    try:
+        widgets.use_theme(root)
+        screen = app.App(root, conn, 'carl', 'Carl')
+        root.minsize(1, 1)
+        root.geometry('1900x700')
+        screen.search_var.set('building')
+        screen.search()
+        root.update()
+        tree = screen.room_tree
+        columns = sum(int(tree.column(key, 'width')) for key in ['#0', *tree['columns']])
+        root.geometry(f'{root.winfo_width() - (tree.winfo_width() - columns) - 20}x700')
+        root.update()
+        assert len(screen.room_tree.get_children()) == 3000
+        yield screen
+    finally:
+        root.destroy()
+
+def editor_trees(screen):
+    return (screen.zone_tree, screen.room_tree, screen.exit_tree)
+
+# filling the tables hands the column layout the values it just put in them: nothing is read back cell by cell, and the
+# only cells written again are the ones shown cut
+def test_filling_the_editor_tables_reads_no_cell_back(full_editor):
+    trees = editor_trees(full_editor)
+    with counted(*trees) as calls:
+        full_editor.show()
+    assert cells_read(calls) == []
+    full = {(str(tree), item, key): text for tree in trees for item, texts in tree.long_columns.full.items()
+            for key, text in texts.items()}
+    cut = [cell for cell, shown in shown_texts(trees).items() if cell in full and shown != full[cell]]
+    assert cut and len(cells_written(calls)) == len(cut)
+
+# the widths worked out from the handed values are the ones the cells themselves give
+def test_columns_fitted_from_handed_values_match_the_cells(full_editor):
+    for tree in editor_trees(full_editor):
+        short = tree.long_columns.short
+        fitted = {key: int(tree.column(key, 'width')) for key, _ in short}
+        for key, _ in short:
+            tree.column(key, width=1)
+        widgets.fit_columns(tree, short)
+        assert {key: int(tree.column(key, 'width')) for key, _ in short} == fitted
+
+# one step of dragging the window's edge: only the cells whose cut text changes are touched, and no whole text is
+# measured again
+def test_a_resize_step_touches_only_the_cells_that_change(full_editor):
+    root, tree = full_editor.root, full_editor.room_tree
+    before = shown_texts([tree])
+    whole = {text for texts in tree.long_columns.full.values() for text in texts.values() if text}
+    width, height = tree.winfo_width(), root.winfo_height()
+    with counted(tree) as calls:
+        root.geometry(f'{root.winfo_width() - 30}x{height}')
+        root.update()
+    assert tree.winfo_width() < width
+    after = shown_texts([tree])
+    changed = {cell for cell in after if after[cell] != before[cell]}
+    assert changed
+    assert cells_read(calls) == []
+    assert len(cells_written(calls)) == len(changed)
+    assert whole.isdisjoint(texts_measured(calls))
 
 # a campus-wide search fills the rooms table with 3000 rows that share a few long building names and notes: dragging the
 # window's edge lays the cut columns out again at every step, so each step must be quick

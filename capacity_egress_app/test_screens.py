@@ -1065,6 +1065,61 @@ def test_zones_pane_gives_the_rest_of_the_window_to_the_tables_below(root, conn)
     assert screen.zone_frame.winfo_height() == before
     assert screen.room_tree.winfo_height() > 0
 
+# a search across ten floors with exits -> more zones than the zones pane shows at once
+def editor_with_many_zones(root, conn):
+    floors = [str(floor) for floor in range(11, 21)]
+    db.insert_rooms(conn, xi.classify_rooms(report([('Turpin Hall', floor, f'{floor}{n:02d}', 30.0, 10)
+                                                    for floor in floors for n in range(20)])), 'turpin.xlsx')
+    for floor in floors:
+        for exit_id in ('S1 - doorway', 'S2 - doorway', 'S3 - doorway'):
+            db.save_exit(conn, {'property': 'Turpin Hall', 'floor': floor, 'exit_id': exit_id, 'exit_type': 'doorway',
+                                'clear_width_cm': '88'}, 'carl', 'Carl')
+    screen = editor_screen(root, conn)
+    screen.search_var.set('turpin')
+    screen.search()
+    root.update()
+    assert len(screen.zone_tree.get_children()) == len(floors) and len(screen.exit_tree.get_children()) == 3 * len(floors)
+    return screen
+
+# the zones pane leaves the rooms table its room. before: the rows it showed in the same window before the restyle
+# (commit 77c8271, measured on the Mac with this data), and never fewer than 3, on a 1920x1080 laptop at 150% and at the
+# Windows font
+ROOM_ROWS = [(None, 3), (WINDOWS_LINE_FONT, 1), (WINDOWS_FONT, 1)]
+
+@pytest.mark.parametrize(('font_size', 'before'), ROOM_ROWS)
+def test_rooms_table_keeps_its_rows_on_the_tight_screen(root, conn, monkeypatch, font_size, before):
+    monkeypatch.setattr(widgets, 'work_area', lambda window: TIGHT_WORK_AREA)
+    if font_size:
+        use_font(root, font_size)
+    screen = editor_with_many_zones(root, conn)
+    assert within((root.winfo_width(), root.winfo_height()), inside_of(TIGHT_WORK_AREA))
+    assert rows_shown(screen.room_tree) >= max(before, 3)
+    assert rows_shown(screen.zone_tree) >= app.ZONE_ROWS_LEAST
+
+def test_rooms_table_keeps_its_rows_at_the_windows_font(larger_font_root, conn):
+    screen = editor_with_many_zones(larger_font_root, conn)
+    assert (larger_font_root.winfo_width(), larger_font_root.winfo_height()) == app.OPEN_WINDOW
+    assert rows_shown(screen.room_tree) >= 6
+
+# the cap follows the window: dragged smaller, the zones pane gives rows back to the rooms; dragged bigger, it shows
+# its zones again
+def test_zones_pane_follows_the_window_height(root, conn):
+    screen = editor_with_many_zones(root, conn)
+
+    def drag_to(height):
+        root.geometry(f'{root.winfo_width()}x{height}')
+        for _ in range(3):
+            root.update()
+        return int(screen.zone_tree['height']), rows_shown(screen.room_tree)
+
+    root.minsize(1, 1)
+    tall_zones, tall_rooms = drag_to(820)                 # heights the Mac's own screen holds too
+    short_zones, short_rooms = drag_to(624)
+    assert tall_zones <= app.ZONE_ROWS_MOST and tall_rooms >= 6
+    assert app.ZONE_ROWS_LEAST <= short_zones < tall_zones and short_rooms >= 3
+    assert abs(screen.panes.sashpos(0) - screen.zone_frame.winfo_reqheight()) <= 2
+    assert drag_to(820)[0] == tall_zones
+
 # the app is not DPI-aware on Windows: a 1920x1080 laptop at 150% scaling gives it a 1280x720 screen, and the taskbar
 # takes some of that. every window opens at the size it is laid out at when the usable screen (the work area: left, top,
 # width, height, less its title bar and borders) has room, shrinks to that screen when it has not, is never forced bigger

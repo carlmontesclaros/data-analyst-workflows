@@ -29,6 +29,7 @@ NO_ZONE = '(by room number)'                            # the Change zone box's 
 # what the Change zone box names before "and N more": rooms on a floor, floors, zones -> short enough for a small screen
 ROOMS_SHOWN, FLOORS_SHOWN, ZONES_SHOWN = 12, 3, 6
 ZONE_ROWS_LEAST, ZONE_ROWS_MOST = 2, 8
+ZONE_PANE_SHARE = 3                                    # the zones pane takes at most 1/3 of the three tables' height
 OPEN_WINDOW = (1400, 820)
 
 def sanitize(name):
@@ -278,22 +279,34 @@ class App:
 
     # the zones pane is as tall as its rows (a few at least, a screenful at most: more scroll)
     def fit_zone_pane(self):
-        if self.zone_wanted is not None and self.zone_wanted != self.zone_rows and not self.zone_pane_pending:
+        if self.zone_wanted is not None and self.zone_target() != self.zone_rows and not self.zone_pane_pending:
             self.zone_pane_pending = True
             self.root.after_idle(self.set_zone_pane)
+
+    # the rows it shows: the ones wanted, fewer in a short window so the rooms table below keeps its own
+    def zone_target(self):
+        height = self.panes.winfo_height()
+        if height <= 1:                           # not laid out yet: the pane's first <Configure> asks again
+            return self.zone_wanted
+        row = int(ttk.Style(self.zone_tree).lookup('Treeview', 'rowheight'))
+        around = self.zone_frame.winfo_reqheight() - int(self.zone_tree['height']) * row      # title, headings, bar
+        fit = (height // ZONE_PANE_SHARE - around) // row
+        return min(self.zone_wanted, max(fit, ZONE_ROWS_LEAST))
 
     # once the window has laid the new rows out: the divider goes under the last row
     def set_zone_pane(self):
         self.zone_pane_pending = False
         if not self.zone_tree.winfo_exists():
             return
-        self.zone_tree.configure(height=self.zone_wanted)
+        self.root.update_idletasks()              # the heights the target is worked out from
+        rows = self.zone_target()
+        self.zone_tree.configure(height=rows)
         self.root.update_idletasks()
         try:
             self.panes.sashpos(0, self.zone_frame.winfo_reqheight())
         except tk.TclError:                       # not on screen yet: the pane's first <Configure> asks again
             return
-        self.zone_rows = self.zone_wanted
+        self.zone_rows = rows
 
     def make_tree(self, parent, columns, height, long_keys=()):
         frame = ttk.Frame(parent)
@@ -379,7 +392,7 @@ class App:
         if result is None:                            # nothing picked or found -> empty lists, nothing calculated
             for tree in (self.zone_tree, self.room_tree, self.exit_tree):
                 tree.delete(*tree.get_children())
-                tree.long_columns.refit()
+                tree.long_columns.refit(rows={})
             self.zone_wanted = ZONE_ROWS_LEAST
             self.fit_zone_pane()
             self.show_counts(0, 0, 0)
@@ -389,12 +402,15 @@ class App:
         zones = zones.loc[[k in keys for k in zip(zones['property'], zones['floor'], strict=False)]]    # .loc: an empty list must not wipe the columns
         exits = result['exits']
         exits = exits.loc[[k in keys for k in zip(exits['property'], exits['floor'], strict=False)]]
+        # row -> its values, handed to the column layout so it needn't read them back from the tables
+        zone_values, room_values, exit_values = {}, {}, {}
 
         self.zone_tree.delete(*self.zone_tree.get_children())
         for i, z in zones.sort_values(['property', 'floor', 'zone_wing']).iterrows():
             values = [z['floor'] if self.building.picked() else f"{z['property']} {z['floor']}"] + \
                      [z['zone_wing'], z['status'], z['total_load'], exit_capacity_text(z)] + \
                      [z[c] for c in ['exit_count', 'rooms_counted', 'rooms_in_scope', 'link_inflow', 'flags']]
+            zone_values[f"z{i}"] = values
             self.zone_tree.insert('', 'end', iid=f"z{i}", values=values, **colours.row(self.zone_tree, egress.zone_colour(z)))
 
         self.room_tree.delete(*self.room_tree.get_children())
@@ -410,7 +426,9 @@ class App:
             values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
                       text_or_blank(r['zone_override']), '; '.join(flag), text_or_blank(r['note'])]
-            self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
+            iid = f"r{int(r['room_id'])}"
+            room_values[iid] = values
+            self.room_tree.insert('', 'end', iid=iid, values=values,
                                   **colours.row(self.room_tree, egress.room_colour(r), *(['missing'] if r['in_latest_report'] == 0 else [])))
 
         self.exit_tree.delete(*self.exit_tree.get_children())
@@ -420,11 +438,14 @@ class App:
             values = [e['floor'], e['wing'], e['exit_id'], e['exit_type'], width, stair, e['persons'], e['limited_by'],
                       'yes' if e['counts_as_exit'] else 'no', e['shares_stair'], e['width_check'], e['into_wing'],
                       text_or_blank(e['measured_date']), text_or_blank(e['measured_by']), text_or_blank(e['notes'])]
-            self.exit_tree.insert('', 'end', iid=f"e{int(e['exit_pk'])}", values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
+            iid = f"e{int(e['exit_pk'])}"
+            exit_values[iid] = values
+            self.exit_tree.insert('', 'end', iid=iid, values=values, **colours.row(self.exit_tree, egress.exit_colour(e)))
 
-        self.zone_tree.long_columns.refit(ends={f"z{i}": {'floor': str(z['floor'])} for i, z in zones.iterrows()})
-        for tree in (self.room_tree, self.exit_tree):
-            tree.long_columns.refit()
+        self.zone_tree.long_columns.refit(ends={f"z{i}": {'floor': str(z['floor'])} for i, z in zones.iterrows()},
+                                          rows=zone_values)
+        self.room_tree.long_columns.refit(rows=room_values)
+        self.exit_tree.long_columns.refit(rows=exit_values)
         self.zone_wanted = min(max(len(zones), ZONE_ROWS_LEAST), ZONE_ROWS_MOST)
         self.fit_zone_pane()
         self.show_counts(len(rooms), len(zones), len(exits))
