@@ -7,8 +7,8 @@ import egress
 import code_factors as cf
 import exports
 import colours
-from widgets import (FONTS, BuildingBox, anchor_for, card_section, fit_columns, fit_window, heading_text, initials, open_path,
-                     sideways_bar, wrap_to_width)
+from widgets import (FONTS, BuildingBox, RowFade, anchor_for, card_section, fit_columns, fit_window, heading_text, hover_rows,
+                     initials, open_path, sideways_bar, wrap_to_width)
 
 # configs
 POLL_MS = 20000                                                        # check for other people's saves every 20 s
@@ -77,6 +77,7 @@ class CheckScreen:
         self.changes = {}          # room_id -> proposed capacity
         self.check = None
         self.room = None
+        self.zone_verdicts = {}    # (building, floor, wing) -> the verdict its row in the zones table says
         self.fonts = FONTS
         root.title("Room capacity check")
         self.build_widgets()
@@ -266,7 +267,7 @@ class CheckScreen:
         self.zone_label = tk.StringVar(value="Floor exits: occupant load vs exit capacity")
         ttk.Label(results, textvariable=self.zone_label, style='Card.TLabel', font=self.fonts['strong']).grid(
             row=2, column=0, sticky='w')
-        self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1)
+        self.zone_tree = self.make_tree(results, ZONE_COLUMNS, height=1, fades=True)
         self.zone_tree.master.grid(row=3, column=0, sticky='nsew', pady=(2, 0))
 
         # footer: legend + the screening rule
@@ -299,10 +300,13 @@ class CheckScreen:
         columns = columns or {self.found_tree: FOUND_COLUMNS, self.check_tree: CHECK_COLUMNS, self.zone_tree: ZONE_COLUMNS}[tree]
         fit_columns(tree, columns, always={'Result': ZONE_VERDICTS} if columns is ZONE_COLUMNS else None)
 
-    def make_tree(self, parent, columns, height):
+    def make_tree(self, parent, columns, height, fades=False):
         frame = ttk.Frame(parent, style='Inner.Card.TFrame')
         tree = ttk.Treeview(frame, columns=[c for c, _ in columns], height=height, selectmode='browse')
+        if fades:
+            tree.fade = RowFade(tree)                    # before the colours: it covers a row's tint while it runs
         colours.colour_tags(tree)
+        hover_rows(tree)
         for col, width in columns:
             tree.heading(col, text=heading_text(col), anchor=anchor_for(col))
             tree.column(col, width=width, minwidth=width, anchor=anchor_for(col), stretch=col in ('Building', 'Result'))
@@ -434,17 +438,23 @@ class CheckScreen:
             verdict += f" ({r['per_code_load']} → {t['per_code_load']} on the floor)"
         self.show_chip(self.trial_badge, f"With change: {verdict}", colours.chip(self.trial_badge, t['colour']))
 
+    def clear_zones(self):
+        self.zone_tree.fade.cancel()
+        self.zone_tree.delete(*self.zone_tree.get_children())
+        self.zone_verdicts = {}
+
     def show_floor_now(self, prop, floor):
         zones = self.result['zones']
         zones = zones[(zones['property'] == prop) & (zones['floor'] == floor)].sort_values('zone_wing')
         self.zone_label.set(f"Floor {floor} exits now: occupant load vs exit capacity")
-        self.zone_tree.delete(*self.zone_tree.get_children())
+        self.clear_zones()
         for _, z in zones.iterrows():
             verdict = egress.zone_verdict(z)
             capacity = '-' if verdict == egress.CANT_CHECK else z['exit_capacity']
             name = egress.zone_name(z['floor'], z['zone_wing'])
             self.zone_tree.insert('', 'end', values=[name, z['total_load'], capacity, verdict],
                                   **colours.row(self.zone_tree, egress.zone_colour(z)))
+            self.zone_verdicts[prop, floor, z['zone_wing']] = verdict
         self.fit(self.zone_tree)
 
     # the check -> nothing is saved
@@ -495,7 +505,7 @@ class CheckScreen:
         if self.room is not None:
             self.show_floor_now(self.room['property'], self.room['floor'])
         else:
-            self.zone_tree.delete(*self.zone_tree.get_children())
+            self.clear_zones()
 
     def run_check(self):
         self.check_tree.delete(*self.check_tree.get_children())
@@ -525,14 +535,26 @@ class CheckScreen:
                                    **colours.row(self.check_tree, r['colour']))
         self.fit(self.check_tree)
         self.zone_label.set("Floor exits with the change: occupant load vs exit capacity   (★ = your room's zone)")
-        self.zone_tree.delete(*self.zone_tree.get_children())
+        # what each zone said before this result: its row if it had one, else the floor as it is now
+        said = self.zones_now({z['property'] for z in self.check['zones']}) | self.zone_verdicts
+        self.clear_zones()
         for z in self.check['zones']:
             name = egress.zone_name(z['floor'], z['zone_wing']) + (' ★' if z['has_checked_room'] else '')
             capacity = '-' if z['verdict'] == egress.CANT_CHECK else z['exit_capacity']
             verdict = z['verdict'] + (f"  (also: {z['other_flags']})" if z['other_flags'] else '')
-            self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
-                                  **colours.row(self.zone_tree, z['colour']))
+            item = self.zone_tree.insert('', 'end', values=[name, f"{z['load_before']} → {z['load_after']}", capacity, verdict],
+                                         **colours.row(self.zone_tree, z['colour']))
+            key = z['property'], z['floor'], z['zone_wing']
+            if said.get(key, z['verdict']) != z['verdict']:
+                self.zone_tree.fade.start(item, z['colour'])
+            self.zone_verdicts[key] = z['verdict']
         self.fit(self.zone_tree)
+
+    # (building, floor, wing) -> the verdict each zone of these buildings has now, without the check's changes
+    def zones_now(self, buildings):
+        zones = self.result['zones']
+        zones = zones[zones['property'].isin(buildings)]
+        return {(z['property'], z['floor'], z['zone_wing']): egress.zone_verdict(z) for _, z in zones.iterrows()}
 
     def save_summary(self):
         if not self.check or not self.check['rooms']:

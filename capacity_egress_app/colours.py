@@ -41,6 +41,11 @@ LEGEND = [(egress.GREEN, "Green", "within"),
           (egress.RED, "Red", "over a hard limit"),
           (egress.GREY, "Grey", "no data yet")]
 
+# a row whose verdict a check just changed starts on this stronger step of its status and fades to its own tint (white on
+# a green or grey row). the row's text stays above 4.5:1 on every step
+FADE_FROM = {egress.GREEN: '#B7E1C2', egress.AMBER: '#FFDC85', egress.RED: '#F7B5B5', egress.GREY: '#DCE0E5'}
+FADE_STEPS = 3
+
 MARK_SIZE = 12
 MARK_COLUMN = 28                                        # width of a table's first column, the one that holds the mark
 
@@ -76,6 +81,12 @@ SHAPES = {egress.GREEN: _runs(_circle(5.8)),             # filled circle: within
 def row_look(colour):
     rule = ROW_RULES.get(colour, {})
     return rule.get('background', SURFACE), rule.get('foreground', TEXT_FG)
+
+# the shades a row passes through on its way to its own tint, the strongest first: evenly spaced, the tint itself not included
+def fade_shades(colour):
+    start, end = FADE_FROM[colour], row_look(colour)[0]
+    pairs = [(int(start[i:i + 2], 16), int(end[i:i + 2], 16)) for i in (1, 3, 5)]
+    return ['#' + ''.join(f'{round(a + (b - a) * step / FADE_STEPS):02X}' for a, b in pairs) for step in range(FADE_STEPS)]
 
 # the four marks, drawn once per window and kept on it so they are not garbage collected. a transparent background lets
 # the row's own colour (tint, or the selected blue) show round the shape

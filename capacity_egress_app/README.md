@@ -121,6 +121,8 @@ Same meaning on every table. One short legend sits on both screens; this table i
 
 The picked row is pale blue and always wins over a tint; its mark stays visible.
 
+The row under the pointer is shaded grey on every table; a tint and the picked row win over it. When a check changes a zone's verdict on the check screen, that zone's row starts on a stronger shade of its status and fades to its own colour in about 160 ms.
+
 Red only ever means over a hard limit.
 
 ## Future (recorded, not built)
