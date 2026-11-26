@@ -33,6 +33,7 @@ Mark asked for a way to change a room's capacity without opening the Excel files
 - See each zone's occupant load vs exit capacity, and each room's capacity and source
 - **Change capacity**: preview the zone result, then save or cancel
 - **Change room type** (editors): pick a room type or go back to the sub-category default; previews the per code load and the zone, asks why, logged like a capacity change. A new space report never overwrites it
+- **Change zone** (editors): give one room, or a selection of rooms at once, a zone that wins over the room-number letters, or clear it; previews the floors' zones, asks why, logged in each room's history. A new space report never overwrites it (see [Room zones](#room-zones))
 - Add or edit an exit (same checks as the Excel exits sheet)
 - Edit code factors (m² per person, mm per person, settings), with a required building code clause reference
 - Keep one note per room and per exit
@@ -100,7 +101,7 @@ The first screen everyone sees. Built for a quick question like "can DTB A120 go
 
 The check screen **never saves**. An editor who wants to apply a change presses **Editor screen**: the check screen is replaced by the editor screen, opened on the room picked (if any), where Change capacity or Change room type previews the floor and asks why. The editor screen's **Building** box takes typing the same way. **← Check screen** on the editor screen switches back, showing anything just saved. One window at a time; closing the editor screen closes the app.
 
-The editor screen's menu is one row of quiet tool buttons (flat until the pointer is over them) with a line between its four groups: back, data, exports, people. Each table's title carries that table's own actions beside it: Rooms has Change capacity, Change room type, Room note, Room history and Open photos; Exits has Add exit, Edit exit, Delete exit, Exit note and Exit history. The Zones table is only as tall as its zones (two rows at least, eight at most, then it scrolls); the Rooms and Exits tables share the rest of the window. At the Windows font the three tables fit the window the screen opens at with no sideways bar: numbers, ids, dates and other short columns always show in full, and the descriptive columns (the zones' status, flags and building, the rooms' building, sub-category, flag and note, the exits' type, width check, measured by and notes) share the width that is left and end a text that does not fit with "…". Resting the pointer on a cut cell shows its whole text.
+The editor screen's menu is one row of quiet tool buttons (flat until the pointer is over them) with a line between its four groups: back, data, exports, people. Each table's title carries that table's own actions beside it: Rooms has Change capacity, Change room type, Change zone, Room note, Room history and Open photos; Exits has Add exit, Edit exit, Delete exit, Exit note and Exit history. The Zones table is only as tall as its zones (two rows at least, eight at most, then it scrolls); the Rooms and Exits tables share the rest of the window. At the Windows font the three tables fit the window the screen opens at with no sideways bar: numbers, ids, dates and other short columns always show in full, and the descriptive columns (the zones' status, flags and building, the rooms' building, sub-category, flag and note, the exits' type, width check, measured by and notes) share the width that is left and end a text that does not fit with "…". Resting the pointer on a cut cell shows its whole text.
 
 The look is a small flat theme built on Tk's own clam theme (`widgets.use_theme`), with its colours in `colours.py`. It needs no files and nothing to install. The app used the Sun Valley theme until 2026-11-06, but its images made every keystroke redraw slowly.
 
@@ -173,7 +174,7 @@ From `capacity_egress_app/` (Mac: `python3`, Windows: `py`):
    The test windows are transparent by default so they don't flash on screen (same real sizes); set `CAPACITY_TEST_WINDOWS=real` to show them (CI does).
    GitHub runs them on every pull request and every push to `main`: lint once, then the tests on Windows and on the Mac. Which tests run where, and when a push to `main` skips them, is in the header of `.github/workflows/tests.yml`. A red X on a PR means something broke: don't merge until it's green.
 
-Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code), flags missing rooms and never touches capacities. If the file's counts match the app's own (Carl's report or the app's export, not a raw FMIS export), the app asks "Keep the FMIS capacities as they are?": Yes leaves the stored FMIS capacities alone, No reads the counts as FMIS values like a raw export.
+Load a newer space report with **Refresh space report** in the app, not by rebuilding. It updates area and sub-category, adds new rooms (per code, with no zone), flags missing rooms and never touches capacities, room types or room zones. If the file's counts match the app's own (Carl's report or the app's export, not a raw FMIS export), the app asks "Keep the FMIS capacities as they are?": Yes leaves the stored FMIS capacities alone, No reads the counts as FMIS values like a raw export.
 
 ### Export space report
 
@@ -296,7 +297,7 @@ Enter exits with **Add exit** in the app. One row per exit; a floor with three e
 
 | Field | What goes in it |
 |---|---|
-| wing | The zone this exit serves, on a floor split into wings: one wing (`B`), or a **group** of wings open to each other joined with `+` (`A+C+D`). Fill it on **every** exit of that floor. Blank = the floor is one zone. A wing can be in only one group per floor (`B` and `A+C+D` together are fine, `A+C` and `C+D` aren't). Order and case don't matter: `d + a+c` is saved as `A+C+D`. See **Wing groups** below. |
+| wing | The zone this exit serves, on a floor split into wings: one wing (`B`), or a **group** of wings open to each other joined with `+` (`A+C+D`). Where rooms have their own zone, name that zone the same way (`WEST`). Fill it on **every** exit of that floor. Blank = the floor is one zone. A wing can be in only one group per floor (`B` and `A+C+D` together are fine, `A+C` and `C+D` aren't). Order and case don't matter: `d + a+c` is saved as `A+C+D`. See **Wing groups** and **Room zones** below. |
 | exit_id | Space number from the base drawings + what was measured: `S4 - doorway`, `S5 - open stair`. Outside doors aren't numbered on the plans: `E<floor> - outside exit`, plus a letter if there are several (`E2`, `E2A`, `E2B`). |
 | exit_type | `doorway`, `stairs` (rise ≤ 180 mm **and** run ≥ 280 mm) or `stairs_steep` (anything else). |
 | stair_width_cm, stair_type | Only for a door into a stair: the stair's narrowest clear width (cm, round down) and `stairs` / `stairs_steep`. Blank type = `stairs`. Blank width = door only (listed as `stair_not_measured`). |
@@ -314,7 +315,26 @@ Most floors are one zone, even with several room prefixes (22 buildings, 64 floo
 | David Turpin 1 (wall between A and B) | `A` or `B` | A, B |
 | Clearihue 1 (B not connected to A) | `B` on the B wing exits, `A+C+D` on the rest | B, A+C+D |
 
-Each room joins the zone whose group holds its wing (on Clearihue 1, every A, C and D room → A+C+D). A room whose wing no exit names (no exits measured for it yet, a stair `S1`, a lift `L11`, a room number with no letter) stays a zone of its own with no exits: it shows `NOT SURVEYED`, so its people are never dropped, and if it has any load it's listed as `wing_not_in_a_group` in the warnings. Stairs and lifts carry 0 people, so they make no zone and no warning.
+Each room joins the zone whose group holds its wing (on Clearihue 1, every A, C and D room → A+C+D), unless a zone is typed on the room (see **Room zones**). A room whose wing no exit names (no exits measured for it yet, a stair `S1`, a lift `L11`, a room number with no letter) stays a zone of its own with no exits: it shows `NOT SURVEYED`, so its people are never dropped, and if it has any load it's listed as `wing_not_in_a_group` in the warnings. Stairs and lifts carry 0 people, so they make no zone and no warning.
+
+### Room zones
+
+Some floors have parts the room letters can't describe. On the Cornett floor 1 plans there are three parts with no indoor door between them, and A and B are each in two of them. There, give each room a **zone** with **Change zone** on the editor screen (one room, or several at once: Shift-click picks a run of rooms, Ctrl-click adds one, Cmd-click on the Mac) and name the same zones in the exits' `wing`:
+
+| Rooms | Zone on the rooms | Exits' wing |
+|---|---|---|
+| B104-B115 and A135-A196 | `WEST` | `WEST` |
+| B129-B146 | `NORTH` | `NORTH` |
+| A120-A132 | `SOUTH` | `SOUTH` |
+
+- **A room's zone wins over its room-number letters.** A room with no zone goes by its letters, as on every other floor.
+- **A zone is one name in letters only** (`WEST`, not `NORTH-EAST`, `W2` or `WEST+SOUTH`), saved in capitals. Keep it short: names up to five letters fit the editor tables at the Windows font.
+- **Exits name it like a wing**, in `wing` and `into_wing`: alone, or in a group (`SOUTH+WEST`) for zones open to each other. A zone that is a wing's letter (`A`) is that wing, so it joins the group holding `A`.
+- **Zones count only once an exit on the floor has a wing.** Until then the floor is one zone, whatever its rooms say (the Change zone preview says so). Tag every exit.
+- **A zone no exit names** is its own zone with no exits: `NOT SURVEYED`, and listed as `wing_not_in_a_group` when it has load, like a wing.
+- **A room left without a zone is never silent.** On a floor split into zones where any room has one, every room with load and no zone goes by its letters, shows **no zone set** in its Flag column and is listed as `room_without_zone` in the warnings, even when an exit names its letter. A new room from a space report has no zone, so look for these after a refresh.
+- A space report refresh never changes or clears a zone.
+- A room zone shows wherever a zone's wing does: the Wing column, `Floor 1 wing WEST` on the check screen and its summary, and `zone_wing` in the results workbook (`room_wing` there stays the room-number letters).
 
 Where a stair has a door in front of it, measure **both**: the door in `clear_width_cm`, the stair in `stair_width_cm`. BCBC 2024 gives doors 6.1 and stairs 8.0 mm/person, so a stair can carry fewer people than its door even when it's wider (88 cm door = 144, 110 cm stair = 137). The exit counts the smaller (Carl, 2026-10-20). Only measure the stair itself when it's an open stair, and put `open stair` in the exit_id so the calculation recognises it.
 
@@ -325,8 +345,8 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 1. **Room type.** The room's override if set, otherwise the default from the category map. Rooms with area but no sub-category count as excluded and are listed in the warnings.
 2. **Per code load** = net area ÷ m² per person, **rounded up** (3.4.3.1.(1) → Subsection 3.1.17).
 3. **Load used per room** = the room capacity when there is one (site count or PM change; 0 stays 0), otherwise the per code load. Sub-categories in `room_exclude` (all non-assignable 16.x: circulation, washrooms, mechanical, janitorial) count as 0, `out of scope`. Lounges (14.3, 1.85 m²) and kitchens (7.2, 9.30 m²) count at their Table 3.1.17.1. per code load; they aren't counted on site because their occupancy varies.
-4. **Wing of each room** = the letters at the start of its Space number (`B303` → B).
-5. **Zones.** A floor is one zone unless any exit on it has a wing; then each exit's wing is a zone: one wing (`B`) or a group (`A+C+D`). A room is in the zone whose group holds its wing; a wing no exit names is its own zone with no exits (`wing_not_in_a_group` when it has load). A wing in two groups on one floor is counted in the first group alphabetically and listed (`wing_in_two_groups`); a wing that isn't letters or letters joined with `+` is used as typed and listed (`bad_wing`). On a split floor, zones with no per code load, no load used and no exits are dropped; a zone with counted people but no per code load (an excluded room type with a site count) stays.
+4. **Wing of each room** = the letters at the start of its Space number (`B303` → B). A **room zone** typed on the room wins over the wing when placing it in a zone ([Room zones](#room-zones)).
+5. **Zones.** A floor is one zone unless any exit on it has a wing; then each exit's wing is a zone: one wing or room zone (`B`, `WEST`) or a group (`A+C+D`). A room is in the zone whose group holds its room zone, or its wing when it has none; one that no exit names is its own zone with no exits (`wing_not_in_a_group` when it has load). On such a floor where any room has a room zone, rooms with load and none are listed (`room_without_zone`). A wing in two groups on one floor is counted in the first group alphabetically and listed (`wing_in_two_groups`); a wing that isn't letters or letters joined with `+` is used as typed and listed (`bad_wing`). On a split floor, zones with no per code load, no load used and no exits are dropped; a zone with counted people but no per code load (an excluded room type with a site count) stays.
 6. **Open stairs count** (`open_stairs_count` = `yes`, Carl 2026-10-20): they lead down to an exit door, and this tool screens capacity, not fire separation. `no` is the strict reading of BCBC 3.4.4.1.(1) (exits fire separated): open stairs get 0 people and `not an exit - open stair`.
 7. **Persons per exit** = `clear_width_cm × 10 ÷ mm per person`, rounded down: doorway 6.1 (3.4.3.2.(1)(a)), stairs 8.0 ((b)), stairs_steep 9.2 ((c)). With a stair behind the door, the same for the stair, and the exit gets the **smaller** (`limited_by` = door / stair; `narrowest_persons` in `exit_calc.py`). Doors into the **same stair** (same S number on the floor, e.g. `S2 - doorway (A201b)` and `S2 - doorway (A206)`) are one exit: the slower of all those doors together and the stair, counted on the first door (`shares_stair` on the others; 3.4.3.1.(2), widths add up where exits converge).
 8. **50% rule** (3.4.3.2.(7)): exit capacity = the smaller of the total and 2 × (total − largest exit). A single exit gives 0.
@@ -357,6 +377,7 @@ Where a stair has a door in front of it, measure **both**: the door in `clear_wi
 | Floors stay separate (no cumulative stair widths through an open stair, 3.4.3.2.(6)); people leave down or out, never up | Carl | 2026-10-20 |
 | Turpin floor 1 wings stay separate zones with the link door (there's a wall between them) | Carl | 2026-10-20 |
 | A zone on a split floor can be a group of wings (`A+C+D`). Clearihue 1: B is its own zone (not really connected to A), A+C+D one zone; Clearihue 2 and 3 stay whole floors (connected) | Carl | 2026-11-10 |
+| A room can have its own zone, which wins over its room-number letters, for parts of a floor the letters can't describe (Cornett floor 1: A and B each span two parts; treating its three parts separately is still to be confirmed with Mark) | Carl | 2026-11-25 |
 | Load = room capacity; FMIS's default 0 is not a count, so unvisited rooms use per code | Carl | 2026-10-02 |
 | SQLite + Tkinter app is the system of record (ADR 0001) | Carl + Mark | 2026-10-02 |
 | Occupant load rounded up | Project default, confirm | 2026-09 |

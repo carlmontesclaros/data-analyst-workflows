@@ -27,6 +27,16 @@ def wing_group(text):
 def wing_letters(group):
     return group.split(WING_JOIN) if group else []
 
+# room zones -> a zone typed on a room wins over its room-number letters, for the parts of a floor the letters can't
+#   describe (Carl 2026-11-25: Cornett floor 1 has three parts with no indoor path between them, and A and B are each
+#   in two). one name in letters, matched like a wing: an exit's wing names it, alone or in a group
+def room_zone(text):
+    # ' west ' -> 'WEST', blank -> '' (the room goes by its room number)
+    text = '' if text is None or (not isinstance(text, str) and pd.isna(text)) else str(text).strip()
+    if text and not (text.isascii() and text.isalpha()):
+        raise ValueError(f"zone '{text}' must be one name in letters only (WEST)")
+    return text.upper()
+
 # groups on one floor -> {wing: the groups holding it}, only for a wing in more than one
 def wing_clashes(groups):
     holders = {}
@@ -111,6 +121,15 @@ def prepare_rooms(rooms, factors, settings, warning_rows):
 
     # wing -> leading letters of the room number
     rooms['room_wing'] = rooms['space'].astype(str).str.strip().str.extract(r'^([A-Za-z]+)')[0].fillna('').str.upper()
+    # what the room is zoned by -> the zone typed on it, otherwise its wing. a database nobody has opened since zones
+    #   were added has no column yet -> every room goes by its wing
+    if 'zone_override' not in rooms.columns:
+        rooms['zone_override'] = None
+    typed = rooms['zone_override'].dropna().astype(str).str.strip().str.upper()    # only the few rooms with one
+    typed = typed[typed != '']
+    rooms['has_zone'] = rooms.index.isin(typed.index)
+    rooms['zone_key'] = rooms['room_wing']
+    rooms.loc[typed.index, 'zone_key'] = typed
     rooms['floor_key'] = rooms['property'] + ' | ' + rooms['floor']
     return rooms
 
@@ -240,21 +259,32 @@ def build_zones(rooms, exits, settings, warning_rows):
                              'detail': f"{row['exit_id']}: into_wing '{row['into_wing']}' is in its own zone "
                                        f"({row['zone_wing']}) - not counted as an exit, no people added"})
 
-    # room -> the group holding its wing. a wing no exit names stays its own zone (no exits -> not surveyed),
-    #   so its people are never dropped; with people in it, it's listed
+    # room -> the group holding its zone key (its typed zone, else its wing). a key no exit names stays its own zone
+    #   (no exits -> not surveyed), so its people are never dropped; with people in it, it's listed
     on_split = rooms['floor_key'].isin(split_floors)
-    grouped = pd.Series([group_of.get(k) for k in zip(rooms['floor_key'], rooms['room_wing'], strict=True)],
+    grouped = pd.Series([group_of.get(k) for k in zip(rooms['floor_key'], rooms['zone_key'], strict=True)],
                         index=rooms.index, dtype=object)
-    rooms['zone_wing'] = grouped.fillna(rooms['room_wing']).where(on_split, '').astype(rooms['room_wing'].dtype)
+    rooms['zone_wing'] = grouped.fillna(rooms['zone_key']).where(on_split, '').astype(rooms['room_wing'].dtype)
     orphans = rooms[on_split & grouped.isna() & (rooms['load_used'] > 0)]
-    for (floor_key, wing), group in sorted(orphans.groupby(['floor_key', 'room_wing']),
-                                           key=lambda g: (g[0][0], g[0][1] == '', g[0][1])):
+    for (floor_key, wing), group in by_floor_and_wing(orphans, 'zone_key'):
         n, first = len(group), group.iloc[0]
         named = ', '.join(sorted(g for fk, g in floor_groups if fk == floor_key))
         warning_rows.append({'type': 'wing_not_in_a_group', 'property': first['property'], 'floor': first['floor'],
                              'detail': f"{'wing ' + wing if wing else 'no wing letter'}: {n} room{'s' if n > 1 else ''}, "
                                        f"load {int(group['load_used'].sum())} - not in any exit's wing ({named}), "
                                        f"so it's its own zone with no exits"})
+
+    # a floor where any room has a typed zone -> a room without one still goes by its room number, which may be the
+    #   wrong part (a new FMIS room has no zone): every one with people in it is listed, whichever zone it joins
+    zoned_floors = set(rooms.loc[rooms['has_zone'], 'floor_key'])
+    rooms['no_zone_set'] = on_split & rooms['floor_key'].isin(zoned_floors) & ~rooms['has_zone'] & (rooms['load_used'] > 0)
+    for (_, wing), group in by_floor_and_wing(rooms[rooms['no_zone_set']], 'room_wing'):
+        n, first = len(group), group.iloc[0]
+        names = ', '.join(sorted(group['space'].astype(str)))
+        warning_rows.append({'type': 'room_without_zone', 'property': first['property'], 'floor': first['floor'],
+                             'detail': f"{'wing ' + wing if wing else 'no wing letter'}: {n} room{'s' if n > 1 else ''} "
+                                       f"with no zone ({names}), load {int(group['load_used'].sum())} - this floor has "
+                                       f"room zones, so {'they go by their' if n > 1 else 'it goes by its'} room number"})
 
     per_zone = rooms.groupby(ZONE_KEYS, as_index=False).agg(
         area_based_load=('per_code_load', 'sum'), load_used=('load_used', 'sum'),
@@ -344,6 +374,10 @@ def build_zones(rooms, exits, settings, warning_rows):
     zones['status'] = statuses
     zones['flags'] = flag_texts
     return order_zones(zones)
+
+# rooms -> one group per floor and wing, in the order the warnings list them (no letter last)
+def by_floor_and_wing(rooms, wing_col):
+    return sorted(rooms.groupby(['floor_key', wing_col]), key=lambda g: (g[0][0], g[0][1] == '', g[0][1]))
 
 # worst status first, then by building, floor and wing
 def order_zones(zones):

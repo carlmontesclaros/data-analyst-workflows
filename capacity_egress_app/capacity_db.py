@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     capacity_source TEXT NOT NULL DEFAULT 'per code',
     visited INTEGER NOT NULL DEFAULT 0,         -- 1 = counted on a site visit at some point; stays 1 after a PM change
     room_type_override TEXT,
+    zone_override TEXT,                         -- zone typed on the room, blank = by room number; never from FMIS
     note TEXT,
     fmis_capacity INTEGER,
     in_latest_report INTEGER NOT NULL DEFAULT 1,
@@ -118,6 +119,10 @@ def create_schema(conn):
         if col not in exit_cols:
             conn.execute(f"ALTER TABLE exits ADD COLUMN {col} {kind}")
             conn.commit()
+    # databases built before rooms had zones -> add the column (blank = the room number decides, as before)
+    if 'zone_override' not in [row[1] for row in conn.execute("PRAGMA table_info(rooms)")]:
+        conn.execute("ALTER TABLE rooms ADD COLUMN zone_override TEXT")
+        conn.commit()
 
 # space report col -> rooms table col (reading the workbook is excel_inputs.py)
 ROOM_COLUMN_NAMES = {
@@ -137,12 +142,13 @@ def insert_rooms(conn, df, report_name):
     rooms = rooms.drop(columns=['Capacity (Occupants)'])
 
     # building number 237.0 -> 237 and blank stays blank
+    rooms['building_number'] = rooms['building_number'].astype(object)
     has_number = rooms['building_number'].notna()
     rooms.loc[has_number, 'building_number'] = (rooms.loc[has_number, 'building_number']
                                                 .astype(str).str.removesuffix('.0'))
 
     # Office and office are the same room type
-    rooms['room_type_override'] = rooms['room_type_override'].str.strip().str.lower()
+    rooms['room_type_override'] = rooms['room_type_override'].astype(object).str.strip().str.lower()
 
     rooms['in_latest_report'] = 1
     rooms['last_report'] = report_name
@@ -288,7 +294,7 @@ def insert_extra_settings(conn):
     return len(EXTRA_SETTINGS)
 
 # space report refresh -> match rooms on Property + Floor + Space (+ area when a key repeats)
-# only FMIS columns change, capacity / source / visited / note / override are never touched
+# only FMIS columns change, capacity / source / visited / note / room type and zone are never touched
 FMIS_COLS = ['building_number', 'area_m2', 'space_category', 'sub_category']
 ROOM_KEYS = ['property', 'floor', 'space']
 
@@ -304,6 +310,8 @@ def match_report(conn, df):
     report['fmis_count'] = pd.to_numeric(report['Capacity (Occupants)'], errors='coerce')
     # same room twice, one copy blank -> keep one (ECS 242A)
     report = report.sort_values('fmis_count').drop_duplicates(['property', 'floor', 'space', 'area_m2'])
+    # Excel gives a number column (42) or an all-blank float one -> object, so text can go back in
+    report['building_number'] = report['building_number'].astype(object)
     has_number = report['building_number'].notna()
     report.loc[has_number, 'building_number'] = (report.loc[has_number, 'building_number']
                                                  .astype(str).str.removesuffix('.0'))
@@ -362,7 +370,8 @@ def refresh_space_report(conn, df, report_name, user_login=None, keep_fmis_capac
     # new rooms -> per code until someone counts them
     if len(new_rooms):
         insert = new_rooms[ROOM_KEYS + FMIS_COLS + ['room_type_override', 'note']].copy()
-        insert['room_type_override'] = insert['room_type_override'].str.strip().str.lower()
+        # a raw FMIS export leaves this column blank -> Excel reads it as float, so object before .str
+        insert['room_type_override'] = insert['room_type_override'].astype(object).str.strip().str.lower()
         insert['fmis_capacity'] = new_rooms['fmis_count'].where(new_rooms['fmis_count'] > 0).astype('Int64')
         insert['in_latest_report'] = 1
         insert['last_report'] = report_name
@@ -549,6 +558,35 @@ def change_room_type(conn, room_id, new_type, user_login, user_name, why, expect
         conn.execute("UPDATE rooms SET room_type_override = ? WHERE room_id = ?", (new_type, room_id))
         log_change(conn, user_login, user_name, 'rooms', room_id, 'room_type_override', old[0], new_type, why)
     return True
+
+# zone -> typed on one room or a selection at once, wins over the room-number letters; blank = back to the letters.
+# all or nothing: one room changed by someone else refuses the whole save
+def change_zone(conn, room_ids, new_zone, user_login, user_name, why, expected=NO_CHECK):
+    # expected = {room_id: zone_override} the person saw when they opened the box
+    new_zone = egress.room_zone(new_zone) or None
+    if not room_ids:
+        raise ValueError("pick a room first")
+    if not str(why or '').strip():
+        raise ValueError("say why the zone changed")
+    changed = 0
+    with write_transaction(conn):
+        require_editor(conn, user_login)
+        changed_at = now()
+        for room_id in dict.fromkeys(int(i) for i in room_ids):
+            old = conn.execute("SELECT zone_override, space FROM rooms WHERE room_id = ?", (room_id,)).fetchone()
+            if old is None:
+                raise ValueError(f"no room with room_id {room_id}")
+            if expected is not NO_CHECK and not same_value(old[0], expected[room_id]):
+                raise StaleDataError(f"Room {old[1]}'s zone was changed to {old[0] or 'none (by room number)'}"
+                                     f"{last_change(conn, 'rooms', room_id)} after you opened it. "
+                                     f"The screen has been refreshed; check it and try again.")
+            if same_value(old[0], new_zone):
+                continue
+            conn.execute("UPDATE rooms SET zone_override = ? WHERE room_id = ?", (new_zone, room_id))
+            log_change(conn, user_login, user_name, 'rooms', room_id, 'zone_override', old[0], new_zone, why,
+                       changed_at=changed_at)
+            changed += 1
+    return changed
 
 # notes -> one per room, one per exit
 def set_note(conn, table_name, record_id, note, user_login, user_name, expected=NO_CHECK):

@@ -24,6 +24,9 @@ PHOTOS_DIR = PHOTOS_DIR_WINDOWS if sys.platform == 'win32' else PHOTOS_DIR_DEV
 BAD_CHARS = '/\\:*?"<>|'                               # same as automation.py sanitize()
 POLL_MS = 20000                                        # check for other people's saves every 20 s
 ALL = '(all)'
+NO_ZONE = '(by room number)'                            # the Change zone box's choice that clears a room's zone
+# what the Change zone box names before "and N more": rooms on a floor, floors, zones -> short enough for a small screen
+ROOMS_SHOWN, FLOORS_SHOWN, ZONES_SHOWN = 12, 3, 6
 ZONE_ROWS_LEAST, ZONE_ROWS_MOST = 2, 8
 OPEN_WINDOW = (1400, 820)
 
@@ -36,7 +39,7 @@ ZONE_COLUMNS = [('floor', 70), ('zone_wing', 80), ('status', 300), ('total_load'
                 ('rooms_counted', 125), ('rooms_in_scope', 125), ('link_inflow', 120), ('flags', 420)]
 ROOM_COLUMNS = [('property', 200), ('floor', 50), ('space', 70), ('sub_category', 220), ('area_m2', 80), ('room_type', 90),
                 ('per_code_load', 115), ('capacity', 115), ('capacity_source', 125), ('load_used', 90), ('in_scope', 75),
-                ('flag', 180), ('note', 250)]
+                ('zone_override', 45), ('flag', 180), ('note', 250)]
 EXIT_COLUMNS = [('floor', 50), ('wing', 58), ('exit_id', 110), ('exit_type', 74), ('clear_width_cm', 85), ('stair_width_cm', 85),
                 ('persons', 80), ('limited_by', 85), ('counts_as_exit', 115), ('shares_stair', 90), ('width_check', 220),
                 ('into_wing', 80), ('measured_date', 80), ('measured_by', 100), ('notes', 250)]
@@ -54,6 +57,14 @@ def exit_capacity_text(zone):
 
 def text_or_blank(v):
     return '' if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+
+# one zone of a save preview -> its load before and after against its exit capacity. before: the zones as they are now.
+# gap: what goes between the numbers and the status
+def zone_preview(before, z, gap='  '):
+    b = before[(before['floor_key'] == z['floor_key']) & (before['zone_wing'] == z['zone_wing'])]
+    was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
+    return (f"floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
+            f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}{gap}[{z['status']}]")
 
 
 class App:
@@ -205,8 +216,8 @@ class App:
 
         # rooms
         room_frame = self.make_pane(panes, "Rooms", [("Change capacity", self.change_capacity), ("Change room type", self.change_room_type),
-                                                     ("Room note", self.room_note), ("Room history", self.room_history),
-                                                     ("Open photos", self.open_photos)])
+                                                     ("Change zone", self.change_zone), ("Room note", self.room_note),
+                                                     ("Room history", self.room_history), ("Open photos", self.open_photos)])
         self.room_tree = self.make_tree(room_frame, ROOM_COLUMNS, height=12, long_keys=ROOM_LONG)
         # before the colours: of two tags that set the same option the one made first wins, so its amber text beats grey's
         # muted text and red's red text. red text only ever means over a hard limit
@@ -360,12 +371,14 @@ class App:
             flag = []
             if r['in_latest_report'] == 0:
                 flag.append('missing room')
+            if r['no_zone_set']:                      # before the FMIS flag: a cut cell still shows it
+                flag.append('no zone set')
             if pd.notna(r['fmis_capacity']) and pd.notna(r['capacity']) and int(r['fmis_capacity']) != int(r['capacity']):
                 flag.append(f"FMIS says {int(r['fmis_capacity'])}")
             cap = '' if pd.isna(r['capacity']) else int(r['capacity'])
             values = [r['property'], r['floor'], r['space'], text_or_blank(r['sub_category']), r['area_m2'], text_or_blank(r['room_type']),
                       r['per_code_load'], cap, r['capacity_source'], r['load_used'], 'yes' if r['in_scope'] else 'no',
-                      '; '.join(flag), text_or_blank(r['note'])]
+                      text_or_blank(r['zone_override']), '; '.join(flag), text_or_blank(r['note'])]
             self.room_tree.insert('', 'end', iid=f"r{int(r['room_id'])}", values=values,
                                   **colours.row(self.room_tree, egress.room_colour(r), *(['missing'] if r['in_latest_report'] == 0 else [])))
 
@@ -511,10 +524,7 @@ class App:
             after = self.floor_result(room['property'], room['floor'], rooms=rooms)['zones']
             lines = ["Preview (not saved):"]
             for _, z in after.iterrows():
-                b = before[before['zone_wing'] == z['zone_wing']]
-                was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
-                lines.append(f"  floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
-                             f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}  [{z['status']}]")
+                lines.append(f"  {zone_preview(before, z)}")
                 if z['flags']:
                     lines.append(f"     {z['flags']}")
             preview_var.set('\n'.join(lines))
@@ -601,10 +611,7 @@ class App:
                      f"load used {room['load_used']} -> {r['load_used']}",
                      f"  room: {verdict}"]
             for _, z in after['zones'].iterrows():
-                b = before[before['zone_wing'] == z['zone_wing']]
-                was = f"{b.iloc[0]['total_load']} -> " if len(b) else ''
-                lines.append(f"  floor {z['floor']}{' ' + egress.wing_label(z['zone_wing']) if z['zone_wing'] else ''}: "
-                             f"occupant load {was}{z['total_load']} vs exit capacity {z['exit_capacity']}  [{z['status']}]")
+                lines.append(f"  {zone_preview(before, z)}")
             preview_var.set('\n'.join(lines))
 
         type_var.trace_add('write', preview)
@@ -626,6 +633,148 @@ class App:
                 self.after_change(f"saved: {room['property']} {room['space']} room type "
                                   f"{text_or_blank(room['room_type']) or '-'} -> {chosen() or default or '-'}",
                                   floor=(room['property'], room['floor']))
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=5, column=0, columnspan=3, sticky='e')
+        ttk.Button(buttons, text="Save", command=save).pack(side='left', padx=4)
+        ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side='left')
+        win.bind('<Escape>', lambda e: win.destroy())
+
+    # the rooms picked in the list, one or many, read again first -> their rows, or None after saying why not
+    def picked_rooms(self):
+        sel = self.room_tree.selection()
+        if not sel:
+            messagebox.showinfo("Pick a room", "Select a room in the Rooms list first.")
+            return None
+        ids = [int(i[1:]) for i in sel]
+        self.refresh_if_changed()                     # start from the latest values
+        picked = self.rooms[self.rooms['room_id'].isin(ids)]
+        if len(picked) != len(ids):
+            messagebox.showinfo("Room not found", "That room is no longer in the database.")
+            return None
+        return picked.sort_values(['property', 'floor', 'space'])
+
+    # change zone -> one room or the whole selection; preview the zones of their floors, then save or cancel
+    def change_zone(self):
+        picked = self.picked_rooms()
+        if picked is None:
+            return
+        ids = [int(i) for i in picked['room_id']]
+        seen = {int(i): zone for i, zone in zip(picked['room_id'], picked['zone_override'], strict=True)}
+        current = [text_or_blank(zone).strip().upper() for zone in picked['zone_override']]
+        floors = list(dict.fromkeys(zip(picked['property'], picked['floor'], strict=True)))
+        one = picked.iloc[0] if len(picked) == 1 else None
+        name = f"{one['property']} {one['space']}" if one is not None else f"{len(picked)} rooms"
+
+        # the choices -> the single names exits on these floors use, and the zones rooms in these buildings have
+        on_floors = pd.MultiIndex.from_frame(self.exits[['property', 'floor']]).isin(floors)
+        names = {str(w).strip().upper() for w in self.exits.loc[on_floors, 'wing'].dropna()}
+        in_buildings = self.rooms['property'].isin(picked['property'])
+        names |= {str(z).strip().upper() for z in self.rooms.loc[in_buildings, 'zone_override'].dropna()}
+        choices = [NO_ZONE] + sorted(n for n in names if n.isalpha())
+
+        win = tk.Toplevel(self.root)
+        win.title(f"Change zone - {name}")
+        win.transient(self.root)
+        win.grab_set()
+        frame = ttk.Frame(win, padding=10)
+        frame.pack(fill='both', expand=True)
+        if one is not None:
+            heading = f"{one['property']} floor {one['floor']} room {one['space']}"
+            now = f"Zone now: {current[0] or NO_ZONE}"
+        else:
+            heading = f"{len(picked)} rooms"
+            lines = []
+            for prop, floor in floors[:FLOORS_SHOWN]:
+                spaces = picked.loc[(picked['property'] == prop) & (picked['floor'] == floor), 'space'].astype(str).tolist()
+                more = f" and {len(spaces) - ROOMS_SHOWN} more" if len(spaces) > ROOMS_SHOWN else ''
+                lines.append(f"{prop} floor {floor}: {', '.join(spaces[:ROOMS_SHOWN])}{more}")
+            if len(floors) > FLOORS_SHOWN:
+                lines.append(f"... and {len(floors) - FLOORS_SHOWN} more floors")
+            counts = ', '.join(f"{zone or 'by room number'} ({n} room{'s' if n > 1 else ''})"
+                               for zone, n in sorted(pd.Series(current).value_counts().items()))
+            now = '\n'.join(lines + [f"Zone now: {counts}"])
+        ttk.Label(frame, text=heading, font='AppStrongFont').grid(row=0, column=0, columnspan=3, sticky='w')
+        ttk.Label(frame, text=now, justify='left', wraplength=560).grid(row=1, column=0, columnspan=3, sticky='w', pady=(0, 8))
+
+        ttk.Label(frame, text="New zone:").grid(row=2, column=0, sticky='w')
+        # rooms in different zones -> nothing filled in, so a Save can't clear them without being asked to
+        zone_var = tk.StringVar(value=(current[0] or NO_ZONE) if len(set(current)) == 1 else '')
+        zone_box = ttk.Combobox(frame, textvariable=zone_var, values=choices, width=34)
+        zone_box.grid(row=2, column=1, sticky='w')
+        zone_box.focus_set()
+        ttk.Label(frame, text="Why:").grid(row=3, column=0, sticky='w')
+        why_var = tk.StringVar()
+        why_entry = ttk.Entry(frame, textvariable=why_var, width=50)
+        why_entry.grid(row=3, column=1, columnspan=2, sticky='w')
+        why_entry.bind('<Control-z>', lambda e: why_var.set(''))
+
+        preview_var = tk.StringVar()
+        ttk.Label(frame, textvariable=preview_var, justify='left', wraplength=560).grid(
+            row=4, column=0, columnspan=3, sticky='w', pady=8)
+
+        def on_these_floors(table):
+            return table[pd.MultiIndex.from_frame(table[['property', 'floor']]).isin(floors)]
+
+        floor_rooms, floor_exits = on_these_floors(self.rooms), on_these_floors(self.exits)
+        before = egress.calculate(floor_rooms, floor_exits, self.factors)['zones']
+
+        # the zone typed, '' = clear it. a ValueError says what's wrong, in the preview and on Save
+        def entered():
+            text = zone_var.get().strip()
+            if not text:
+                raise ValueError(f"type a zone, or pick {NO_ZONE} to clear it")
+            return '' if text == NO_ZONE else egress.room_zone(text)
+
+        def preview(*_):
+            try:
+                zone = entered()
+            except ValueError as err:
+                preview_var.set(str(err))
+                return
+            rooms = floor_rooms.copy()
+            rooms['zone_override'] = rooms['zone_override'].astype(object)
+            rooms.loc[rooms['room_id'].isin(ids), 'zone_override'] = zone or None
+            result = egress.calculate(rooms, floor_exits, self.factors)
+            zones = result['zones'].sort_values(['property', 'floor', 'zone_wing'])
+            lines = ["Preview (not saved):"]
+            several = picked['property'].nunique() > 1
+            for _, z in zones.head(ZONES_SHOWN).iterrows():
+                building = f"{z['property']} " if several else ''
+                lines.append(f"  {building}{zone_preview(before, z, gap=chr(10) + '      ')}")
+            if len(zones) > ZONES_SHOWN:
+                lines.append(f"  ... and {len(zones) - ZONES_SHOWN} more zones")
+            split = set(result['exits'].loc[result['exits']['wing'] != '', 'floor_key'])
+            whole = [(prop, floor) for prop, floor in floors if f"{prop} | {floor}" not in split]
+            if zone:                                  # a zone only counts once an exit on the floor names a wing
+                for prop, floor in whole[:FLOORS_SHOWN]:
+                    building = f"{prop} " if several else ''
+                    lines.append(f"  {building}floor {floor}: no exit has a wing yet, so it is still one zone")
+                if len(whole) > FLOORS_SHOWN:
+                    lines.append(f"  ... and {len(whole) - FLOORS_SHOWN} more floors like that")
+            preview_var.set('\n'.join(lines))
+
+        zone_var.trace_add('write', preview)
+        preview()
+
+        def save():
+            try:
+                zone = entered()
+                changed = db.change_zone(self.conn, ids, zone, self.user_login, self.user_name, why_var.get(),
+                                         expected=seen)
+            except (ValueError, sqlite3.Error) as err:
+                if isinstance(err, db.StaleDataError):
+                    win.destroy()
+                    self.save_failed(err)
+                else:
+                    self.save_failed(err, parent=win)
+                return
+            win.destroy()
+            if changed:
+                message = (f"saved: {name} zone {current[0] or '-'} -> {zone or '-'}" if one is not None else
+                           f"saved: zone {zone or NO_ZONE} on {changed} room{'s' if changed > 1 else ''}")
+                # one floor -> only it is read again; rooms on several floors -> everything
+                self.after_change(message, floor=floors[0] if len(floors) == 1 else None)
 
         buttons = ttk.Frame(frame)
         buttons.grid(row=5, column=0, columnspan=3, sticky='e')

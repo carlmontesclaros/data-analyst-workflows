@@ -886,6 +886,46 @@ def test_editor_window_resizes_after_a_search_that_finds_nothing(larger_font_roo
     root.update()
     assert errors == []
 
+# a floor split into named zones (Cornett: WEST, NORTH, SOUTH), a room with no zone flagged: names and flag show in full
+# and the tables still need no sideways bar
+def test_editor_tables_show_room_zones_at_the_windows_font(larger_font_root, conn):
+    root = larger_font_root
+    db.insert_rooms(conn, xi.classify_rooms(report([(LONG_ROOM[0], LONG_ROOM[1], 'B130', 30.0, 10)])), 'second.xlsx')
+    rid = conn.execute("SELECT room_id FROM rooms WHERE space = 'B130'").fetchone()[0]
+    db.change_zone(conn, [rid], 'NORTH', 'carl', 'Carl', 'walked the floor')
+    for exit_id in ('E1', 'E2'):
+        db.save_exit(conn, {'property': LONG_ROOM[0], 'floor': LONG_ROOM[1], 'wing': 'NORTH', 'into_wing': 'SOUTH',
+                            'exit_id': exit_id, 'exit_type': 'doorway', 'clear_width_cm': '88'}, 'carl', 'Carl')
+    screen = busy_editor(root, conn)
+    assert (root.winfo_width(), root.winfo_height()) == app.OPEN_WINDOW
+    rooms = screen.room_tree
+    assert sorted(rooms.set(item, 'zone_override') for item in rooms.get_children()) == ['', 'NORTH']
+    for tree, long in [(screen.zone_tree, app.ZONE_LONG), (rooms, app.ROOM_LONG), (screen.exit_tree, app.EXIT_LONG)]:
+        assert cut_columns(tree, [key for key in tree['columns'] if key not in long]) == []
+        assert tree.xview() == (0.0, 1.0), tree['columns']
+
+# a selection across many floors -> the Change zone box names a few and stays short enough for a 150% scaled laptop,
+# with Save still on it (its height at the Windows font's line, as the app draws it there)
+def test_the_change_zone_box_stays_short_for_a_big_selection(root, conn):
+    use_font(root, WINDOWS_LINE_FONT)
+    rows = [(LONG_ROOM[0], str(floor), f"{floor}{n:02d}", 30.0, 10) for floor in range(11, 23) for n in range(20)]
+    db.insert_rooms(conn, xi.classify_rooms(report(rows)), 'floors.xlsx')
+    screen = editor_screen(root, conn)
+    screen.building_var.set(LONG_ROOM[0])
+    screen.pick_building()
+    root.update()
+    screen.room_tree.selection_set(screen.room_tree.get_children())
+    screen.change_zone()
+    root.update()
+    win = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel) and w.title().startswith('Change zone'))
+    zone = next(w for w in all_widgets(win) if isinstance(w, ttk.Combobox))
+    zone.set('WEST')
+    root.update()
+    text = ' '.join(str(w.cget('text')) for w in all_widgets(win) if isinstance(w, ttk.Label))
+    assert 'and 8 more' in text and 'more floors' in text and 'more zones' in text
+    assert win.winfo_reqheight() <= 700
+    assert [b.cget('text') for b in buttons(win) if not is_inside_window(b, win)] == []
+
 def sideways_bar_of(tree):
     bars = [w for w in tree.master.winfo_children() if isinstance(w, ttk.Scrollbar) and str(w.cget('orient')) == 'horizontal']
     assert len(bars) == 1
@@ -990,7 +1030,8 @@ def test_a_cell_that_fits_shows_no_full_text(larger_font_root, conn):
 def test_pane_titles_carry_their_actions_as_tool_buttons(root, conn):
     screen = editor_screen(root, conn)
     for tree, title, actions in [(screen.zone_tree, 'Zones: occupant load vs exit capacity', []),
-                                 (screen.room_tree, 'Rooms', ['Change capacity', 'Change room type', 'Room note', 'Room history', 'Open photos']),
+                                 (screen.room_tree, 'Rooms', ['Change capacity', 'Change room type', 'Change zone', 'Room note', 'Room history',
+                                                              'Open photos']),
                                  (screen.exit_tree, 'Exits', ['Add exit', 'Edit exit', 'Delete exit', 'Exit note', 'Exit history'])]:
         pane = tree.master.master
         header = pane.winfo_children()[0]

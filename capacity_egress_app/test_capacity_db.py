@@ -168,6 +168,60 @@ def test_refresh_repeated_key_matches_on_area(conn):
     flags = {r['area_m2']: r['in_latest_report'] for r in conn.execute("SELECT * FROM rooms WHERE space = '010'")}
     assert flags == {12.0: 0, 25.0: 1}
 
+# a real .xlsx through the app's reader -> Excel gives numbers or all-blank columns the dataframes above never have
+def write_space_report(path, rows):
+    # rows: dicts by SPACE_REPORT_COLS name, missing columns left blank in the sheet
+    wb = Workbook()
+    wb.active.append(xi.SPACE_REPORT_COLS)
+    for r in rows:
+        wb.active.append([r.get(c) for c in xi.SPACE_REPORT_COLS])
+    wb.save(path)
+    return xi.read_space_report(str(path))
+
+def base_xlsx_rows(**extra):
+    return [dict({'Property': p, 'Floor': f, 'Space': s, 'Net Space (sq m)': a, 'Capacity (Occupants)': c}, **extra)
+            for p, f, s, a, c in BASE_ROWS]
+
+@pytest.mark.parametrize('number, stored', [(42, '42'), (None, None)])
+def test_refresh_reads_numeric_or_blank_building_number_from_xlsx(conn, tmp_path, number, stored):
+    # FMIS building numbers are plain numbers in Excel (42), or the column is empty -> stored as text '42' / NULL
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows(**{'Building Number': number}))
+    result = db.refresh_space_report(conn, df, 'fmis.xlsx')
+    assert (result['matched'], result['new'], result['missing']) == (6, 0, 0)
+    assert {r[0] for r in conn.execute("SELECT building_number FROM rooms")} == {stored}
+
+def test_refresh_new_rooms_with_blank_room_type_column_from_xlsx(conn, tmp_path):
+    # a raw FMIS export has nothing in the room type column -> new rooms go in with no room type override
+    rows = base_xlsx_rows() + [{'Property': 'Clearihue Building', 'Floor': '2', 'Space': 'A203',
+                                'Net Space (sq m)': 20.0, 'Capacity (Occupants)': 0}]
+    df = write_space_report(tmp_path / 'fmis.xlsx', rows)
+    result = db.refresh_space_report(conn, df, 'fmis.xlsx')
+    assert (result['new'], result['missing']) == (1, 0)
+    new = conn.execute("SELECT room_type_override, capacity_source FROM rooms WHERE space = 'A203'").fetchone()
+    assert tuple(new) == (None, 'per code')
+
+@pytest.fixture
+def empty_conn():
+    c = sqlite3.connect(':memory:')
+    db.create_schema(c)
+    yield c
+    c.close()
+
+@pytest.mark.parametrize('number, stored', [(42, '42'), (None, None)])
+def test_first_import_reads_numeric_or_blank_building_number_from_xlsx(empty_conn, tmp_path, number, stored):
+    # same .xlsx shapes as refresh, through build_database's first import path -> text '42' / NULL
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows(**{'Building Number': number}))
+    c = empty_conn
+    assert db.insert_rooms(c, xi.classify_rooms(df), 'fmis.xlsx') == 6
+    assert {r[0] for r in c.execute("SELECT building_number FROM rooms")} == {stored}
+
+def test_first_import_blank_room_type_column_from_xlsx(empty_conn, tmp_path):
+    # a raw FMIS export has nothing in the room type column -> rooms go in with no room type override
+    df = write_space_report(tmp_path / 'fmis.xlsx', base_xlsx_rows())
+    c = empty_conn
+    assert db.insert_rooms(c, xi.classify_rooms(df), 'fmis.xlsx') == 6
+    assert {r[0] for r in c.execute("SELECT room_type_override FROM rooms")} == {None}
+
 def test_insert_exits_warnings(conn):
     exits = pd.DataFrame([
         {'Property': 'Engineering Office Wing', 'Floor': '1', 'exit_id': 'S1 - doorway', 'exit_type': 'doorway', 'clear_width_cm': 88},
@@ -624,3 +678,93 @@ def test_old_database_gets_the_stair_columns():
     cols = [r[1] for r in c.execute("PRAGMA table_info(exits)")]
     c.close()
     assert 'stair_width_cm' in cols and 'stair_type' in cols
+
+# --- room zones ------------------------------------------------------------------------------------------------------
+
+def zones_set(c):
+    return {r['space']: r['zone_override'] for r in c.execute("SELECT * FROM rooms WHERE zone_override IS NOT NULL")}
+
+def zone_log(c):
+    return [tuple(r) for r in c.execute("SELECT record_key, old_value, new_value, user_name, why, changed_at FROM audit_log "
+                                        "WHERE field = 'zone_override' ORDER BY log_id")]
+
+def test_old_database_gets_the_zone_column_and_keeps_its_rooms():
+    c = sqlite3.connect(':memory:')
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE rooms (room_id INTEGER PRIMARY KEY, property TEXT NOT NULL, floor TEXT NOT NULL, "
+              "space TEXT NOT NULL, capacity INTEGER)")
+    c.execute("INSERT INTO rooms (property, floor, space, capacity) VALUES ('Cornett Building', '1', 'A137', 12)")
+    db.create_schema(c)
+    db.create_schema(c)                      # opened again -> nothing more to add
+    r = dict(c.execute("SELECT * FROM rooms").fetchone())
+    c.close()
+    assert (r['space'], r['capacity'], r['zone_override']) == ('A137', 12, None)
+
+# several rooms at once -> one log row per room that changed, same time and reason, shown in each room's history
+def test_change_zone_for_several_rooms_logs_each_one(conn):
+    ids = [room_id(conn, s) for s in ('101', '102', 'A201')]
+    assert db.change_zone(conn, ids[:1], 'west', 'mark', 'Mark', 'first') == 1
+    assert db.change_zone(conn, ids, ' West ', 'carl', 'Carl', 'walked the floor') == 2        # 101 already is WEST
+    assert zones_set(conn) == {'101': 'WEST', '102': 'WEST', 'A201': 'WEST'}
+    log = zone_log(conn)
+    assert [row[:5] for row in log] == [(str(ids[0]), None, 'WEST', 'Mark', 'first'),
+                                        (str(ids[1]), None, 'WEST', 'Carl', 'walked the floor'),
+                                        (str(ids[2]), None, 'WEST', 'Carl', 'walked the floor')]
+    assert log[1][5] == log[2][5]
+    history = db.history(conn, 'rooms', ids[2])
+    assert history[['field', 'new_value', 'why']].values.tolist() == [['zone_override', 'WEST', 'walked the floor']]
+
+def test_change_zone_blank_clears_it(conn):
+    ids = [room_id(conn, s) for s in ('101', '102')]
+    db.change_zone(conn, ids, 'SOUTH', 'carl', 'Carl', 'set')
+    assert db.change_zone(conn, ids, '  ', 'carl', 'Carl', 'wrong part') == 2
+    assert zones_set(conn) == {}
+    assert [row[1:3] for row in zone_log(conn)][2:] == [('SOUTH', None)] * 2
+
+@pytest.mark.parametrize('zone, why, message', [
+    ('WEST', ' ', 'say why the zone changed'), ('WEST+SOUTH', 'x', 'letters only'), ('North-east', 'x', 'letters only')])
+def test_change_zone_refused_saves_nothing(conn, zone, why, message):
+    ids = [room_id(conn, s) for s in ('101', '102')]
+    with pytest.raises(ValueError, match=message):
+        db.change_zone(conn, ids, zone, 'carl', 'Carl', why)
+    assert zones_set(conn) == {} and zone_log(conn) == []
+
+def test_change_zone_needs_an_editor_and_a_room(conn):
+    rid = room_id(conn, '101')
+    with pytest.raises(ValueError, match='pick a room'):
+        db.change_zone(conn, [], 'WEST', 'carl', 'Carl', 'x')
+    with pytest.raises(ValueError, match='no room with room_id 999'):
+        db.change_zone(conn, [rid, 999], 'WEST', 'carl', 'Carl', 'x')
+    db.set_editor(conn, 'carl', True, 'carl', 'Carl', why='first editor')
+    with pytest.raises(db.NotEditorError):
+        db.change_zone(conn, [rid], 'WEST', 'viewer1', 'Viewer', 'x')
+    assert zones_set(conn) == {}
+
+# someone else changed one of the picked rooms since the person looked -> none of them is saved
+def test_change_zone_after_someone_else_changed_one_room(conn):
+    ids = [room_id(conn, s) for s in ('101', '102')]
+    seen = {i: None for i in ids}
+    db.change_zone(conn, ids[1:], 'SOUTH', 'mark', 'Mark', 'x')
+    with pytest.raises(db.StaleDataError, match="102's zone was changed to SOUTH by Mark"):
+        db.change_zone(conn, ids, 'WEST', 'carl', 'Carl', 'x', expected=seen)
+    assert zones_set(conn) == {'102': 'SOUTH'}
+
+# a space report refresh updates FMIS columns only -> a room's zone survives changes, a rename elsewhere, going missing
+def test_refresh_never_touches_a_room_zone(conn):
+    ids = [room_id(conn, s) for s in ('101', '102')]
+    db.change_zone(conn, ids, 'WEST', 'carl', 'Carl', 'x')
+    rows = [list(r) for r in BASE_ROWS]
+    rows[0][3] = 55.0                                          # 101: FMIS area changed
+    del rows[1]                                                # 102: gone from the report
+    rows.append(['Clearihue Building', '2', 'A299', 20.0, 0])  # a new room has no zone
+    result = db.refresh_space_report(conn, report(rows), 'second.xlsx')
+    assert (result['new'], result['missing']) == (1, 1)
+    assert zones_set(conn) == {'101': 'WEST', '102': 'WEST'}
+    assert conn.execute("SELECT area_m2 FROM rooms WHERE space = '101'").fetchone()[0] == 55.0
+    assert conn.execute("SELECT in_latest_report FROM rooms WHERE space = '102'").fetchone()[0] == 0
+
+# an exit's wing names a room zone like it names a wing, and a link door can lead into one
+def test_save_exit_with_a_room_zone_as_its_wing(conn):
+    db.save_exit(conn, good_exit(wing='south', exit_id='S1'), 'carl', 'Carl')
+    pk = db.save_exit(conn, good_exit(wing='west', into_wing='south', exit_id='S2'), 'carl', 'Carl')
+    assert tuple(conn.execute("SELECT wing, into_wing FROM exits WHERE exit_pk = ?", (pk,)).fetchone()) == ('WEST', 'SOUTH')

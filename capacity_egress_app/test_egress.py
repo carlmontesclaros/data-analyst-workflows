@@ -631,3 +631,128 @@ def test_a_floor_refreshed_in_the_campus_gives_a_fresh_calculation(why, new_room
     assert_same_frame(got.whole(in_fresh_order=True)['warnings'], want['warnings'], 'warnings')
     assert sizes == [len(floor_rooms), len(want_rooms)]
     assert_same_result(campus.whole(), egress.calculate(*frames(TWO_BUILDINGS_ROOMS, TWO_BUILDINGS_EXITS), f))  # old one unchanged
+
+# --- room zones -> a zone typed on a room wins over its room-number letters ------------------------------------------
+# Cornett floor 1 in miniature: three parts with no indoor path between them, and the letters don't follow them.
+# West = B107 + A137, North-east = B130, South = A121 -> A and B are each in two parts
+
+PARTS = {'B107': 'WEST', 'A137': 'WEST', 'B130': 'NORTH', 'A121': 'SOUTH'}
+COUNTS = {'B107': 200, 'A137': 40, 'B130': 300, 'A121': 60}
+
+def cornett_rooms(zones=PARTS, extra=()):
+    rooms = [room(space, 60.55, COUNTS[space], 'site count') | {'zone_override': zones.get(space)} for space in COUNTS]
+    return rooms + list(extra)
+
+# two doors to each part: West 182 cm (298 people each), North-east 89 cm (145), South 159 cm (260)
+def cornett_exits(west='WEST', north='NORTH', south='SOUTH'):
+    return [exit_row(f"{name} {n}", 'doorway', cm, wing)
+            for name, cm, wing in [('west', 182, west), ('north', 89, north), ('south', 159, south)] for n in (1, 2)]
+
+def loads(result):
+    return {z['zone_wing']: (z['total_load'], z['exit_capacity']) for _, z in result['zones'].iterrows()}
+
+def warned(result, kind):
+    w = result['warnings']
+    return w.loc[w['type'] == kind, 'detail'].tolist()
+
+def test_room_zones_check_each_part_of_a_floor_against_its_own_exits():
+    result = run(cornett_rooms(), cornett_exits())
+    assert loads(result) == {'WEST': (240, 596), 'NORTH': (300, 290), 'SOUTH': (60, 520)}
+    assert zone(result, 'NORTH')['status'] == egress.STATUS_REVIEW
+    assert 'occupant load over exiting capacity' in zone(result, 'NORTH')['flags']
+    assert zone(result, 'WEST')['status'] == zone(result, 'SOUTH')['status'] == egress.STATUS_WITHIN
+    assert result['warnings']['type'].tolist() == []
+    rooms = result['rooms'].set_index('space')
+    assert rooms['zone_wing'].to_dict() == PARTS
+    assert rooms.loc['B107', 'room_wing'] == 'B'                # the room-number letter is still reported as it is
+
+# no zone typed anywhere -> the letters decide, as before: B130's 300 are pooled with B107 against the north doors,
+# and the south doors are credited to A137
+def test_without_room_zones_the_room_number_letters_decide():
+    result = run(cornett_rooms(zones={}), cornett_exits(west='A', north='B', south='A'))
+    assert loads(result) == {'A': (100, 1116), 'B': (500, 290)}
+    assert result['warnings']['type'].tolist() == []
+
+@pytest.mark.parametrize('blank', [None, '', '   ', float('nan')])
+def test_a_blank_room_zone_changes_nothing(blank):
+    exits = cornett_exits(west='A', north='B', south='A') + [exit_row('c 1', 'doorway', 88, 'C')]
+    extra = [room('S1', 12.0), room('D140', 20.0, 5, 'site count'), room('101', 20.0)]
+    plain = [{k: v for k, v in r.items() if k != 'zone_override'} for r in cornett_rooms(zones={}, extra=extra)]
+    without = run(plain, exits)
+    with_blank = run([r | {'zone_override': blank} for r in plain], exits)
+    assert_same_frame(with_blank['zones'], without['zones'], 'zones')
+    assert_same_frame(with_blank['warnings'], without['warnings'], 'warnings')
+    assert with_blank['rooms']['zone_wing'].tolist() == without['rooms']['zone_wing'].tolist()
+
+def test_a_room_zone_matches_in_any_case():
+    result = run(cornett_rooms(zones={k: f" {v.lower()} " for k, v in PARTS.items()}), cornett_exits(west='west'))
+    assert loads(result) == {'WEST': (240, 596), 'NORTH': (300, 290), 'SOUTH': (60, 520)}
+
+# a new FMIS room has no zone -> it falls back to its letter, so it is always listed, never silently placed
+def test_a_room_with_no_zone_on_a_floor_with_zones_is_listed():
+    extra = [room('A199', 60.55, 25, 'site count'), room('A198', 60.55), room('A100C', 40.0, sub='16.2.4 - Circulation Space'),
+             room('A197', 20.0, 0, 'site count'), room('A201', 60.55, floor='2')]
+    result = run(cornett_rooms(extra=extra), cornett_exits() + [exit_row('up 1', 'doorway', 88, 'A', floor='2')])
+    assert warned(result, 'room_without_zone') == [
+        "wing A: 2 rooms with no zone (A198, A199), load 58 - this floor has room zones, so they go by their room number"]
+    rooms = result['rooms'].set_index('space')
+    assert rooms.index[rooms['no_zone_set']].tolist() == ['A199', 'A198']
+    # no exit names A -> its own zone with no exits, as today
+    first = result['zones'][result['zones']['floor'] == '3'].set_index('zone_wing')
+    assert (first.loc['A', 'status'], first.loc['A', 'total_load']) == (egress.STATUS_NOT_SURVEYED, 58)
+    assert len(warned(result, 'wing_not_in_a_group')) == 1
+
+# the dangerous case: the room's letter IS an exit's wing, so the room joins that zone and nothing else looks wrong
+def test_a_room_with_no_zone_is_listed_even_when_an_exit_names_its_letter():
+    result = run(cornett_rooms(zones=PARTS | {'B107': None}), cornett_exits(south='B'))
+    assert zone(result, 'B')['total_load'] == 200
+    assert warned(result, 'room_without_zone') == [
+        "wing B: 1 room with no zone (B107), load 200 - this floor has room zones, so it goes by its room number"]
+    assert warned(result, 'wing_not_in_a_group') == [
+        "wing SOUTH: 1 room, load 60 - not in any exit's wing (B, NORTH, WEST), so it's its own zone with no exits"]
+
+def test_a_room_zone_no_exit_names_is_its_own_zone_with_no_exits():
+    result = run(cornett_rooms(zones=PARTS | {'A121': 'SOTH'}), cornett_exits())
+    z = zone(result, 'SOTH')
+    assert (z['total_load'], z['exit_count'], z['status']) == (60, 0, egress.STATUS_NOT_SURVEYED)
+    assert zone(result, 'SOUTH')['total_load'] == 0                          # its doors are there, nobody joins them
+    assert warned(result, 'wing_not_in_a_group') == [
+        "wing SOTH: 1 room, load 60 - not in any exit's wing (NORTH, SOUTH, WEST), so it's its own zone with no exits"]
+
+# zones typed before the exits are tagged -> like wing letters, they split nothing until an exit has a wing
+def test_room_zones_on_a_floor_whose_exits_have_no_wing_leave_it_one_zone():
+    result = run(cornett_rooms(zones=PARTS | {'B107': None}), cornett_exits(None, None, None))
+    assert loads(result) == {'': (600, 2 * (298 + 145 + 260))}
+    assert warned(result, 'room_without_zone') == []
+    assert not result['rooms']['no_zone_set'].any()
+
+def test_a_link_door_into_a_room_zone():
+    exits = cornett_exits() + [exit_row('link', 'doorway', 88, 'NORTH', into_wing='SOUTH')]
+    result = run(cornett_rooms(), exits)
+    assert zone(result, 'SOUTH')['link_inflow'] == 100           # ceil(300 / 3 exits)
+    assert warned(result, 'link_to_missing_wing') == []
+
+# a zone is matched like a wing letter -> a wing group holding it takes the room, whether the name is a letter or a word
+@pytest.mark.parametrize('group, typed', [('A+C', 'a'), ('SOUTH+WEST', 'west')])
+def test_a_room_zone_joins_the_group_holding_it(group, typed):
+    rooms = [room('B101', 60.55, 30, 'site count') | {'zone_override': typed}]
+    result = run(rooms, [exit_row('E1', 'doorway', 88, group), exit_row('E2', 'doorway', 88, group)])
+    assert loads(result) == {egress.wing_group(group): (30, 288)}
+    assert result['warnings']['type'].tolist() == []
+
+@pytest.mark.parametrize('text, saved', [(' west ', 'WEST'), ('A', 'A'), ('', ''), (None, ''), (float('nan'), '')])
+def test_a_zone_is_written_one_way(text, saved):
+    assert egress.room_zone(text) == saved
+
+@pytest.mark.parametrize('text', ['WEST+SOUTH', 'north-east', 'West 1', 'W2', 'ouest é'])
+def test_a_zone_is_one_name_in_letters_only(text):
+    with pytest.raises(ValueError, match='letters only'):
+        egress.room_zone(text)
+
+# a zone set or cleared on one floor -> that floor redone gives what a whole calculation gives, both ways round
+@pytest.mark.parametrize('before, after', [(None, 'WEST'), ('WEST', None)])
+def test_one_floor_redone_after_a_zone_change_gives_the_whole_campus_answer(before, after):
+    rooms = [r | {'zone_override': before if r['room_id'] == 1 else None} for r in CAMPUS_ROOMS]
+    new_rooms = [r | {'zone_override': after if r['room_id'] == 1 else None} for r in CAMPUS_ROOMS]
+    got, want = refreshed(rooms, CAMPUS_EXITS, new_rooms, CAMPUS_EXITS, 'Fake Hall', '1')
+    assert_same_result(got, want)
